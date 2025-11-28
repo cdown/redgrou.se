@@ -1,15 +1,20 @@
 mod db;
+mod filter;
 mod tiles;
 mod upload;
 
+use axum::extract::{Path, State};
 use axum::routing::{get, post};
-use axum::Router;
+use axum::{Json, Router};
+use sqlx::SqlitePool;
 use std::env;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+
+use filter::{get_distinct_values, get_field_metadata, FieldMetadata, FieldValues};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -34,6 +39,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health_check))
         .route("/upload", post(upload::upload_csv))
         .route("/api/tiles/{upload_id}/{z}/{x}/{y}", get(tiles::get_tile))
+        .route("/api/fields", get(fields_metadata))
+        .route("/api/fields/{upload_id}/{field}", get(field_values))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(pool);
@@ -49,4 +56,19 @@ async fn main() -> anyhow::Result<()> {
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+async fn fields_metadata() -> Json<Vec<FieldMetadata>> {
+    Json(get_field_metadata())
+}
+
+async fn field_values(
+    State(pool): State<SqlitePool>,
+    Path((upload_id, field)): Path<(String, String)>,
+) -> Json<FieldValues> {
+    let values = get_distinct_values(&pool, &upload_id, &field)
+        .await
+        .unwrap_or_default();
+
+    Json(FieldValues { field, values })
 }

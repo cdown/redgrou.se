@@ -1,9 +1,12 @@
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mvt::{GeomEncoder, GeomType, Tile};
-use sqlx::SqlitePool;
+use serde::Deserialize;
+use sqlx::{Row, SqlitePool};
 use tracing::{debug, error};
+
+use crate::filter::FilterGroup;
 
 const TILE_EXTENT: u32 = 4096;
 
@@ -39,7 +42,6 @@ fn latlng_to_tile_coords(lat: f64, lng: f64, z: u32, x: u32, y: u32) -> (f64, f6
     (tile_x, tile_y)
 }
 
-#[derive(sqlx::FromRow)]
 struct SightingPoint {
     id: i64,
     latitude: f64,
@@ -48,9 +50,15 @@ struct SightingPoint {
     count: i32,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TileQuery {
+    filter: Option<String>,
+}
+
 pub async fn get_tile(
     State(pool): State<SqlitePool>,
     Path((upload_id, z, x, y_str)): Path<(String, u32, u32, String)>,
+    Query(query): Query<TileQuery>,
 ) -> impl IntoResponse {
     let y: u32 = match y_str.trim_end_matches(".pbf").parse() {
         Ok(v) => v,
@@ -66,29 +74,63 @@ pub async fn get_tile(
         z, x, y, lon_min, lat_min, lon_max, lat_max
     );
 
-    let points: Vec<SightingPoint> = match sqlx::query_as(
+    let mut params: Vec<String> = vec![
+        upload_id.clone(),
+        lat_min.to_string(),
+        lat_max.to_string(),
+        lon_min.to_string(),
+        lon_max.to_string(),
+    ];
+
+    let filter_clause = if let Some(filter_json) = &query.filter {
+        match serde_json::from_str::<FilterGroup>(filter_json) {
+            Ok(filter) => filter
+                .to_sql(&mut params)
+                .map(|sql| format!(" AND {}", sql)),
+            Err(e) => {
+                error!("Invalid filter JSON: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let sql = format!(
         r#"
         SELECT id, latitude, longitude, common_name, count
         FROM sightings
         WHERE upload_id = ?
           AND latitude >= ? AND latitude <= ?
           AND longitude >= ? AND longitude <= ?
+        {}
         "#,
-    )
-    .bind(&upload_id)
-    .bind(lat_min)
-    .bind(lat_max)
-    .bind(lon_min)
-    .bind(lon_max)
-    .fetch_all(&pool)
-    .await
-    {
-        Ok(p) => p,
+        filter_clause.unwrap_or_default()
+    );
+
+    let mut db_query = sqlx::query(&sql);
+    for param in &params {
+        db_query = db_query.bind(param);
+    }
+
+    let rows = match db_query.fetch_all(&pool).await {
+        Ok(r) => r,
         Err(e) => {
             error!("Failed to query sightings: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
         }
     };
+
+    let points: Vec<SightingPoint> = rows
+        .iter()
+        .map(|row| SightingPoint {
+            id: row.get("id"),
+            latitude: row.get("latitude"),
+            longitude: row.get("longitude"),
+            common_name: row.get("common_name"),
+            count: row.get("count"),
+        })
+        .collect();
 
     let mut tile = Tile::new(TILE_EXTENT);
     let mut layer = tile.create_layer("sightings");
