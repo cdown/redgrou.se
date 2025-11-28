@@ -56,8 +56,11 @@ const ALLOWED_FIELDS: &[&str] = &[
     "country_code",
     "count",
     "observed_at",
+    "year",
     "notes",
     "trip_name",
+    "lifer",
+    "year_tick",
 ];
 
 fn is_allowed_field(field: &str) -> bool {
@@ -201,9 +204,24 @@ pub fn get_field_metadata() -> Vec<FieldMetadata> {
             field_type: "date".into(),
         },
         FieldMetadata {
+            name: "year".into(),
+            label: "Year".into(),
+            field_type: "number".into(),
+        },
+        FieldMetadata {
             name: "trip_name".into(),
             label: "Trip".into(),
             field_type: "string".into(),
+        },
+        FieldMetadata {
+            name: "lifer".into(),
+            label: "Lifer".into(),
+            field_type: "boolean".into(),
+        },
+        FieldMetadata {
+            name: "year_tick".into(),
+            label: "Year Tick".into(),
+            field_type: "boolean".into(),
         },
     ]
 }

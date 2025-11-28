@@ -424,6 +424,21 @@ function ConditionBuilder({
           options={values}
           onChange={(v) => updateRule(path, () => ({ ...condition, value: v }))}
         />
+      ) : condition.field && fieldType === "boolean" ? (
+        <Select
+          value={String(condition.value)}
+          onValueChange={(v) =>
+            updateRule(path, () => ({ ...condition, value: Number(v) }))
+          }
+        >
+          <SelectTrigger className="w-24 h-8">
+            <SelectValue placeholder="Select..." />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="1">Yes</SelectItem>
+            <SelectItem value="0">No</SelectItem>
+          </SelectContent>
+        </Select>
       ) : condition.field && fieldType === "date" ? (
         <DatePicker
           value={String(condition.value)}

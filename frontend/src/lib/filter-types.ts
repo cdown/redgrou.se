@@ -33,15 +33,15 @@ export function isGroup(rule: Rule): rule is FilterGroup {
 export interface FieldMetadata {
   name: string;
   label: string;
-  field_type: "string" | "number" | "date";
+  field_type: "string" | "number" | "date" | "boolean";
 }
 
 export const OPERATORS: Record<
   string,
   { label: string; types: string[]; freeform?: boolean }
 > = {
-  eq: { label: "is", types: ["string"] },
-  neq: { label: "is not", types: ["string"] },
+  eq: { label: "is", types: ["string", "boolean"] },
+  neq: { label: "is not", types: ["string", "boolean"] },
   contains: { label: "contains", types: ["string"] },
   starts_with: { label: "starts with", types: ["string"], freeform: true },
   ends_with: { label: "ends with", types: ["string"], freeform: true },

@@ -26,6 +26,8 @@ const COL_COMMON_NAME: &str = "commonName";
 const COL_COUNT: &str = "count";
 const COL_NOTE: &str = "note";
 const COL_SESSION_TITLE: &str = "sessionTitle";
+const COL_LIFER: &str = "lifer";
+const COL_YEAR_TICK: &str = "yearTick";
 
 #[derive(Serialize)]
 pub struct UploadResponse {
@@ -48,8 +50,11 @@ struct SightingRow {
     longitude: f64,
     country_code: String,
     observed_at: String,
+    year: i32,
     notes: Option<String>,
     trip_name: Option<String>,
+    lifer: bool,
+    year_tick: bool,
 }
 
 #[derive(Default)]
@@ -63,6 +68,8 @@ struct ColumnMap {
     count: Option<usize>,
     note: Option<usize>,
     session_title: Option<usize>,
+    lifer: Option<usize>,
+    year_tick: Option<usize>,
 }
 
 impl ColumnMap {
@@ -79,6 +86,8 @@ impl ColumnMap {
                 COL_COUNT => map.count = Some(idx),
                 COL_NOTE => map.note = Some(idx),
                 COL_SESSION_TITLE => map.session_title = Some(idx),
+                COL_LIFER => map.lifer = Some(idx),
+                COL_YEAR_TICK => map.year_tick = Some(idx),
                 _ => {}
             }
         }
@@ -102,6 +111,17 @@ fn get_field(record: &csv::ByteRecord, idx: Option<usize>) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+fn parse_bool(record: &csv::ByteRecord, idx: Option<usize>) -> bool {
+    get_field(record, idx)
+        .map(|s| s.to_lowercase() == "true")
+        .unwrap_or(false)
+}
+
+fn extract_year(date_str: &str) -> i32 {
+    // ISO 8601 format: 2020-02-14T09:34:18.584Z
+    date_str.get(0..4).and_then(|y| y.parse().ok()).unwrap_or(0)
+}
+
 fn parse_row(record: &csv::ByteRecord, col_map: &ColumnMap) -> Option<SightingRow> {
     let sighting_uuid = get_field(record, col_map.sighting_id)?;
     let common_name = get_field(record, col_map.common_name)?;
@@ -117,6 +137,10 @@ fn parse_row(record: &csv::ByteRecord, col_map: &ColumnMap) -> Option<SightingRo
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
 
+    let year = extract_year(&observed_at);
+    let lifer = parse_bool(record, col_map.lifer);
+    let year_tick = parse_bool(record, col_map.year_tick);
+
     Some(SightingRow {
         sighting_uuid,
         common_name,
@@ -126,8 +150,11 @@ fn parse_row(record: &csv::ByteRecord, col_map: &ColumnMap) -> Option<SightingRo
         longitude,
         country_code,
         observed_at,
+        year,
         notes: get_field(record, col_map.note),
         trip_name: get_field(record, col_map.session_title),
+        lifer,
+        year_tick,
     })
 }
 
@@ -141,7 +168,7 @@ async fn insert_batch(
     }
 
     let mut query_builder = QueryBuilder::new(
-        "INSERT INTO sightings (upload_id, sighting_uuid, common_name, scientific_name, count, latitude, longitude, country_code, observed_at, notes, trip_name) "
+        "INSERT INTO sightings (upload_id, sighting_uuid, common_name, scientific_name, count, latitude, longitude, country_code, observed_at, year, notes, trip_name, lifer, year_tick) "
     );
 
     query_builder.push_values(rows, |mut b, row| {
@@ -154,8 +181,11 @@ async fn insert_batch(
             .push_bind(row.longitude)
             .push_bind(&row.country_code)
             .push_bind(&row.observed_at)
+            .push_bind(row.year)
             .push_bind(&row.notes)
-            .push_bind(&row.trip_name);
+            .push_bind(&row.trip_name)
+            .push_bind(row.lifer)
+            .push_bind(row.year_tick);
     });
 
     query_builder.build().execute(pool).await?;
@@ -166,7 +196,6 @@ pub async fn upload_csv(
     State(pool): State<SqlitePool>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
-    // Force geocoder initialization if not already done
     let _ = &*GEOCODER;
 
     while let Ok(Some(field)) = multipart.next_field().await {
