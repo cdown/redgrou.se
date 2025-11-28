@@ -1,0 +1,279 @@
+"use client";
+
+import { useCallback, useEffect, useState, useRef } from "react";
+import { FilterGroup, filterToJson } from "@/lib/filter-types";
+import { formatCountry } from "@/lib/countries";
+
+interface Sighting {
+  id: number;
+  common_name: string;
+  scientific_name: string | null;
+  count: number | null;
+  latitude: number;
+  longitude: number;
+  country_code: string | null;
+  observed_at: string;
+  notes: string | null;
+  trip_name: string | null;
+}
+
+interface SightingsResponse {
+  sightings: Sighting[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+interface SightingsTableProps {
+  uploadId: string;
+  filter: FilterGroup | null;
+}
+
+type SortField =
+  | "common_name"
+  | "scientific_name"
+  | "count"
+  | "country_code"
+  | "observed_at"
+  | "trip_name";
+
+type SortDir = "asc" | "desc";
+
+const COLUMNS: { field: SortField; label: string; width: string }[] = [
+  { field: "common_name", label: "Species", width: "w-[200px]" },
+  { field: "scientific_name", label: "Scientific Name", width: "w-[200px]" },
+  { field: "count", label: "Count", width: "w-[80px]" },
+  { field: "country_code", label: "Country", width: "w-[140px]" },
+  { field: "observed_at", label: "Date", width: "w-[120px]" },
+  { field: "trip_name", label: "Trip", width: "w-[200px]" },
+];
+
+const PAGE_SIZE = 50;
+
+export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
+  const [sightings, setSightings] = useState<Sighting[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [sortField, setSortField] = useState<SortField>("observed_at");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const loadingRef = useRef(false);
+  const pageRef = useRef(1);
+
+  const fetchPage = useCallback(
+    async (pageNum: number, append: boolean) => {
+      if (loadingRef.current) return;
+      loadingRef.current = true;
+      setLoading(true);
+
+      const params = new URLSearchParams();
+      params.set("sort_field", sortField);
+      params.set("sort_dir", sortDir);
+      params.set("page", String(pageNum));
+      params.set("page_size", String(PAGE_SIZE));
+
+      if (filter) {
+        params.set("filter", filterToJson(filter));
+      }
+
+      try {
+        const res = await fetch(
+          `http://localhost:3001/api/uploads/${uploadId}/sightings?${params}`
+        );
+        const json: SightingsResponse = await res.json();
+
+        if (append) {
+          setSightings((prev) => [...prev, ...json.sightings]);
+        } else {
+          setSightings(json.sightings);
+        }
+
+        setTotal(json.total);
+        setHasMore(pageNum < json.total_pages);
+        pageRef.current = pageNum;
+      } catch (e) {
+        console.error("Failed to fetch sightings:", e);
+      } finally {
+        loadingRef.current = false;
+        setLoading(false);
+      }
+    },
+    [uploadId, filter, sortField, sortDir]
+  );
+
+  useEffect(() => {
+    setSightings([]);
+    pageRef.current = 1;
+    setHasMore(true);
+    fetchPage(1, false);
+  }, [fetchPage]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      if (loadingRef.current || !hasMore) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const scrolledToBottom = scrollTop + clientHeight >= scrollHeight - 200;
+
+      if (scrolledToBottom) {
+        const nextPage = pageRef.current + 1;
+        fetchPage(nextPage, true);
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [hasMore, fetchPage]);
+
+  const handleSort = (field: SortField) => {
+    if (field === sortField) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  };
+
+  const formatDate = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (field !== sortField) {
+      return (
+        <svg
+          className="ml-1 h-3 w-3 opacity-30"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+          />
+        </svg>
+      );
+    }
+
+    return sortDir === "asc" ? (
+      <svg
+        className="ml-1 h-3 w-3"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M5 15l7-7 7 7"
+        />
+      </svg>
+    ) : (
+      <svg
+        className="ml-1 h-3 w-3"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M19 9l-7 7-7-7"
+        />
+      </svg>
+    );
+  };
+
+  return (
+    <div className="absolute inset-0 flex flex-col">
+      <div className="shrink-0 border-b px-4 py-2 text-sm text-muted-foreground">
+        {total.toLocaleString()} sightings
+        {sightings.length < total &&
+          ` (${sightings.length.toLocaleString()} loaded)`}
+      </div>
+
+      <div className="shrink-0 border-b bg-background">
+        <div className="flex text-sm font-medium">
+          {COLUMNS.map((col) => (
+            <div key={col.field} className={`${col.width} shrink-0 px-3 py-2`}>
+              <button
+                className="flex items-center hover:text-foreground transition-colors"
+                onClick={() => handleSort(col.field)}
+              >
+                {col.label}
+                <SortIcon field={col.field} />
+              </button>
+            </div>
+          ))}
+          <div className="flex-1 px-3 py-2">Notes</div>
+        </div>
+      </div>
+
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
+        {sightings.length === 0 && !loading ? (
+          <div className="flex h-32 items-center justify-center text-muted-foreground">
+            No sightings found
+          </div>
+        ) : (
+          <>
+            {sightings.map((sighting) => (
+              <div
+                key={sighting.id}
+                className="flex border-b text-sm hover:bg-muted/50 transition-colors"
+              >
+                <div className="w-[200px] shrink-0 px-3 py-2 font-medium">
+                  {sighting.common_name}
+                </div>
+                <div className="w-[200px] shrink-0 px-3 py-2 italic text-muted-foreground">
+                  {sighting.scientific_name || "—"}
+                </div>
+                <div className="w-[80px] shrink-0 px-3 py-2">
+                  {sighting.count ?? "—"}
+                </div>
+                <div className="w-[140px] shrink-0 px-3 py-2">
+                  {sighting.country_code ? formatCountry(sighting.country_code) : "—"}
+                </div>
+                <div className="w-[120px] shrink-0 px-3 py-2">
+                  {formatDate(sighting.observed_at)}
+                </div>
+                <div className="w-[200px] shrink-0 px-3 py-2">
+                  {sighting.trip_name || "—"}
+                </div>
+                <div className="flex-1 px-3 py-2 truncate">
+                  {sighting.notes || "—"}
+                </div>
+              </div>
+            ))}
+
+            {loading && (
+              <div className="flex justify-center py-4">
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+              </div>
+            )}
+
+            {!hasMore && sightings.length > 0 && (
+              <div className="py-4 text-center text-sm text-muted-foreground">
+                All {total.toLocaleString()} sightings loaded
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -1,5 +1,6 @@
 mod db;
 mod filter;
+mod sightings;
 mod tiles;
 mod upload;
 
@@ -42,6 +43,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/upload", post(upload::upload_csv))
         .route("/api/uploads/{upload_id}", get(get_upload))
         .route("/api/uploads/{upload_id}/count", get(get_filtered_count))
+        .route(
+            "/api/uploads/{upload_id}/sightings",
+            get(sightings::get_sightings),
+        )
         .route("/api/tiles/{upload_id}/{z}/{x}/{y}", get(tiles::get_tile))
         .route("/api/fields", get(fields_metadata))
         .route("/api/fields/{upload_id}/{field}", get(field_values))

@@ -30,6 +30,7 @@ import {
   isFreeformOperator,
   Operator,
 } from "@/lib/filter-types";
+import { formatCountry } from "@/lib/countries";
 
 interface QueryBuilderProps {
   uploadId: string;
@@ -451,6 +452,7 @@ function ConditionBuilder({
           values={Array.isArray(condition.value) ? condition.value : []}
           options={values}
           onChange={(v) => updateRule(path, () => ({ ...condition, value: v }))}
+          fieldName={condition.field}
         />
       ) : condition.field && fieldType === "boolean" ? (
         null
@@ -488,6 +490,7 @@ function ConditionBuilder({
           options={values}
           onChange={(v) => updateRule(path, () => ({ ...condition, value: v }))}
           placeholder="Type to search..."
+          fieldName={condition.field}
         />
       ) : null}
 
@@ -552,6 +555,7 @@ interface TypeaheadSelectProps {
   options: string[];
   onChange: (value: string) => void;
   placeholder?: string;
+  fieldName?: string;
 }
 
 function TypeaheadSelect({
@@ -559,34 +563,55 @@ function TypeaheadSelect({
   options,
   onChange,
   placeholder,
+  fieldName,
 }: TypeaheadSelectProps) {
-  const [search, setSearch] = useState(value);
-  const [isOpen, setIsOpen] = useState(false);
+  const formatOption = (opt: string) => {
+    if (fieldName === "country_code" && opt) {
+      return formatCountry(opt);
+    }
+    return opt;
+  };
 
-  useEffect(() => {
-    setSearch(value);
-  }, [value]);
+  const [search, setSearch] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+
+  const displayValue = isFocused ? search : (value ? formatOption(value) : "");
 
   const filtered = useMemo(() => {
-    if (!search) return options.slice(0, 50);
-    const lower = search.toLowerCase();
+    const searchTerm = isFocused ? search : "";
+    if (!searchTerm) return options.slice(0, 50);
+    const lower = searchTerm.toLowerCase();
     return options
-      .filter((o) => o.toLowerCase().includes(lower))
+      .filter((o) => {
+        const display = fieldName === "country_code" ? formatCountry(o) : o;
+        return display.toLowerCase().includes(lower);
+      })
       .slice(0, 50);
-  }, [search, options]);
+  }, [search, options, fieldName, isFocused]);
 
   return (
     <div className="relative flex-1">
       <Input
         type="text"
-        value={search}
+        value={displayValue}
         onChange={(e) => {
           setSearch(e.target.value);
-          onChange(e.target.value);
-          setIsOpen(true);
+          const match = options.find((o) => {
+            const display = fieldName === "country_code" ? formatCountry(o) : o;
+            return display.toLowerCase() === e.target.value.toLowerCase();
+          });
+          onChange(match || e.target.value);
         }}
-        onFocus={() => setIsOpen(true)}
-        onBlur={() => setTimeout(() => setIsOpen(false), 150)}
+        onFocus={() => {
+          setIsFocused(true);
+          setIsOpen(true);
+          setSearch(value ? formatOption(value) : "");
+        }}
+        onBlur={() => {
+          setIsFocused(false);
+          setTimeout(() => setIsOpen(false), 150);
+        }}
         placeholder={placeholder}
         className="h-8"
       />
@@ -598,11 +623,10 @@ function TypeaheadSelect({
               className="w-full rounded px-2 py-1 text-left text-sm hover:bg-accent"
               onMouseDown={() => {
                 onChange(opt);
-                setSearch(opt);
                 setIsOpen(false);
               }}
             >
-              {opt}
+              {formatOption(opt)}
             </button>
           ))}
         </div>
@@ -615,31 +639,43 @@ interface MultiValueSelectProps {
   values: string[];
   options: string[];
   onChange: (values: string[]) => void;
+  fieldName?: string;
 }
 
 function MultiValueSelect({
   values,
   options,
   onChange,
+  fieldName,
 }: MultiValueSelectProps) {
   const [search, setSearch] = useState("");
   const [isOpen, setIsOpen] = useState(false);
+
+  const formatOption = (opt: string) => {
+    if (fieldName === "country_code") {
+      return formatCountry(opt);
+    }
+    return opt;
+  };
 
   const filtered = useMemo(() => {
     const available = options.filter((o) => !values.includes(o));
     if (!search) return available.slice(0, 50);
     const lower = search.toLowerCase();
     return available
-      .filter((o) => o.toLowerCase().includes(lower))
+      .filter((o) => {
+        const display = fieldName === "country_code" ? formatCountry(o) : o;
+        return display.toLowerCase().includes(lower);
+      })
       .slice(0, 50);
-  }, [search, options, values]);
+  }, [search, options, values, fieldName]);
 
   return (
     <div className="relative flex-1">
       <div className="flex min-h-8 flex-wrap gap-1 rounded-md border bg-transparent p-1">
         {values.map((v) => (
           <Badge key={v} variant="secondary" className="gap-1 h-6">
-            {v}
+            {formatOption(v)}
             <button
               onClick={() => onChange(values.filter((x) => x !== v))}
               className="ml-1 hover:text-destructive"
@@ -672,7 +708,7 @@ function MultiValueSelect({
                 setSearch("");
               }}
             >
-              {opt}
+              {formatOption(opt)}
             </button>
           ))}
         </div>

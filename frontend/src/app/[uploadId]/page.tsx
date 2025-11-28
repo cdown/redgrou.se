@@ -3,8 +3,11 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { SightingsMap } from "@/components/sightings-map";
+import { SightingsTable } from "@/components/sightings-table";
 import { QueryBuilder } from "@/components/query-builder";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
+
+type ViewMode = "map" | "table";
 
 interface UploadMetadata {
   upload_id: string;
@@ -23,6 +26,7 @@ export default function UploadPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("map");
 
   useEffect(() => {
     if (!uploadId) return;
@@ -96,6 +100,59 @@ export default function UploadPage() {
           <QueryBuilder uploadId={upload.upload_id} onFilterChange={setFilter} />
         </div>
         <div className="flex items-center gap-3">
+          <div className="flex rounded-md border bg-muted/30 p-0.5">
+            <button
+              onClick={() => setViewMode("map")}
+              className={`flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors ${
+                viewMode === "map"
+                  ? "bg-background shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z" />
+                <path d="M15 5.764v15" />
+                <path d="M9 3.236v15" />
+              </svg>
+              Map
+            </button>
+            <button
+              onClick={() => setViewMode("table")}
+              className={`flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors ${
+                viewMode === "table"
+                  ? "bg-background shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 3v18" />
+                <rect width="18" height="18" x="3" y="3" rx="2" />
+                <path d="M3 9h18" />
+                <path d="M3 15h18" />
+              </svg>
+              Table
+            </button>
+          </div>
           <button
             onClick={handleCopyLink}
             className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-muted"
@@ -133,8 +190,12 @@ export default function UploadPage() {
           </button>
         </div>
       </header>
-      <div className="flex-1">
-        <SightingsMap uploadId={upload.upload_id} filter={filter} />
+      <div className="relative flex-1 overflow-hidden">
+        {viewMode === "map" ? (
+          <SightingsMap uploadId={upload.upload_id} filter={filter} />
+        ) : (
+          <SightingsTable uploadId={upload.upload_id} filter={filter} />
+        )}
       </div>
     </main>
   );
