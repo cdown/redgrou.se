@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { SightingsMap } from "@/components/sightings-map";
 import { QueryBuilder } from "@/components/query-builder";
-import { FilterGroup } from "@/lib/filter-types";
+import { FilterGroup, filterToJson } from "@/lib/filter-types";
 
 interface UploadMetadata {
   upload_id: string;
@@ -19,6 +19,7 @@ export default function UploadPage() {
 
   const [upload, setUpload] = useState<UploadMetadata | null>(null);
   const [filter, setFilter] = useState<FilterGroup | null>(null);
+  const [filteredCount, setFilteredCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -35,6 +36,16 @@ export default function UploadPage() {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [uploadId]);
+
+  useEffect(() => {
+    if (!uploadId || !filter) return;
+
+    const filterParam = encodeURIComponent(filterToJson(filter));
+    fetch(`http://localhost:3001/api/uploads/${uploadId}/count?filter=${filterParam}`)
+      .then((res) => res.json())
+      .then((data) => setFilteredCount(data.count))
+      .catch(() => setFilteredCount(null));
+  }, [uploadId, filter]);
 
   const handleCopyLink = async () => {
     const url = window.location.href;
@@ -75,6 +86,11 @@ export default function UploadPage() {
             <h1 className="font-semibold">redgrou.se</h1>
             <p className="text-sm text-muted-foreground">
               {upload.filename} — {upload.row_count.toLocaleString()} sightings
+              {filter && filteredCount !== null && filteredCount !== upload.row_count && (
+                <span className="text-foreground font-medium">
+                  {" "}(showing {filteredCount.toLocaleString()})
+                </span>
+              )}
             </p>
           </div>
           <QueryBuilder uploadId={upload.upload_id} onFilterChange={setFilter} />

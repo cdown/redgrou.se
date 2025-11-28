@@ -3,11 +3,11 @@ mod filter;
 mod tiles;
 mod upload;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::env;
 use std::net::SocketAddr;
@@ -16,7 +16,7 @@ use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use filter::{get_distinct_values, get_field_metadata, FieldMetadata, FieldValues};
+use filter::{get_distinct_values, get_field_metadata, FieldMetadata, FieldValues, FilterGroup};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -41,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health_check))
         .route("/upload", post(upload::upload_csv))
         .route("/api/uploads/{upload_id}", get(get_upload))
+        .route("/api/uploads/{upload_id}/count", get(get_filtered_count))
         .route("/api/tiles/{upload_id}/{z}/{x}/{y}", get(tiles::get_tile))
         .route("/api/fields", get(fields_metadata))
         .route("/api/fields/{upload_id}/{field}", get(field_values))
@@ -86,6 +87,52 @@ async fn get_upload(
         filename: row.1,
         row_count: row.2,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct CountQuery {
+    filter: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CountResponse {
+    count: i64,
+}
+
+async fn get_filtered_count(
+    State(pool): State<SqlitePool>,
+    Path(upload_id): Path<String>,
+    Query(query): Query<CountQuery>,
+) -> Result<Json<CountResponse>, StatusCode> {
+    let mut params: Vec<String> = vec![upload_id];
+
+    let filter_clause = if let Some(filter_json) = &query.filter {
+        match serde_json::from_str::<FilterGroup>(&filter_json) {
+            Ok(filter) => filter
+                .to_sql(&mut params)
+                .map(|sql| format!(" AND {}", sql)),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    let sql = format!(
+        "SELECT COUNT(*) as cnt FROM sightings WHERE upload_id = ?{}",
+        filter_clause.unwrap_or_default()
+    );
+
+    let mut db_query = sqlx::query_scalar::<_, i64>(&sql);
+    for param in &params {
+        db_query = db_query.bind(param);
+    }
+
+    let count = db_query
+        .fetch_one(&pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(CountResponse { count }))
 }
 
 async fn fields_metadata() -> Json<Vec<FieldMetadata>> {
