@@ -3,17 +3,26 @@
 import { useRef, useEffect } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { FilterGroup, filterToJson } from "@/lib/filter-types";
 
 interface SightingsMapProps {
   uploadId: string;
+  filter: FilterGroup | null;
 }
 
-export function SightingsMap({ uploadId }: SightingsMapProps) {
+export function SightingsMap({ uploadId, filter }: SightingsMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    if (!containerRef.current) return;
+
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+
+    const filterParam = filter ? `?filter=${encodeURIComponent(filterToJson(filter))}` : "";
 
     const map = new maplibregl.Map({
       container: containerRef.current,
@@ -42,7 +51,7 @@ export function SightingsMap({ uploadId }: SightingsMapProps) {
     map.on("load", () => {
       map.addSource("sightings", {
         type: "vector",
-        tiles: [`http://localhost:3001/api/tiles/${uploadId}/{z}/{x}/{y}.pbf`],
+        tiles: [`http://localhost:3001/api/tiles/${uploadId}/{z}/{x}/{y}.pbf${filterParam}`],
       });
 
       map.addLayer({
@@ -85,7 +94,7 @@ export function SightingsMap({ uploadId }: SightingsMapProps) {
       map.remove();
       mapRef.current = null;
     };
-  }, [uploadId]);
+  }, [uploadId, filter]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }

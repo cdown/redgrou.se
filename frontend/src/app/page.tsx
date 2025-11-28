@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { UploadForm } from "@/components/upload-form";
 import { SightingsMap } from "@/components/sightings-map";
+import { QueryBuilder } from "@/components/query-builder";
+import { FilterGroup } from "@/lib/filter-types";
 
 interface UploadResult {
   upload_id: string;
@@ -12,6 +14,7 @@ interface UploadResult {
 
 export default function Home() {
   const [upload, setUpload] = useState<UploadResult | null>(null);
+  const [filter, setFilter] = useState<FilterGroup | null>(null);
 
   return (
     <main className="flex h-screen flex-col">
@@ -30,21 +33,27 @@ export default function Home() {
       ) : (
         <div className="flex flex-1 flex-col">
           <header className="flex items-center justify-between border-b px-4 py-3">
-            <div>
-              <h1 className="font-semibold">redgrou.se</h1>
-              <p className="text-sm text-muted-foreground">
-                {upload.filename} — {upload.row_count.toLocaleString()} sightings
-              </p>
+            <div className="flex items-center gap-4">
+              <div>
+                <h1 className="font-semibold">redgrou.se</h1>
+                <p className="text-sm text-muted-foreground">
+                  {upload.filename} — {upload.row_count.toLocaleString()} sightings
+                </p>
+              </div>
+              <QueryBuilder uploadId={upload.upload_id} onFilterChange={setFilter} />
             </div>
             <button
-              onClick={() => setUpload(null)}
+              onClick={() => {
+                setUpload(null);
+                setFilter(null);
+              }}
               className="text-sm text-muted-foreground hover:text-foreground"
             >
               Upload another
             </button>
           </header>
           <div className="flex-1">
-            <SightingsMap uploadId={upload.upload_id} />
+            <SightingsMap uploadId={upload.upload_id} filter={filter} />
           </div>
         </div>
       )}

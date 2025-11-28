@@ -16,9 +16,7 @@ pub enum Operator {
     Contains,
     StartsWith,
     EndsWith,
-    Gt,
     Gte,
-    Lt,
     Lte,
     In,
     NotIn,
@@ -137,20 +135,20 @@ impl Condition {
                 params.push(format!("%{}", v));
                 Some(format!("{} LIKE ?", field))
             }
-            (Operator::Gt, FilterValue::Number(v)) => {
-                params.push(v.to_string());
-                Some(format!("{} > ?", field))
-            }
             (Operator::Gte, FilterValue::Number(v)) => {
                 params.push(v.to_string());
                 Some(format!("{} >= ?", field))
             }
-            (Operator::Lt, FilterValue::Number(v)) => {
-                params.push(v.to_string());
-                Some(format!("{} < ?", field))
+            (Operator::Gte, FilterValue::String(v)) => {
+                params.push(v.clone());
+                Some(format!("{} >= ?", field))
             }
             (Operator::Lte, FilterValue::Number(v)) => {
                 params.push(v.to_string());
+                Some(format!("{} <= ?", field))
+            }
+            (Operator::Lte, FilterValue::String(v)) => {
+                params.push(v.clone());
                 Some(format!("{} <= ?", field))
             }
             (Operator::In, FilterValue::List(vals)) if !vals.is_empty() => {
