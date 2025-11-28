@@ -157,7 +157,12 @@ impl Condition {
             (Operator::In, FilterValue::List(vals)) if !vals.is_empty() => {
                 let placeholders: Vec<&str> = vals.iter().map(|_| "?").collect();
                 params.extend(vals.clone());
-                Some(format!("{} IN ({})", field, placeholders.join(", ")))
+                // Special case: year_tick means "year tick for these years"
+                if field == "year_tick" {
+                    Some(format!("(year_tick = 1 AND year IN ({}))", placeholders.join(", ")))
+                } else {
+                    Some(format!("{} IN ({})", field, placeholders.join(", ")))
+                }
             }
             (Operator::NotIn, FilterValue::List(vals)) if !vals.is_empty() => {
                 let placeholders: Vec<&str> = vals.iter().map(|_| "?").collect();
@@ -215,13 +220,13 @@ pub fn get_field_metadata() -> Vec<FieldMetadata> {
         },
         FieldMetadata {
             name: "lifer".into(),
-            label: "Lifer".into(),
+            label: "Is lifer".into(),
             field_type: "boolean".into(),
         },
         FieldMetadata {
             name: "year_tick".into(),
-            label: "Year Tick".into(),
-            field_type: "boolean".into(),
+            label: "Year tick for years".into(),
+            field_type: "year_tick".into(),
         },
     ]
 }
@@ -242,7 +247,7 @@ pub async fn get_distinct_values(
     }
 
     let query = format!(
-        "SELECT DISTINCT {} FROM sightings WHERE upload_id = ? AND {} IS NOT NULL ORDER BY {} LIMIT 500",
+        "SELECT DISTINCT CAST({} AS TEXT) FROM sightings WHERE upload_id = ? AND {} IS NOT NULL ORDER BY {} LIMIT 500",
         field, field, field
     );
 

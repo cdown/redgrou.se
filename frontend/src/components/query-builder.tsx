@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -207,6 +207,7 @@ export function QueryBuilder({ uploadId, onFilterChange }: QueryBuilderProps) {
             setCombinator={setCombinator}
             isRoot
             depth={0}
+            uploadId={uploadId}
           />
 
           <div className="mt-4 flex gap-2">
@@ -243,6 +244,7 @@ interface GroupBuilderProps {
   setCombinator: (path: number[], combinator: "and" | "or") => void;
   isRoot?: boolean;
   depth?: number;
+  uploadId: string;
 }
 
 function GroupBuilder({
@@ -257,6 +259,7 @@ function GroupBuilder({
   setCombinator,
   isRoot,
   depth = 0,
+  uploadId,
 }: GroupBuilderProps) {
   const bgColour = GROUP_COLOURS[depth % GROUP_COLOURS.length];
 
@@ -294,6 +297,7 @@ function GroupBuilder({
                 removeRule={removeRule}
                 setCombinator={setCombinator}
                 depth={depth + 1}
+                uploadId={uploadId}
               />
               <Button
                 variant="ghost"
@@ -313,6 +317,7 @@ function GroupBuilder({
               fetchFieldValues={fetchFieldValues}
               updateRule={updateRule}
               removeRule={removeRule}
+              uploadId={uploadId}
             />
           )}
         </div>
@@ -348,6 +353,7 @@ interface ConditionBuilderProps {
   fetchFieldValues: (field: string) => void;
   updateRule: (path: number[], updater: (rule: Rule) => Rule) => void;
   removeRule: (path: number[]) => void;
+  uploadId: string;
 }
 
 function ConditionBuilder({
@@ -358,6 +364,7 @@ function ConditionBuilder({
   fetchFieldValues,
   updateRule,
   removeRule,
+  uploadId,
 }: ConditionBuilderProps) {
   const field = fields.find((f) => f.name === condition.field);
   const fieldType = field?.field_type || "string";
@@ -366,23 +373,38 @@ function ConditionBuilder({
   const isFreeform = isFreeformOperator(condition.operator);
   const isMultiValue = condition.operator === "in" || condition.operator === "not_in";
 
+  const skipOperator = fieldType === "boolean" || fieldType === "year_tick";
+
   return (
     <div className="flex flex-1 items-center gap-2">
       <Select
         value={condition.field}
         onValueChange={(v) => {
           fetchFieldValues(v);
-          const newFieldType = fields.find((f) => f.name === v)?.field_type || "string";
-          const defaultOp = newFieldType === "date" ? "gte" : "eq";
+          const newField = fields.find((f) => f.name === v);
+          const newFieldType = newField?.field_type || "string";
+          let defaultOp = "eq";
+          let defaultValue: string | string[] | number = "";
+
+          if (newFieldType === "date") {
+            defaultOp = "gte";
+          } else if (newFieldType === "boolean") {
+            defaultOp = "eq";
+            defaultValue = 1;
+          } else if (newFieldType === "year_tick") {
+            defaultOp = "in";
+            defaultValue = [];
+          }
+
           updateRule(path, () => ({
             ...condition,
             field: v,
             operator: defaultOp,
-            value: "",
+            value: defaultValue,
           }));
         }}
       >
-        <SelectTrigger className="w-36 h-8">
+        <SelectTrigger className="w-44 h-8">
           <SelectValue placeholder="Field..." />
         </SelectTrigger>
         <SelectContent>
@@ -394,7 +416,7 @@ function ConditionBuilder({
         </SelectContent>
       </Select>
 
-      {condition.field && (
+      {condition.field && !skipOperator && (
         <Select
           value={condition.operator}
           onValueChange={(v) =>
@@ -418,27 +440,20 @@ function ConditionBuilder({
         </Select>
       )}
 
-      {condition.field && isMultiValue ? (
+      {condition.field && fieldType === "year_tick" ? (
+        <YearMultiSelect
+          uploadId={uploadId}
+          values={Array.isArray(condition.value) ? condition.value.map(String) : []}
+          onChange={(v) => updateRule(path, () => ({ ...condition, value: v }))}
+        />
+      ) : condition.field && isMultiValue ? (
         <MultiValueSelect
           values={Array.isArray(condition.value) ? condition.value : []}
           options={values}
           onChange={(v) => updateRule(path, () => ({ ...condition, value: v }))}
         />
       ) : condition.field && fieldType === "boolean" ? (
-        <Select
-          value={String(condition.value)}
-          onValueChange={(v) =>
-            updateRule(path, () => ({ ...condition, value: Number(v) }))
-          }
-        >
-          <SelectTrigger className="w-24 h-8">
-            <SelectValue placeholder="Select..." />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="1">Yes</SelectItem>
-            <SelectItem value="0">No</SelectItem>
-          </SelectContent>
-        </Select>
+        null
       ) : condition.field && fieldType === "date" ? (
         <DatePicker
           value={String(condition.value)}
@@ -658,6 +673,82 @@ function MultiValueSelect({
               }}
             >
               {opt}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface YearMultiSelectProps {
+  uploadId: string;
+  values: string[];
+  onChange: (values: string[]) => void;
+}
+
+function YearMultiSelect({ uploadId, values, onChange }: YearMultiSelectProps) {
+  const [years, setYears] = useState<string[]>([]);
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch(`http://localhost:3001/api/fields/${uploadId}/year`)
+      .then((res) => res.json())
+      .then((data) => {
+        const sortedYears = (data.values as string[])
+          .filter((y) => y && y !== "0")
+          .sort((a, b) => Number(b) - Number(a));
+        setYears(sortedYears);
+      })
+      .catch(console.error);
+  }, [uploadId]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const available = years.filter((y) => !values.includes(y));
+
+  return (
+    <div className="relative flex-1" ref={containerRef}>
+      <div className="flex min-h-8 flex-wrap gap-1 rounded-md border bg-transparent p-1">
+        {values.map((v) => (
+          <Badge key={v} variant="secondary" className="gap-1 h-6">
+            {v}
+            <button
+              onClick={() => onChange(values.filter((x) => x !== v))}
+              className="ml-1 hover:text-destructive"
+            >
+              ✕
+            </button>
+          </Badge>
+        ))}
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          className="h-6 px-2 text-sm text-muted-foreground hover:text-foreground"
+        >
+          {values.length === 0 ? "Select years..." : "+"}
+        </button>
+      </div>
+      {isOpen && available.length > 0 && (
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-popover p-1 shadow-md">
+          {available.map((year) => (
+            <button
+              key={year}
+              className="w-full rounded px-2 py-1 text-left text-sm hover:bg-accent"
+              onMouseDown={() => {
+                onChange([...values, year].sort((a, b) => Number(b) - Number(a)));
+              }}
+            >
+              {year}
             </button>
           ))}
         </div>

@@ -9,7 +9,9 @@ export type Operator =
   | "gte"
   | "lte"
   | "in"
-  | "not_in";
+  | "not_in"
+  | "is_true"
+  | "is_false";
 
 export interface Condition {
   id: string;
@@ -33,18 +35,18 @@ export function isGroup(rule: Rule): rule is FilterGroup {
 export interface FieldMetadata {
   name: string;
   label: string;
-  field_type: "string" | "number" | "date" | "boolean";
+  field_type: "string" | "number" | "date" | "boolean" | "year_tick";
 }
 
 export const OPERATORS: Record<
   string,
-  { label: string; types: string[]; freeform?: boolean }
+  { label: string; types: string[] }
 > = {
-  eq: { label: "is", types: ["string", "boolean"] },
-  neq: { label: "is not", types: ["string", "boolean"] },
+  eq: { label: "is", types: ["string"] },
+  neq: { label: "is not", types: ["string"] },
   contains: { label: "contains", types: ["string"] },
-  starts_with: { label: "starts with", types: ["string"], freeform: true },
-  ends_with: { label: "ends with", types: ["string"], freeform: true },
+  starts_with: { label: "starts with", types: ["string"] },
+  ends_with: { label: "ends with", types: ["string"] },
   gte: { label: "is on or after", types: ["date"] },
   lte: { label: "is on or before", types: ["date"] },
   in: { label: "is one of", types: ["string"] },
@@ -65,6 +67,12 @@ export function getOperatorsForType(fieldType: string): Operator[] {
   if (fieldType === "date") {
     return ["gte", "lte"];
   }
+  if (fieldType === "boolean") {
+    return ["is_true", "is_false"];
+  }
+  if (fieldType === "year_tick") {
+    return ["in"];
+  }
   return Object.entries(OPERATORS)
     .filter(([, meta]) => meta.types.includes(fieldType))
     .map(([op]) => op as Operator);
@@ -74,11 +82,14 @@ export function getOperatorLabel(operator: Operator, fieldType: string): string 
   if (fieldType === "number" && NUMBER_OPERATORS[operator]) {
     return NUMBER_OPERATORS[operator].label;
   }
+  if (fieldType === "year_tick" && operator === "in") {
+    return "for years";
+  }
   return OPERATORS[operator]?.label || operator;
 }
 
 export function isFreeformOperator(operator: Operator): boolean {
-  return OPERATORS[operator]?.freeform === true;
+  return operator === "starts_with" || operator === "ends_with";
 }
 
 export function createCondition(): Condition {
@@ -101,16 +112,35 @@ export function createGroup(): FilterGroup {
 export function filterToJson(filter: FilterGroup): string {
   const clean = (group: FilterGroup): object => ({
     combinator: group.combinator,
-    rules: group.rules.map((rule) => {
-      if (isGroup(rule)) {
-        return clean(rule);
-      }
-      return {
-        field: rule.field,
-        operator: rule.operator,
-        value: rule.value,
-      };
-    }),
+    rules: group.rules
+      .map((rule) => {
+        if (isGroup(rule)) {
+          return clean(rule);
+        }
+        // Handle special operators
+        if (rule.operator === "is_true") {
+          return { field: rule.field, operator: "eq", value: 1 };
+        }
+        if (rule.operator === "is_false") {
+          return { field: rule.field, operator: "eq", value: 0 };
+        }
+        // Handle year_tick - expand to year_tick=1 AND year IN (...)
+        if (rule.field === "year_tick" && rule.operator === "in" && Array.isArray(rule.value)) {
+          return {
+            combinator: "and",
+            rules: [
+              { field: "year_tick", operator: "eq", value: 1 },
+              { field: "year", operator: "in", value: rule.value.map((y) => String(y)) },
+            ],
+          };
+        }
+        return {
+          field: rule.field,
+          operator: rule.operator,
+          value: rule.value,
+        };
+      })
+      .filter(Boolean),
   });
 
   return JSON.stringify(clean(filter));
