@@ -174,7 +174,10 @@ async fn insert_batch(
 
 // We compute lifer and year_tick ourselves rather than trusting the CSV.
 // Birda data sometimes has these fields set incorrectly (e.g. lifers not marked as year ticks).
-async fn compute_lifer_and_year_tick(pool: &SqlitePool, upload_id: &str) -> Result<(), sqlx::Error> {
+async fn compute_lifer_and_year_tick(
+    pool: &SqlitePool,
+    upload_id: &str,
+) -> Result<(), sqlx::Error> {
     // A lifer is the first sighting of a species (by common_name) ever within this upload
     sqlx::query(
         "UPDATE sightings SET lifer = 1 WHERE id IN (
@@ -182,7 +185,7 @@ async fn compute_lifer_and_year_tick(pool: &SqlitePool, upload_id: &str) -> Resu
                 SELECT id, ROW_NUMBER() OVER (PARTITION BY common_name ORDER BY observed_at) as rn
                 FROM sightings WHERE upload_id = ?
             ) WHERE rn = 1
-        )"
+        )",
     )
     .bind(upload_id)
     .execute(pool)

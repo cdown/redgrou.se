@@ -4,8 +4,10 @@ mod tiles;
 mod upload;
 
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::Serialize;
 use sqlx::SqlitePool;
 use std::env;
 use std::net::SocketAddr;
@@ -38,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/upload", post(upload::upload_csv))
+        .route("/api/uploads/{upload_id}", get(get_upload))
         .route("/api/tiles/{upload_id}/{z}/{x}/{y}", get(tiles::get_tile))
         .route("/api/fields", get(fields_metadata))
         .route("/api/fields/{upload_id}/{field}", get(field_values))
@@ -56,6 +59,33 @@ async fn main() -> anyhow::Result<()> {
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+#[derive(Serialize)]
+struct UploadMetadata {
+    upload_id: String,
+    filename: String,
+    row_count: i64,
+}
+
+async fn get_upload(
+    State(pool): State<SqlitePool>,
+    Path(upload_id): Path<String>,
+) -> Result<Json<UploadMetadata>, StatusCode> {
+    let row = sqlx::query_as::<_, (String, String, i64)>(
+        "SELECT id, filename, row_count FROM uploads WHERE id = ?",
+    )
+    .bind(&upload_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(UploadMetadata {
+        upload_id: row.0,
+        filename: row.1,
+        row_count: row.2,
+    }))
 }
 
 async fn fields_metadata() -> Json<Vec<FieldMetadata>> {

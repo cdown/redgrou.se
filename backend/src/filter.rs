@@ -159,7 +159,10 @@ impl Condition {
                 params.extend(vals.clone());
                 // Special case: year_tick means "year tick for these years"
                 if field == "year_tick" {
-                    Some(format!("(year_tick = 1 AND year IN ({}))", placeholders.join(", ")))
+                    Some(format!(
+                        "(year_tick = 1 AND year IN ({}))",
+                        placeholders.join(", ")
+                    ))
                 } else {
                     Some(format!("{} IN ({})", field, placeholders.join(", ")))
                 }
