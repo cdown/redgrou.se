@@ -8,7 +8,6 @@ use ts_rs::TS;
 #[ts(export)]
 pub struct ApiErrorBody {
     pub error: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub code: Option<String>,
 }
