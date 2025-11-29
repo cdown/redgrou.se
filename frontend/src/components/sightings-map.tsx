@@ -15,9 +15,10 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, "");
 }
 
-function truncateText(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength).replace(/\s+\S*$/, "") + "…";
+function firstParagraph(text: string): string {
+  const stripped = stripHtml(text);
+  const para = stripped.split(/\n\n|\r\n\r\n/)[0].trim();
+  return para.replace(/\.{3,}$/, "").trim();
 }
 
 function createPopupContent(
@@ -76,7 +77,7 @@ function updatePopupWithSpeciesInfo(
   }
 
   const summary = info.wikipediaSummary
-    ? truncateText(stripHtml(info.wikipediaSummary), 200)
+    ? firstParagraph(info.wikipediaSummary)
     : null;
 
   container.innerHTML = `
