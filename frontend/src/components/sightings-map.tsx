@@ -16,10 +16,30 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, "");
 }
 
+const MAX_DESCRIPTION_LENGTH = 350;
+
 function firstParagraph(text: string): string {
   const stripped = stripHtml(text);
   const para = stripped.split(/\n\n|\r\n\r\n/)[0].trim();
-  return para.replace(/\.{3,}$/, "").trim();
+
+  if (para.length <= MAX_DESCRIPTION_LENGTH) {
+    return para;
+  }
+
+  // Text exceeds limit - find last complete sentence that fits
+  const truncated = para.slice(0, MAX_DESCRIPTION_LENGTH);
+  const lastSentenceEnd = Math.max(
+    truncated.lastIndexOf(". "),
+    truncated.lastIndexOf("! "),
+    truncated.lastIndexOf("? "),
+    truncated.lastIndexOf("."),
+  );
+
+  if (lastSentenceEnd > 0) {
+    return para.slice(0, lastSentenceEnd + 1);
+  }
+
+  return truncated;
 }
 
 function createPopupContent(
