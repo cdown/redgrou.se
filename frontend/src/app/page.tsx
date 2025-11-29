@@ -61,7 +61,9 @@ export default function Home() {
               interactive map.
             </p>
             <UploadForm
-              onUploadComplete={(result) => router.push(`/${result.upload_id}`)}
+              onUploadComplete={(result) =>
+                router.push(`/single/${result.upload_id}`)
+              }
             />
           </div>
 
@@ -139,9 +141,7 @@ export default function Home() {
 
       {/* Footer brand */}
       <div className="absolute bottom-4 right-4">
-        <span className="text-xs text-stone-400">
-          Built for birders
-        </span>
+        <span className="text-xs text-stone-400">Built for birders</span>
       </div>
     </main>
   );

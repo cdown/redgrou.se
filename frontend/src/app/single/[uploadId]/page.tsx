@@ -70,7 +70,7 @@ export default function UploadPage() {
       setStoredEditToken(uploadId, urlToken);
 
       // Remove token from URL without triggering navigation
-      const cleanUrl = `${window.location.origin}/${uploadId}`;
+      const cleanUrl = `${window.location.origin}/single/${uploadId}`;
       window.history.replaceState({}, "", cleanUrl);
     }
   }, [searchParams, uploadId]);
@@ -109,7 +109,7 @@ export default function UploadPage() {
   }, [uploadId, filter]);
 
   const handleCopyLink = useCallback(async () => {
-    const url = window.location.origin + "/" + uploadId;
+    const url = window.location.origin + "/single/" + uploadId;
     await navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -117,7 +117,7 @@ export default function UploadPage() {
 
   const handleCopyEditLink = useCallback(async () => {
     if (!editToken) return;
-    const url = `${window.location.origin}/${uploadId}?token=${editToken}`;
+    const url = `${window.location.origin}/single/${uploadId}?token=${editToken}`;
     await navigator.clipboard.writeText(url);
     setCopiedEditLink(true);
     setTimeout(() => setCopiedEditLink(false), 2000);
