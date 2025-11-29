@@ -9,7 +9,8 @@ pub async fn init_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
         .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
-        .pragma("foreign_keys", "ON");
+        .pragma("foreign_keys", "ON")
+        .pragma("mmap_size", "314572800");
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
