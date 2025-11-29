@@ -140,8 +140,18 @@ export default function Home() {
       </div>
 
       {/* Footer brand */}
-      <div className="absolute bottom-4 right-4">
-        <span className="text-xs text-stone-400">Built for birders</span>
+      <div className="absolute bottom-4 left-4 flex flex-col leading-tight">
+        <span className="text-sm font-semibold tracking-tight text-stone-600">
+          redgrouse
+        </span>
+        <a
+          href="https://chrisdown.name"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[10px] tracking-[0.2em] text-stone-400 hover:text-stone-600 transition-colors"
+        >
+          by chris down
+        </a>
       </div>
     </main>
   );

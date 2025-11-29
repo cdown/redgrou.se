@@ -552,8 +552,8 @@ export default function UploadPage() {
         </div>
       </div>
 
-      {/* Bottom-left: Stats pill */}
-      <div className="absolute bottom-4 left-4">
+      {/* Bottom-left: Stats pill + Brand */}
+      <div className="absolute bottom-4 left-4 flex flex-col gap-2">
         {!filterOpen && (
           <div className="rounded-full bg-white/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
             <span className="font-medium text-stone-900">
@@ -567,12 +567,18 @@ export default function UploadPage() {
             )}
           </div>
         )}
-      </div>
-
-      {/* Bottom-right: Brand */}
-      <div className="absolute bottom-4 right-4">
-        <div className="rounded-lg bg-white/80 px-3 py-1.5 text-xs font-medium tracking-wide text-stone-500 shadow backdrop-blur">
-          redgrou.se
+        <div className="flex flex-col leading-tight">
+          <span className="text-sm font-semibold tracking-tight text-stone-600 drop-shadow-sm">
+            redgrouse
+          </span>
+          <a
+            href="https://chrisdown.name"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] tracking-[0.2em] text-stone-400 hover:text-stone-600 transition-colors"
+          >
+            by chris down
+          </a>
         </div>
       </div>
 
