@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
@@ -27,6 +27,7 @@ export default function UploadPage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("map");
+  const [filterOpen, setFilterOpen] = useState(false);
 
   useEffect(() => {
     if (!uploadId) return;
@@ -44,75 +45,88 @@ export default function UploadPage() {
   useEffect(() => {
     if (!uploadId || !filter) return;
 
+    let cancelled = false;
     const filterParam = encodeURIComponent(filterToJson(filter));
     fetch(`http://localhost:3001/api/uploads/${uploadId}/count?filter=${filterParam}`)
       .then((res) => res.json())
-      .then((data) => setFilteredCount(data.count))
-      .catch(() => setFilteredCount(null));
+      .then((data) => {
+        if (!cancelled) setFilteredCount(data.count);
+      })
+      .catch(() => {
+        if (!cancelled) setFilteredCount(null);
+      });
+
+    return () => {
+      cancelled = true;
+      setFilteredCount(null);
+    };
   }, [uploadId, filter]);
 
-  const handleCopyLink = async () => {
+  const handleCopyLink = useCallback(async () => {
     const url = window.location.href;
     await navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
+  }, []);
 
   if (loading) {
     return (
-      <main className="flex h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading...</p>
+      <main className="fixed inset-0 flex items-center justify-center bg-stone-100">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-stone-300 border-t-rose-500" />
+          <p className="text-sm text-stone-500">Loading sightings...</p>
+        </div>
       </main>
     );
   }
 
   if (error || !upload) {
     return (
-      <main className="flex h-screen flex-col items-center justify-center gap-4">
-        <p className="text-destructive">
-          {error || "Upload not found"}
-        </p>
-        <button
-          onClick={() => router.push("/")}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          Upload your own data
-        </button>
+      <main className="fixed inset-0 flex flex-col items-center justify-center gap-4 bg-stone-100">
+        <div className="rounded-xl bg-white p-8 shadow-lg">
+          <p className="mb-4 text-rose-600">{error || "Upload not found"}</p>
+          <button
+            onClick={() => router.push("/")}
+            className="text-sm font-medium text-stone-600 hover:text-stone-900 transition-colors"
+          >
+            ← Upload your own data
+          </button>
+        </div>
       </main>
     );
   }
 
+  const showingFiltered = filter && filteredCount !== null && filteredCount !== upload.row_count;
+
   return (
-    <main className="flex h-screen flex-col">
-      <header className="flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-4">
-          <div>
-            <h1 className="font-semibold">redgrou.se</h1>
-            <p className="text-sm text-muted-foreground">
-              {upload.filename} — {upload.row_count.toLocaleString()} sightings
-              {filter && filteredCount !== null && filteredCount !== upload.row_count && (
-                <span className="text-foreground font-medium">
-                  {" "}(showing {filteredCount.toLocaleString()})
-                </span>
-              )}
-            </p>
-          </div>
-          <QueryBuilder uploadId={upload.upload_id} onFilterChange={setFilter} />
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex rounded-md border bg-muted/30 p-0.5">
+    <main className="fixed inset-0 overflow-hidden">
+      {/* Full-screen map */}
+      <div className="absolute inset-0">
+        <SightingsMap uploadId={upload.upload_id} filter={filter} />
+      </div>
+
+      {/* Table overlay (slides up from bottom when active) */}
+      <div
+        className={`absolute inset-x-0 bottom-0 bg-white shadow-2xl transition-transform duration-300 ease-out ${
+          viewMode === "table" ? "translate-y-0" : "translate-y-full"
+        }`}
+        style={{ top: "80px", borderRadius: "16px 16px 0 0" }}
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex items-center justify-between border-b px-4 py-3">
+            <span className="font-medium text-stone-900">
+              {showingFiltered
+                ? `${filteredCount?.toLocaleString()} of ${upload.row_count.toLocaleString()} sightings`
+                : `${upload.row_count.toLocaleString()} sightings`}
+            </span>
             <button
               onClick={() => setViewMode("map")}
-              className={`flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors ${
-                viewMode === "map"
-                  ? "bg-background shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
+              className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-stone-100 transition-colors"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
+                width="20"
+                height="20"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -120,54 +134,152 @@ export default function UploadPage() {
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
-                <path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z" />
-                <path d="M15 5.764v15" />
-                <path d="M9 3.236v15" />
+                <path d="M18 6 6 18" />
+                <path d="m6 6 12 12" />
               </svg>
-              Map
-            </button>
-            <button
-              onClick={() => setViewMode("table")}
-              className={`flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors ${
-                viewMode === "table"
-                  ? "bg-background shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 3v18" />
-                <rect width="18" height="18" x="3" y="3" rx="2" />
-                <path d="M3 9h18" />
-                <path d="M3 15h18" />
-              </svg>
-              Table
             </button>
           </div>
+          <div className="relative flex-1 overflow-hidden">
+            <SightingsTable uploadId={upload.upload_id} filter={filter} />
+          </div>
+        </div>
+      </div>
+
+      {/* Filter panel (slides in from left) */}
+      <div
+        className={`absolute bottom-4 left-4 top-4 w-[400px] overflow-hidden rounded-2xl bg-white shadow-2xl transition-transform duration-300 ease-out ${
+          filterOpen ? "translate-x-0" : "-translate-x-[calc(100%+32px)]"
+        }`}
+      >
+        <QueryBuilder
+          uploadId={upload.upload_id}
+          onFilterChange={setFilter}
+          onClose={() => setFilterOpen(false)}
+          isPanel
+        />
+      </div>
+
+      {/* Top-left: Logo + Search button */}
+      <div className="absolute left-4 top-4 flex flex-col gap-2">
+        {!filterOpen && (
+          <>
+            <button
+              onClick={() => setFilterOpen(true)}
+              className="flex items-center gap-3 rounded-full bg-white px-4 py-3 shadow-lg hover:shadow-xl transition-shadow"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-stone-500"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+              <span className="text-stone-500">Filter sightings...</span>
+              {filter && (
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-medium text-white">
+                  ✓
+                </span>
+              )}
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Top-right: View controls */}
+      <div className="absolute right-4 top-4 flex flex-col gap-2">
+        {/* View toggle */}
+        <div className="flex overflow-hidden rounded-lg bg-white shadow-lg">
+          <button
+            onClick={() => setViewMode("map")}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+              viewMode === "map"
+                ? "bg-stone-900 text-white"
+                : "text-stone-600 hover:bg-stone-50"
+            }`}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z" />
+              <path d="M15 5.764v15" />
+              <path d="M9 3.236v15" />
+            </svg>
+            Map
+          </button>
+          <button
+            onClick={() => setViewMode("table")}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+              viewMode === "table"
+                ? "bg-stone-900 text-white"
+                : "text-stone-600 hover:bg-stone-50"
+            }`}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 3v18" />
+              <rect width="18" height="18" x="3" y="3" rx="2" />
+              <path d="M3 9h18" />
+              <path d="M3 15h18" />
+            </svg>
+            List
+          </button>
+        </div>
+
+        {/* More options */}
+        <div className="flex flex-col overflow-hidden rounded-lg bg-white shadow-lg">
           <button
             onClick={handleCopyLink}
-            className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-muted"
+            className="flex items-center gap-2 px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
           >
             {copied ? (
               <>
-                <span className="text-green-600">✓</span>
-                Copied!
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-emerald-500"
+                >
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                <span className="text-emerald-600">Copied!</span>
               </>
             ) : (
               <>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  width="14"
-                  height="14"
+                  width="16"
+                  height="16"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -178,24 +290,56 @@ export default function UploadPage() {
                   <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
                   <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                 </svg>
-                Copy link
+                Share
               </>
             )}
           </button>
           <button
             onClick={() => router.push("/")}
-            className="text-sm text-muted-foreground hover:text-foreground"
+            className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
           >
-            Upload another
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" x2="12" y1="3" y2="15" />
+            </svg>
+            Upload new
           </button>
         </div>
-      </header>
-      <div className="relative flex-1 overflow-hidden">
-        {viewMode === "map" ? (
-          <SightingsMap uploadId={upload.upload_id} filter={filter} />
-        ) : (
-          <SightingsTable uploadId={upload.upload_id} filter={filter} />
+      </div>
+
+      {/* Bottom-left: Stats pill */}
+      <div className="absolute bottom-4 left-4">
+        {!filterOpen && (
+          <div className="rounded-full bg-white/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
+            <span className="font-medium text-stone-900">
+              {showingFiltered
+                ? `${filteredCount?.toLocaleString()} of ${upload.row_count.toLocaleString()}`
+                : upload.row_count.toLocaleString()}
+            </span>
+            <span className="text-stone-500"> sightings</span>
+            {upload.filename && (
+              <span className="text-stone-400"> · {upload.filename}</span>
+            )}
+          </div>
         )}
+      </div>
+
+      {/* Bottom-right: Brand */}
+      <div className="absolute bottom-4 right-4">
+        <div className="rounded-lg bg-white/80 px-3 py-1.5 text-xs font-medium tracking-wide text-stone-500 shadow backdrop-blur">
+          redgrou.se
+        </div>
       </div>
     </main>
   );

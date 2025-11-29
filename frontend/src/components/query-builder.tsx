@@ -35,9 +35,16 @@ import { formatCountry } from "@/lib/countries";
 interface QueryBuilderProps {
   uploadId: string;
   onFilterChange: (filter: FilterGroup | null) => void;
+  onClose?: () => void;
+  isPanel?: boolean;
 }
 
-export function QueryBuilder({ uploadId, onFilterChange }: QueryBuilderProps) {
+export function QueryBuilder({
+  uploadId,
+  onFilterChange,
+  onClose,
+  isPanel,
+}: QueryBuilderProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [fields, setFields] = useState<FieldMetadata[]>([]);
   const [filter, setFilter] = useState<FilterGroup>(createGroup());
@@ -157,7 +164,12 @@ export function QueryBuilder({ uploadId, onFilterChange }: QueryBuilderProps) {
       isGroup(r) ? r.rules.length > 0 : r.field !== ""
     );
     onFilterChange(hasValidRules ? filter : null);
-  }, [filter, onFilterChange]);
+    if (isPanel && onClose) {
+      onClose();
+    } else {
+      setIsOpen(false);
+    }
+  }, [filter, onFilterChange, isPanel, onClose]);
 
   const clearFilter = useCallback(() => {
     setFilter(createGroup());
@@ -167,6 +179,61 @@ export function QueryBuilder({ uploadId, onFilterChange }: QueryBuilderProps) {
   const activeCount = filter.rules.filter((r) =>
     isGroup(r) ? r.rules.length > 0 : r.field !== ""
   ).length;
+
+  if (isPanel) {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <h2 className="text-lg font-semibold text-stone-900">Filters</h2>
+          <button
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-stone-100 transition-colors"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          <GroupBuilder
+            group={filter}
+            path={[]}
+            fields={fields}
+            fieldValues={fieldValues}
+            fetchFieldValues={fetchFieldValues}
+            updateRule={updateRule}
+            addRule={addRule}
+            removeRule={removeRule}
+            setCombinator={setCombinator}
+            isRoot
+            depth={0}
+            uploadId={uploadId}
+          />
+        </div>
+
+        <div className="flex gap-2 border-t p-4">
+          <Button className="flex-1" onClick={applyFilter}>
+            Apply filters
+          </Button>
+          <Button variant="outline" onClick={clearFilter}>
+            Clear
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative">
@@ -377,7 +444,7 @@ function ConditionBuilder({
   const skipOperator = fieldType === "boolean" || fieldType === "year_tick";
 
   return (
-    <div className="flex flex-1 items-center gap-2">
+    <div className="flex flex-1 flex-wrap items-center gap-2">
       <Select
         value={condition.field}
         onValueChange={(v) => {
@@ -405,7 +472,7 @@ function ConditionBuilder({
           }));
         }}
       >
-        <SelectTrigger className="w-44 h-8">
+        <SelectTrigger className="w-36 h-8">
           <SelectValue placeholder="Field..." />
         </SelectTrigger>
         <SelectContent>
@@ -428,7 +495,7 @@ function ConditionBuilder({
             }))
           }
         >
-          <SelectTrigger className="w-36 h-8">
+          <SelectTrigger className="w-32 h-8">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -472,7 +539,7 @@ function ConditionBuilder({
             }))
           }
           placeholder="Value..."
-          className="h-8 flex-1"
+          className="h-8 w-24"
         />
       ) : condition.field && isFreeform ? (
         <Input
@@ -482,7 +549,7 @@ function ConditionBuilder({
             updateRule(path, () => ({ ...condition, value: e.target.value }))
           }
           placeholder="Type to search..."
-          className="h-8 flex-1"
+          className="h-8 min-w-32 flex-1"
         />
       ) : condition.field ? (
         <TypeaheadSelect
@@ -528,7 +595,7 @@ function DatePicker({ value, onChange }: DatePickerProps) {
       <PopoverTrigger asChild>
         <Button
           variant="outline"
-          className="h-8 flex-1 justify-start text-left font-normal"
+          className="h-8 w-36 justify-start text-left font-normal"
         >
           {date ? formatDate(date) : "Select date..."}
         </Button>
@@ -591,7 +658,7 @@ function TypeaheadSelect({
   }, [search, options, fieldName, isFocused]);
 
   return (
-    <div className="relative flex-1">
+    <div className="relative min-w-32 flex-1">
       <Input
         type="text"
         value={displayValue}
@@ -671,7 +738,7 @@ function MultiValueSelect({
   }, [search, options, values, fieldName]);
 
   return (
-    <div className="relative flex-1">
+    <div className="relative min-w-32 flex-1">
       <div className="flex min-h-8 flex-wrap gap-1 rounded-md border bg-transparent p-1">
         {values.map((v) => (
           <Badge key={v} variant="secondary" className="gap-1 h-6">
@@ -753,7 +820,7 @@ function YearMultiSelect({ uploadId, values, onChange }: YearMultiSelectProps) {
   const available = years.filter((y) => !values.includes(y));
 
   return (
-    <div className="relative flex-1" ref={containerRef}>
+    <div className="relative min-w-32 flex-1" ref={containerRef}>
       <div className="flex min-h-8 flex-wrap gap-1 rounded-md border bg-transparent p-1">
         {values.map((v) => (
           <Badge key={v} variant="secondary" className="gap-1 h-6">
