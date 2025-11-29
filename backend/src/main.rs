@@ -1,5 +1,5 @@
 use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{header, HeaderValue};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 use ts_rs::TS;
 
+use redgrouse::error::ApiError;
 use redgrouse::filter::{
     get_distinct_values, get_field_metadata, FieldMetadata, FieldValues, FilterGroup,
 };
@@ -91,15 +92,15 @@ struct UploadMetadata {
 async fn get_upload(
     State(pool): State<SqlitePool>,
     Path(upload_id): Path<String>,
-) -> Result<Json<UploadMetadata>, StatusCode> {
+) -> Result<Json<UploadMetadata>, ApiError> {
     let row = sqlx::query_as::<_, (String, String, i64)>(
         "SELECT id, filename, row_count FROM uploads WHERE id = ?",
     )
     .bind(&upload_id)
     .fetch_optional(&pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    .map_err(|_| ApiError::internal("Database error"))?
+    .ok_or_else(|| ApiError::not_found("Upload not found"))?;
 
     Ok(Json(UploadMetadata {
         upload_id: row.0,
@@ -123,11 +124,11 @@ async fn get_filtered_count(
     State(pool): State<SqlitePool>,
     Path(upload_id): Path<String>,
     Query(query): Query<CountQuery>,
-) -> Result<Json<CountResponse>, StatusCode> {
+) -> Result<Json<CountResponse>, ApiError> {
     let mut params: Vec<String> = vec![upload_id];
 
     let filter_clause = if let Some(filter_json) = &query.filter {
-        match serde_json::from_str::<FilterGroup>(&filter_json) {
+        match serde_json::from_str::<FilterGroup>(filter_json) {
             Ok(filter) => filter
                 .to_sql(&mut params)
                 .map(|sql| format!(" AND {}", sql)),
@@ -150,7 +151,7 @@ async fn get_filtered_count(
     let count = db_query
         .fetch_one(&pool)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| ApiError::internal("Database error"))?;
 
     Ok(Json(CountResponse { count }))
 }

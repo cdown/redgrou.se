@@ -7,6 +7,7 @@
 use std::fs;
 use std::path::Path;
 
+use redgrouse::error::ApiErrorBody;
 use redgrouse::filter::{
     Combinator, Condition, FieldMetadata, FilterGroup, FilterValue, Operator, Rule,
 };
@@ -23,6 +24,7 @@ fn main() {
     fs::create_dir_all(out_dir).expect("Failed to create output directory");
 
     // Export all types
+    ApiErrorBody::export_all_to(out_dir).expect("Failed to export ApiErrorBody");
     Combinator::export_all_to(out_dir).expect("Failed to export Combinator");
     Operator::export_all_to(out_dir).expect("Failed to export Operator");
     FilterValue::export_all_to(out_dir).expect("Failed to export FilterValue");

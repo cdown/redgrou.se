@@ -1,10 +1,10 @@
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use ts_rs::TS;
 
+use crate::error::ApiError;
 use crate::filter::FilterGroup;
 
 const ALLOWED_SORT_FIELDS: &[&str] = &[
@@ -58,7 +58,7 @@ pub async fn get_sightings(
     State(pool): State<SqlitePool>,
     Path(upload_id): Path<String>,
     Query(query): Query<SightingsQuery>,
-) -> Result<Json<SightingsResponse>, StatusCode> {
+) -> Result<Json<SightingsResponse>, ApiError> {
     let page = query.page.unwrap_or(1).max(1);
     let page_size = query.page_size.unwrap_or(100).min(500);
     let offset = (page - 1) * page_size;
@@ -99,7 +99,7 @@ pub async fn get_sightings(
     let total = count_query
         .fetch_one(&pool)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| ApiError::internal("Database error"))?;
 
     let select_sql = format!(
         r#"SELECT id, common_name, scientific_name, count, latitude, longitude,
@@ -139,7 +139,7 @@ pub async fn get_sightings(
     let rows = select_query
         .fetch_all(&pool)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| ApiError::internal("Database error"))?;
 
     let sightings: Vec<Sighting> = rows
         .into_iter()
