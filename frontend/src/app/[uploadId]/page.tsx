@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { apiFetch } from "@/lib/api";
 import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
 import { QueryBuilder } from "@/components/query-builder";
@@ -76,7 +77,7 @@ export default function UploadPage() {
   useEffect(() => {
     if (!uploadId) return;
 
-    fetch(`http://localhost:3001/api/uploads/${uploadId}`)
+    apiFetch(`/api/uploads/${uploadId}`)
       .then((res) => {
         if (!res.ok) throw new Error("Upload not found");
         return res.json();
@@ -91,9 +92,7 @@ export default function UploadPage() {
 
     let cancelled = false;
     const filterParam = encodeURIComponent(filterToJson(filter));
-    fetch(
-      `http://localhost:3001/api/uploads/${uploadId}/count?filter=${filterParam}`
-    )
+    apiFetch(`/api/uploads/${uploadId}/count?filter=${filterParam}`)
       .then((res) => res.json())
       .then((data) => {
         if (!cancelled) setFilteredCount(data.count);
@@ -128,7 +127,7 @@ export default function UploadPage() {
 
     setIsDeleting(true);
     try {
-      const res = await fetch(`http://localhost:3001/api/uploads/${uploadId}`, {
+      const res = await apiFetch(`/api/uploads/${uploadId}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${editToken}`,
@@ -165,16 +164,13 @@ export default function UploadPage() {
       formData.append("file", file);
 
       try {
-        const res = await fetch(
-          `http://localhost:3001/api/uploads/${uploadId}`,
-          {
-            method: "PUT",
-            headers: {
-              Authorization: `Bearer ${editToken}`,
-            },
-            body: formData,
-          }
-        );
+        const res = await apiFetch(`/api/uploads/${uploadId}`, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${editToken}`,
+          },
+          body: formData,
+        });
 
         if (!res.ok) {
           const data = await res.json();

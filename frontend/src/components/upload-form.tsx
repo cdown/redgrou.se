@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { apiFetch } from "@/lib/api";
 
 interface UploadResult {
   upload_id: string;
@@ -32,7 +33,7 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
       formData.append("file", file);
 
       try {
-        const res = await fetch("http://localhost:3001/upload", {
+        const res = await apiFetch("/upload", {
           method: "POST",
           body: formData,
         });

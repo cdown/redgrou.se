@@ -5,7 +5,7 @@ mod tiles;
 mod upload;
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -13,9 +13,12 @@ use sqlx::SqlitePool;
 use std::env;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+
+const BUILD_VERSION: &str = env!("BUILD_VERSION");
 
 use filter::{get_distinct_values, get_field_metadata, FieldMetadata, FieldValues, FilterGroup};
 
@@ -36,7 +39,13 @@ async fn main() -> anyhow::Result<()> {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_headers(Any)
+        .expose_headers([header::HeaderName::from_static("x-build-version")]);
+
+    let build_version_header = SetResponseHeaderLayer::if_not_present(
+        header::HeaderName::from_static("x-build-version"),
+        HeaderValue::from_static(BUILD_VERSION),
+    );
 
     let app = Router::new()
         .route("/health", get(health_check))
@@ -55,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/tiles/{upload_id}/{z}/{x}/{y}", get(tiles::get_tile))
         .route("/api/fields", get(fields_metadata))
         .route("/api/fields/{upload_id}/{field}", get(field_values))
+        .layer(build_version_header)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(pool);

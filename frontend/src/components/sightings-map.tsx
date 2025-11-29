@@ -3,6 +3,7 @@
 import { useRef, useEffect } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { getApiUrl } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { fetchSpeciesInfo } from "@/lib/species-api";
 
@@ -166,7 +167,7 @@ export function SightingsMap({ uploadId, filter }: SightingsMapProps) {
       map.addSource("sightings", {
         type: "vector",
         tiles: [
-          `http://localhost:3001/api/tiles/${uploadId}/{z}/{x}/{y}.pbf${filterParam}`,
+          getApiUrl(`/api/tiles/${uploadId}/{z}/{x}/{y}.pbf${filterParam}`),
         ],
       });
 

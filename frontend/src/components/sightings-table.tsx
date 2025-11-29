@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useRef } from "react";
+import { apiFetch } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { formatCountry } from "@/lib/countries";
 
@@ -80,8 +81,8 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
       }
 
       try {
-        const res = await fetch(
-          `http://localhost:3001/api/uploads/${uploadId}/sightings?${params}`
+        const res = await apiFetch(
+          `/api/uploads/${uploadId}/sightings?${params}`
         );
         const json: SightingsResponse = await res.json();
 

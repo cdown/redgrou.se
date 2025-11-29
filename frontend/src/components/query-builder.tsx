@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
+import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -51,7 +52,7 @@ export function QueryBuilder({
   const [fieldValues, setFieldValues] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
-    fetch("http://localhost:3001/api/fields")
+    apiFetch("/api/fields")
       .then((res) => res.json())
       .then(setFields)
       .catch(console.error);
@@ -61,9 +62,7 @@ export function QueryBuilder({
     async (field: string) => {
       if (fieldValues[field]) return;
       try {
-        const res = await fetch(
-          `http://localhost:3001/api/fields/${uploadId}/${field}`
-        );
+        const res = await apiFetch(`/api/fields/${uploadId}/${field}`);
         const data = await res.json();
         setFieldValues((prev) => ({ ...prev, [field]: data.values }));
       } catch (e) {
@@ -796,7 +795,7 @@ function YearMultiSelect({ uploadId, values, onChange }: YearMultiSelectProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch(`http://localhost:3001/api/fields/${uploadId}/year`)
+    apiFetch(`/api/fields/${uploadId}/year`)
       .then((res) => res.json())
       .then((data) => {
         const sortedYears = (data.values as string[])
