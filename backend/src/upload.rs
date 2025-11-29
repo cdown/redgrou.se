@@ -37,6 +37,9 @@ pub struct UploadResponse {
     pub edit_token: String,
 }
 
+// No salt needed: tokens are 122-bit random UUIDs, not user-chosen passwords.
+// Salting prevents rainbow table attacks on low-entropy secrets, but rainbow
+// tables for random UUIDs don't exist and never will (2^122 entries).
 pub fn hash_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
