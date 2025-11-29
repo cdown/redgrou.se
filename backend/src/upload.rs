@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{QueryBuilder, SqlitePool};
 use subtle::ConstantTimeEq;
 use tracing::{error, info};
+use ts_rs::TS;
 use uuid::Uuid;
 
 // Initialised once to avoid reloading the dataset on every request.
@@ -31,7 +32,8 @@ const COL_COUNT: &str = "count";
 const COL_NOTE: &str = "note";
 const COL_SESSION_TITLE: &str = "sessionTitle";
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export)]
 pub struct UploadResponse {
     pub upload_id: String,
     pub filename: String,
@@ -57,7 +59,8 @@ pub fn verify_token(token: &str, stored_hash: &str) -> bool {
         .into()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export)]
 pub struct UploadError {
     pub error: String,
 }
@@ -428,7 +431,8 @@ async fn verify_upload_access(
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export)]
 pub struct UpdateResponse {
     pub upload_id: String,
     pub filename: String,
@@ -624,7 +628,8 @@ pub async fn update_csv(
         .into_response()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export)]
 pub struct DeleteResponse {
     pub deleted: bool,
 }

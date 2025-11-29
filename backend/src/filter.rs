@@ -1,14 +1,17 @@
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Combinator {
     And,
     Or,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Operator {
     Eq,
@@ -22,7 +25,8 @@ pub enum Operator {
     NotIn,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(untagged)]
 pub enum FilterValue {
     String(String),
@@ -30,21 +34,24 @@ pub enum FilterValue {
     List(Vec<String>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Condition {
     pub field: String,
     pub operator: Operator,
     pub value: FilterValue,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(untagged)]
 pub enum Rule {
     Condition(Condition),
     Group(FilterGroup),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct FilterGroup {
     pub combinator: Combinator,
     pub rules: Vec<Rule>,
@@ -177,7 +184,8 @@ impl Condition {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
 pub struct FieldMetadata {
     pub name: String,
     pub label: String,

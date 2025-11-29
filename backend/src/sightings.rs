@@ -3,6 +3,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use ts_rs::TS;
 
 use crate::filter::FilterGroup;
 
@@ -28,7 +29,8 @@ pub struct SightingsQuery {
     page_size: Option<u32>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
 pub struct Sighting {
     pub id: i64,
     pub common_name: String,
@@ -42,7 +44,8 @@ pub struct Sighting {
     pub trip_name: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
 pub struct SightingsResponse {
     pub sightings: Vec<Sighting>,
     pub total: i64,

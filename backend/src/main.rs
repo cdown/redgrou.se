@@ -1,9 +1,3 @@
-mod db;
-mod filter;
-mod sightings;
-mod tiles;
-mod upload;
-
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::routing::{get, post};
@@ -17,10 +11,14 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+use ts_rs::TS;
+
+use redgrouse::filter::{
+    get_distinct_values, get_field_metadata, FieldMetadata, FieldValues, FilterGroup,
+};
+use redgrouse::{db, sightings, tiles, upload};
 
 const BUILD_VERSION: &str = env!("BUILD_VERSION");
-
-use filter::{get_distinct_values, get_field_metadata, FieldMetadata, FieldValues, FilterGroup};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -82,7 +80,8 @@ async fn health_check() -> &'static str {
     "OK"
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export)]
 struct UploadMetadata {
     upload_id: String,
     filename: String,
@@ -114,7 +113,8 @@ struct CountQuery {
     filter: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export)]
 struct CountResponse {
     count: i64,
 }
