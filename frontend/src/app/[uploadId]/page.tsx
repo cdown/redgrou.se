@@ -58,13 +58,18 @@ export default function UploadPage() {
     setEditToken(getEditToken(uploadId));
   }, [uploadId]);
 
-  // Store token from URL in localStorage for convenience
+  // Store token from URL in localStorage, then remove from URL bar to prevent
+  // accidental sharing of the edit link when user copies the URL
   useEffect(() => {
     const urlToken = searchParams.get("token");
     if (urlToken && uploadId) {
       const editTokens = JSON.parse(localStorage.getItem("editTokens") || "{}");
       editTokens[uploadId] = urlToken;
       localStorage.setItem("editTokens", JSON.stringify(editTokens));
+
+      // Remove token from URL without triggering navigation
+      const cleanUrl = `${window.location.origin}/${uploadId}`;
+      window.history.replaceState({}, "", cleanUrl);
     }
   }, [searchParams, uploadId]);
 
