@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState, useMemo, useRef } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { apiFetch } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -10,7 +11,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -18,6 +18,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { MultiCombobox } from "@/components/ui/multi-combobox";
 import {
   Condition,
   FilterGroup,
@@ -32,6 +34,16 @@ import {
   Operator,
 } from "@/lib/filter-types";
 import { formatCountry } from "@/lib/countries";
+
+function toComboboxOptions(
+  values: string[],
+  fieldName?: string
+): ComboboxOption[] {
+  return values.map((v) => ({
+    value: v,
+    label: fieldName === "country_code" ? formatCountry(v) : v,
+  }));
+}
 
 interface QueryBuilderProps {
   uploadId: string;
@@ -450,7 +462,7 @@ function ConditionBuilder({
           fetchFieldValues(v);
           const newField = fields.find((f) => f.name === v);
           const newFieldType = newField?.field_type || "string";
-          let defaultOp = "eq";
+          let defaultOp: Operator = "eq";
           let defaultValue: string | string[] | number = "";
 
           if (newFieldType === "date") {
@@ -514,11 +526,13 @@ function ConditionBuilder({
           onChange={(v) => updateRule(path, () => ({ ...condition, value: v }))}
         />
       ) : condition.field && isMultiValue ? (
-        <MultiValueSelect
+        <MultiCombobox
+          options={toComboboxOptions(values, condition.field)}
           values={Array.isArray(condition.value) ? condition.value : []}
-          options={values}
           onChange={(v) => updateRule(path, () => ({ ...condition, value: v }))}
-          fieldName={condition.field}
+          placeholder="Select..."
+          searchPlaceholder="Search..."
+          className="min-w-32 flex-1"
         />
       ) : condition.field && fieldType === "boolean" ? (
         null
@@ -551,12 +565,13 @@ function ConditionBuilder({
           className="h-8 min-w-32 flex-1"
         />
       ) : condition.field ? (
-        <TypeaheadSelect
+        <Combobox
+          options={toComboboxOptions(values, condition.field)}
           value={String(condition.value)}
-          options={values}
           onChange={(v) => updateRule(path, () => ({ ...condition, value: v }))}
-          placeholder="Type to search..."
-          fieldName={condition.field}
+          placeholder="Select..."
+          searchPlaceholder="Search..."
+          className="min-w-32 flex-1"
         />
       ) : null}
 
@@ -616,173 +631,6 @@ function DatePicker({ value, onChange }: DatePickerProps) {
   );
 }
 
-interface TypeaheadSelectProps {
-  value: string;
-  options: string[];
-  onChange: (value: string) => void;
-  placeholder?: string;
-  fieldName?: string;
-}
-
-function TypeaheadSelect({
-  value,
-  options,
-  onChange,
-  placeholder,
-  fieldName,
-}: TypeaheadSelectProps) {
-  const formatOption = (opt: string) => {
-    if (fieldName === "country_code" && opt) {
-      return formatCountry(opt);
-    }
-    return opt;
-  };
-
-  const [search, setSearch] = useState("");
-  const [isOpen, setIsOpen] = useState(false);
-  const [isFocused, setIsFocused] = useState(false);
-
-  const displayValue = isFocused ? search : (value ? formatOption(value) : "");
-
-  const filtered = useMemo(() => {
-    const searchTerm = isFocused ? search : "";
-    if (!searchTerm) return options.slice(0, 50);
-    const lower = searchTerm.toLowerCase();
-    return options
-      .filter((o) => {
-        const display = fieldName === "country_code" ? formatCountry(o) : o;
-        return display.toLowerCase().includes(lower);
-      })
-      .slice(0, 50);
-  }, [search, options, fieldName, isFocused]);
-
-  return (
-    <div className="relative min-w-32 flex-1">
-      <Input
-        type="text"
-        value={displayValue}
-        onChange={(e) => {
-          setSearch(e.target.value);
-          const match = options.find((o) => {
-            const display = fieldName === "country_code" ? formatCountry(o) : o;
-            return display.toLowerCase() === e.target.value.toLowerCase();
-          });
-          onChange(match || e.target.value);
-        }}
-        onFocus={() => {
-          setIsFocused(true);
-          setIsOpen(true);
-          setSearch(value ? formatOption(value) : "");
-        }}
-        onBlur={() => {
-          setIsFocused(false);
-          setTimeout(() => setIsOpen(false), 150);
-        }}
-        placeholder={placeholder}
-        className="h-8"
-      />
-      {isOpen && filtered.length > 0 && (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-popover p-1 shadow-md">
-          {filtered.map((opt) => (
-            <button
-              key={opt}
-              className="w-full rounded px-2 py-1 text-left text-sm hover:bg-accent"
-              onMouseDown={() => {
-                onChange(opt);
-                setIsOpen(false);
-              }}
-            >
-              {formatOption(opt)}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-interface MultiValueSelectProps {
-  values: string[];
-  options: string[];
-  onChange: (values: string[]) => void;
-  fieldName?: string;
-}
-
-function MultiValueSelect({
-  values,
-  options,
-  onChange,
-  fieldName,
-}: MultiValueSelectProps) {
-  const [search, setSearch] = useState("");
-  const [isOpen, setIsOpen] = useState(false);
-
-  const formatOption = (opt: string) => {
-    if (fieldName === "country_code") {
-      return formatCountry(opt);
-    }
-    return opt;
-  };
-
-  const filtered = useMemo(() => {
-    const available = options.filter((o) => !values.includes(o));
-    if (!search) return available.slice(0, 50);
-    const lower = search.toLowerCase();
-    return available
-      .filter((o) => {
-        const display = fieldName === "country_code" ? formatCountry(o) : o;
-        return display.toLowerCase().includes(lower);
-      })
-      .slice(0, 50);
-  }, [search, options, values, fieldName]);
-
-  return (
-    <div className="relative min-w-32 flex-1">
-      <div className="flex min-h-8 flex-wrap gap-1 rounded-md border bg-transparent p-1">
-        {values.map((v) => (
-          <Badge key={v} variant="secondary" className="gap-1 h-6">
-            {formatOption(v)}
-            <button
-              onClick={() => onChange(values.filter((x) => x !== v))}
-              className="ml-1 hover:text-destructive"
-            >
-              ✕
-            </button>
-          </Badge>
-        ))}
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setIsOpen(true);
-          }}
-          onFocus={() => setIsOpen(true)}
-          onBlur={() => setTimeout(() => setIsOpen(false), 150)}
-          placeholder={values.length === 0 ? "Type to search..." : ""}
-          className="h-6 flex-1 min-w-20 bg-transparent text-sm outline-none"
-        />
-      </div>
-      {isOpen && filtered.length > 0 && (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-popover p-1 shadow-md">
-          {filtered.map((opt) => (
-            <button
-              key={opt}
-              className="w-full rounded px-2 py-1 text-left text-sm hover:bg-accent"
-              onMouseDown={() => {
-                onChange([...values, opt]);
-                setSearch("");
-              }}
-            >
-              {formatOption(opt)}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 interface YearMultiSelectProps {
   uploadId: string;
   values: string[];
@@ -791,8 +639,6 @@ interface YearMultiSelectProps {
 
 function YearMultiSelect({ uploadId, values, onChange }: YearMultiSelectProps) {
   const [years, setYears] = useState<string[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     apiFetch(`/api/fields/${uploadId}/year`)
@@ -806,55 +652,23 @@ function YearMultiSelect({ uploadId, values, onChange }: YearMultiSelectProps) {
       .catch(console.error);
   }, [uploadId]);
 
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  const options = useMemo(
+    () => years.map((y) => ({ value: y, label: y })),
+    [years]
+  );
 
-  const available = years.filter((y) => !values.includes(y));
+  const handleChange = (newValues: string[]) => {
+    onChange(newValues.sort((a, b) => Number(b) - Number(a)));
+  };
 
   return (
-    <div className="relative min-w-32 flex-1" ref={containerRef}>
-      <div className="flex min-h-8 flex-wrap gap-1 rounded-md border bg-transparent p-1">
-        {values.map((v) => (
-          <Badge key={v} variant="secondary" className="gap-1 h-6">
-            {v}
-            <button
-              onClick={() => onChange(values.filter((x) => x !== v))}
-              className="ml-1 hover:text-destructive"
-            >
-              ✕
-            </button>
-          </Badge>
-        ))}
-        <button
-          type="button"
-          onClick={() => setIsOpen(!isOpen)}
-          className="h-6 px-2 text-sm text-muted-foreground hover:text-foreground"
-        >
-          {values.length === 0 ? "Select years..." : "+"}
-        </button>
-      </div>
-      {isOpen && available.length > 0 && (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-popover p-1 shadow-md">
-          {available.map((year) => (
-            <button
-              key={year}
-              className="w-full rounded px-2 py-1 text-left text-sm hover:bg-accent"
-              onMouseDown={() => {
-                onChange([...values, year].sort((a, b) => Number(b) - Number(a)));
-              }}
-            >
-              {year}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <MultiCombobox
+      options={options}
+      values={values}
+      onChange={handleChange}
+      placeholder="Select years..."
+      searchPlaceholder="Search years..."
+      className="min-w-32 flex-1"
+    />
   );
 }
