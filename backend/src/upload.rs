@@ -2,8 +2,8 @@ use axum::extract::{Multipart, Path, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
+use country_boundaries::{CountryBoundaries, LatLon, BOUNDARIES_ODBL_360X180};
 use once_cell::sync::Lazy;
-use reverse_geocoder::ReverseGeocoder;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use sqlx::{QueryBuilder, SqlitePool};
@@ -11,10 +11,12 @@ use subtle::ConstantTimeEq;
 use tracing::{error, info};
 use uuid::Uuid;
 
-// Initialised once to avoid reloading the ~2MB dataset on every request
-static GEOCODER: Lazy<ReverseGeocoder> = Lazy::new(|| {
-    info!("Initialising reverse geocoder");
-    ReverseGeocoder::new()
+// Initialised once to avoid reloading the dataset on every request.
+// Uses point-in-polygon testing with OpenStreetMap boundaries data.
+static BOUNDARIES: Lazy<CountryBoundaries> = Lazy::new(|| {
+    info!("Initialising country boundaries");
+    CountryBoundaries::from_reader(BOUNDARIES_ODBL_360X180)
+        .expect("Failed to load country boundaries data")
 });
 
 const BATCH_SIZE: usize = 1000;
@@ -129,6 +131,22 @@ fn extract_year(date_str: &str) -> i32 {
     date_str.get(0..4).and_then(|y| y.parse().ok()).unwrap_or(0)
 }
 
+fn get_country_code(lat: f64, lon: f64) -> String {
+    let latlon = match LatLon::new(lat, lon) {
+        Ok(ll) => ll,
+        Err(_) => return "XX".to_string(),
+    };
+
+    let ids = BOUNDARIES.ids(latlon);
+    // ids returns e.g. ["US-TX", "US"] or ["SG"] - we want the shortest (country) code
+    ids.iter()
+        .filter(|id| !id.contains('-'))
+        .next()
+        .or_else(|| ids.first())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "XX".to_string())
+}
+
 fn parse_row(record: &csv::ByteRecord, col_map: &ColumnMap) -> Option<SightingRow> {
     let sighting_uuid = get_field(record, col_map.sighting_id)?;
     let common_name = get_field(record, col_map.common_name)?;
@@ -137,8 +155,7 @@ fn parse_row(record: &csv::ByteRecord, col_map: &ColumnMap) -> Option<SightingRo
     let latitude: f64 = get_field(record, col_map.latitude)?.parse().ok()?;
     let longitude: f64 = get_field(record, col_map.longitude)?.parse().ok()?;
 
-    let search_result = GEOCODER.search((latitude, longitude));
-    let country_code = search_result.record.cc.to_string();
+    let country_code = get_country_code(latitude, longitude);
 
     let count: i32 = get_field(record, col_map.count)
         .and_then(|s| s.parse().ok())
@@ -232,7 +249,7 @@ pub async fn upload_csv(
     State(pool): State<SqlitePool>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
-    let _ = &*GEOCODER;
+    let _ = &*BOUNDARIES;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let filename = field
@@ -460,7 +477,7 @@ pub async fn update_csv(
         }
     }
 
-    let _ = &*GEOCODER;
+    let _ = &*BOUNDARIES;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let filename = field
