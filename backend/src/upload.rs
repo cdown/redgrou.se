@@ -1,10 +1,11 @@
-use axum::extract::{Multipart, State};
-use axum::http::StatusCode;
+use axum::extract::{Multipart, Path, State};
+use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use once_cell::sync::Lazy;
 use reverse_geocoder::ReverseGeocoder;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use sqlx::{QueryBuilder, SqlitePool};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -32,6 +33,17 @@ pub struct UploadResponse {
     pub upload_id: String,
     pub filename: String,
     pub row_count: usize,
+    pub edit_token: String,
+}
+
+pub fn hash_token(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+pub fn verify_token(token: &str, hash: &str) -> bool {
+    hash_token(token) == hash
 }
 
 #[derive(Serialize)]
@@ -238,12 +250,16 @@ pub async fn upload_csv(
         };
 
         let upload_id = Uuid::new_v4().to_string();
+        let edit_token = Uuid::new_v4().to_string();
+        let edit_token_hash = hash_token(&edit_token);
 
-        if let Err(e) = sqlx::query("INSERT INTO uploads (id, filename) VALUES (?, ?)")
-            .bind(&upload_id)
-            .bind(&filename)
-            .execute(&pool)
-            .await
+        if let Err(e) =
+            sqlx::query("INSERT INTO uploads (id, filename, edit_token_hash) VALUES (?, ?, ?)")
+                .bind(&upload_id)
+                .bind(&filename)
+                .bind(&edit_token_hash)
+                .execute(&pool)
+                .await
         {
             error!("Failed to create upload record: {}", e);
             return (
@@ -345,6 +361,7 @@ pub async fn upload_csv(
                 upload_id,
                 filename,
                 row_count: total_rows,
+                edit_token,
             }),
         )
             .into_response();
@@ -357,4 +374,295 @@ pub async fn upload_csv(
         }),
     )
         .into_response()
+}
+
+fn extract_edit_token(headers: &axum::http::HeaderMap) -> Option<String> {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+}
+
+async fn verify_upload_access(
+    pool: &SqlitePool,
+    upload_id: &str,
+    token: &str,
+) -> Result<bool, sqlx::Error> {
+    let hash =
+        sqlx::query_scalar::<_, Option<String>>("SELECT edit_token_hash FROM uploads WHERE id = ?")
+            .bind(upload_id)
+            .fetch_optional(pool)
+            .await?;
+
+    match hash {
+        Some(Some(stored_hash)) => Ok(verify_token(token, &stored_hash)),
+        Some(None) => Ok(false), // Upload exists but has no token (legacy)
+        None => Ok(false),       // Upload doesn't exist
+    }
+}
+
+#[derive(Serialize)]
+pub struct UpdateResponse {
+    pub upload_id: String,
+    pub filename: String,
+    pub row_count: usize,
+}
+
+pub async fn update_csv(
+    State(pool): State<SqlitePool>,
+    Path(upload_id): Path<String>,
+    headers: axum::http::HeaderMap,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let token = match extract_edit_token(&headers) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(UploadError {
+                    error: "Missing edit token".to_string(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    match verify_upload_access(&pool, &upload_id, &token).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(UploadError {
+                    error: "Invalid edit token".to_string(),
+                }),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("Database error verifying token: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UploadError {
+                    error: "Database error".to_string(),
+                }),
+            )
+                .into_response();
+        }
+    }
+
+    let _ = &*GEOCODER;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let filename = field
+            .file_name()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "unknown.csv".to_string());
+
+        if !filename.ends_with(".csv") {
+            continue;
+        }
+
+        let data = match field.bytes().await {
+            Ok(d) => d,
+            Err(e) => {
+                error!("Failed to read upload: {}", e);
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(UploadError {
+                        error: "Failed to read upload data".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        };
+
+        // Delete existing sightings
+        if let Err(e) = sqlx::query("DELETE FROM sightings WHERE upload_id = ?")
+            .bind(&upload_id)
+            .execute(&pool)
+            .await
+        {
+            error!("Failed to delete existing sightings: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UploadError {
+                    error: "Database error".to_string(),
+                }),
+            )
+                .into_response();
+        }
+
+        let mut reader = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .from_reader(data.as_ref());
+
+        let headers = match reader.headers() {
+            Ok(h) => h.clone(),
+            Err(e) => {
+                error!("Failed to read CSV headers: {}", e);
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(UploadError {
+                        error: "Invalid CSV headers".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        };
+
+        let col_map = ColumnMap::from_headers(&headers);
+        if !col_map.is_valid() {
+            error!("CSV missing required columns");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(UploadError {
+                    error: "CSV missing required columns (sightingId, date, longitude, latitude, commonName)".to_string(),
+                }),
+            )
+                .into_response();
+        }
+
+        let mut batch: Vec<SightingRow> = Vec::with_capacity(BATCH_SIZE);
+        let mut total_rows = 0usize;
+        let mut record = csv::ByteRecord::new();
+
+        while reader.read_byte_record(&mut record).unwrap_or(false) {
+            if let Some(row) = parse_row(&record, &col_map) {
+                batch.push(row);
+
+                if batch.len() >= BATCH_SIZE {
+                    if let Err(e) = insert_batch(&pool, &upload_id, &batch).await {
+                        error!("Batch insert failed: {}", e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(UploadError {
+                                error: "Failed to insert sightings".to_string(),
+                            }),
+                        )
+                            .into_response();
+                    }
+                    total_rows += batch.len();
+                    batch.clear();
+                }
+            }
+        }
+
+        if !batch.is_empty() {
+            if let Err(e) = insert_batch(&pool, &upload_id, &batch).await {
+                error!("Final batch insert failed: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(UploadError {
+                        error: "Failed to insert sightings".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+            total_rows += batch.len();
+        }
+
+        let _ = sqlx::query("UPDATE uploads SET row_count = ?, filename = ? WHERE id = ?")
+            .bind(total_rows as i64)
+            .bind(&filename)
+            .bind(&upload_id)
+            .execute(&pool)
+            .await;
+
+        if let Err(e) = compute_lifer_and_year_tick(&pool, &upload_id).await {
+            error!("Failed to compute lifer/year_tick: {}", e);
+        }
+
+        info!(
+            "Update complete: {} rows from {} (upload_id: {})",
+            total_rows, filename, upload_id
+        );
+
+        return (
+            StatusCode::OK,
+            Json(UpdateResponse {
+                upload_id,
+                filename,
+                row_count: total_rows,
+            }),
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::BAD_REQUEST,
+        Json(UploadError {
+            error: "No CSV file found in upload".to_string(),
+        }),
+    )
+        .into_response()
+}
+
+#[derive(Serialize)]
+pub struct DeleteResponse {
+    pub deleted: bool,
+}
+
+pub async fn delete_upload(
+    State(pool): State<SqlitePool>,
+    Path(upload_id): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    let token = match extract_edit_token(&headers) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(UploadError {
+                    error: "Missing edit token".to_string(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    match verify_upload_access(&pool, &upload_id, &token).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(UploadError {
+                    error: "Invalid edit token".to_string(),
+                }),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("Database error verifying token: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UploadError {
+                    error: "Database error".to_string(),
+                }),
+            )
+                .into_response();
+        }
+    }
+
+    // CASCADE will delete associated sightings
+    match sqlx::query("DELETE FROM uploads WHERE id = ?")
+        .bind(&upload_id)
+        .execute(&pool)
+        .await
+    {
+        Ok(_) => {
+            info!("Deleted upload: {}", upload_id);
+            (StatusCode::OK, Json(DeleteResponse { deleted: true })).into_response()
+        }
+        Err(e) => {
+            error!("Failed to delete upload: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UploadError {
+                    error: "Database error".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
 }

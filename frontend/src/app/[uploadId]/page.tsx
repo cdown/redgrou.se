@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
 import { QueryBuilder } from "@/components/query-builder";
@@ -15,9 +15,23 @@ interface UploadMetadata {
   row_count: number;
 }
 
+function getEditToken(uploadId: string): string | null {
+  if (typeof window === "undefined") return null;
+
+  // Check URL parameter first (for edit links)
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlToken = urlParams.get("token");
+  if (urlToken) return urlToken;
+
+  // Check localStorage
+  const editTokens = JSON.parse(localStorage.getItem("editTokens") || "{}");
+  return editTokens[uploadId] || null;
+}
+
 export default function UploadPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const uploadId = params.uploadId as string;
 
   const [upload, setUpload] = useState<UploadMetadata | null>(null);
@@ -28,6 +42,31 @@ export default function UploadPage() {
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("map");
   const [filterOpen, setFilterOpen] = useState(false);
+
+  const [editToken, setEditToken] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [copiedEditLink, setCopiedEditLink] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!uploadId) return;
+    setEditToken(getEditToken(uploadId));
+  }, [uploadId]);
+
+  // Store token from URL in localStorage for convenience
+  useEffect(() => {
+    const urlToken = searchParams.get("token");
+    if (urlToken && uploadId) {
+      const editTokens = JSON.parse(localStorage.getItem("editTokens") || "{}");
+      editTokens[uploadId] = urlToken;
+      localStorage.setItem("editTokens", JSON.stringify(editTokens));
+    }
+  }, [searchParams, uploadId]);
 
   useEffect(() => {
     if (!uploadId) return;
@@ -47,7 +86,9 @@ export default function UploadPage() {
 
     let cancelled = false;
     const filterParam = encodeURIComponent(filterToJson(filter));
-    fetch(`http://localhost:3001/api/uploads/${uploadId}/count?filter=${filterParam}`)
+    fetch(
+      `http://localhost:3001/api/uploads/${uploadId}/count?filter=${filterParam}`
+    )
       .then((res) => res.json())
       .then((data) => {
         if (!cancelled) setFilteredCount(data.count);
@@ -63,11 +104,110 @@ export default function UploadPage() {
   }, [uploadId, filter]);
 
   const handleCopyLink = useCallback(async () => {
-    const url = window.location.href;
+    const url = window.location.origin + "/" + uploadId;
     await navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }, []);
+  }, [uploadId]);
+
+  const handleCopyEditLink = useCallback(async () => {
+    if (!editToken) return;
+    const url = `${window.location.origin}/${uploadId}?token=${editToken}`;
+    await navigator.clipboard.writeText(url);
+    setCopiedEditLink(true);
+    setTimeout(() => setCopiedEditLink(false), 2000);
+  }, [uploadId, editToken]);
+
+  const handleDelete = useCallback(async () => {
+    if (!editToken) return;
+
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/uploads/${uploadId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${editToken}`,
+        },
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Delete failed");
+      }
+
+      // Remove from localStorage
+      const editTokens = JSON.parse(localStorage.getItem("editTokens") || "{}");
+      delete editTokens[uploadId];
+      localStorage.setItem("editTokens", JSON.stringify(editTokens));
+
+      router.push("/");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+      setShowDeleteConfirm(false);
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [editToken, uploadId, router]);
+
+  const handleUpdate = useCallback(
+    async (file: File) => {
+      if (!editToken) return;
+
+      setIsUpdating(true);
+      setUpdateError(null);
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const res = await fetch(
+          `http://localhost:3001/api/uploads/${uploadId}`,
+          {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${editToken}`,
+            },
+            body: formData,
+          }
+        );
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Update failed");
+        }
+
+        const result = await res.json();
+        setUpload({
+          upload_id: uploadId,
+          filename: result.filename,
+          row_count: result.row_count,
+        });
+        setShowUpdateModal(false);
+        // Reset filter since data changed
+        setFilter(null);
+        setFilteredCount(null);
+      } catch (err) {
+        setUpdateError(err instanceof Error ? err.message : "Update failed");
+      } finally {
+        setIsUpdating(false);
+      }
+    },
+    [editToken, uploadId]
+  );
+
+  const handleFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        if (!file.name.endsWith(".csv")) {
+          setUpdateError("Please select a CSV file");
+          return;
+        }
+        handleUpdate(file);
+      }
+    },
+    [handleUpdate]
+  );
 
   if (loading) {
     return (
@@ -96,7 +236,9 @@ export default function UploadPage() {
     );
   }
 
-  const showingFiltered = filter && filteredCount !== null && filteredCount !== upload.row_count;
+  const showingFiltered =
+    filter && filteredCount !== null && filteredCount !== upload.row_count;
+  const canEdit = !!editToken;
 
   return (
     <main className="fixed inset-0 overflow-hidden">
@@ -294,6 +436,99 @@ export default function UploadPage() {
               </>
             )}
           </button>
+
+          {canEdit && (
+            <>
+              <button
+                onClick={handleCopyEditLink}
+                className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
+              >
+                {copiedEditLink ? (
+                  <>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="text-emerald-500"
+                    >
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                    <span className="text-emerald-600">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                    Edit link
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => setShowUpdateModal(true)}
+                className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                  <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                  <path d="M16 16h5v5" />
+                </svg>
+                Replace data
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-rose-600 hover:bg-rose-50 transition-colors"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 6h18" />
+                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                  <line x1="10" x2="10" y1="11" y2="17" />
+                  <line x1="14" x2="14" y1="11" y2="17" />
+                </svg>
+                Delete
+              </button>
+            </>
+          )}
+
           <button
             onClick={() => router.push("/")}
             className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
@@ -341,6 +576,118 @@ export default function UploadPage() {
           redgrou.se
         </div>
       </div>
+
+      {/* Delete confirmation modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-semibold text-stone-900">
+              Delete this upload?
+            </h3>
+            <p className="mb-6 text-sm text-stone-600">
+              This will permanently delete all {upload.row_count.toLocaleString()}{" "}
+              sightings from <strong>{upload.filename}</strong>. This action
+              cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-stone-600 hover:bg-stone-100 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 transition-colors disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Update modal */}
+      {showUpdateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-semibold text-stone-900">
+              Replace data
+            </h3>
+            <p className="mb-6 text-sm text-stone-600">
+              Upload a new CSV file to replace all existing sightings. The URL
+              will remain the same.
+            </p>
+
+            {updateError && (
+              <p className="mb-4 text-sm font-medium text-rose-600">
+                {updateError}
+              </p>
+            )}
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowUpdateModal(false);
+                  setUpdateError(null);
+                }}
+                disabled={isUpdating}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-stone-600 hover:bg-stone-100 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUpdating}
+                className="flex items-center gap-2 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 transition-colors disabled:opacity-50"
+              >
+                {isUpdating ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" x2="12" y1="3" y2="15" />
+                    </svg>
+                    Choose file
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

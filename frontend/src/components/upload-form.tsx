@@ -6,6 +6,7 @@ interface UploadResult {
   upload_id: string;
   filename: string;
   row_count: number;
+  edit_token: string;
 }
 
 interface UploadFormProps {
@@ -42,6 +43,14 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
         }
 
         const result: UploadResult = await res.json();
+
+        // Store edit token in localStorage for future edits
+        const editTokens = JSON.parse(
+          localStorage.getItem("editTokens") || "{}"
+        );
+        editTokens[result.upload_id] = result.edit_token;
+        localStorage.setItem("editTokens", JSON.stringify(editTokens));
+
         onUploadComplete(result);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Upload failed");

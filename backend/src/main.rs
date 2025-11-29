@@ -41,7 +41,12 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/upload", post(upload::upload_csv))
-        .route("/api/uploads/{upload_id}", get(get_upload))
+        .route(
+            "/api/uploads/{upload_id}",
+            get(get_upload)
+                .put(upload::update_csv)
+                .delete(upload::delete_upload),
+        )
         .route("/api/uploads/{upload_id}/count", get(get_filtered_count))
         .route(
             "/api/uploads/{upload_id}/sightings",
