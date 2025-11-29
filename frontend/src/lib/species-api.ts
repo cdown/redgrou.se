@@ -4,7 +4,7 @@ export interface SpeciesInfo {
   wikipediaSummary: string | null;
   photoUrl: string | null;
   photoAttribution: string | null;
-  wikipediaUrl: string | null;
+  inaturalistUrl: string;
   observationsCount: number | null;
 }
 
@@ -17,7 +17,6 @@ interface INatTaxon {
   name: string;
   preferred_common_name?: string;
   wikipedia_summary?: string;
-  wikipedia_url?: string;
   observations_count?: number;
   default_photo?: {
     medium_url?: string;
@@ -58,7 +57,7 @@ export async function fetchSpeciesInfo(
       wikipediaSummary: fullTaxon.wikipedia_summary || null,
       photoUrl: fullTaxon.default_photo?.medium_url || null,
       photoAttribution: fullTaxon.default_photo?.attribution || null,
-      wikipediaUrl: fullTaxon.wikipedia_url || null,
+      inaturalistUrl: `https://www.inaturalist.org/taxa/${fullTaxon.id}`,
       observationsCount: fullTaxon.observations_count || null,
     };
 

@@ -59,7 +59,7 @@ function updatePopupWithSpeciesInfo(
     wikipediaSummary: string | null;
     photoUrl: string | null;
     photoAttribution: string | null;
-    wikipediaUrl: string | null;
+    inaturalistUrl: string;
     observationsCount: number | null;
   } | null,
 ): void {
@@ -109,11 +109,7 @@ function updatePopupWithSpeciesInfo(
             </svg>
             <span style="font-size: 12px; color: #6b7280;">Count: ${count}</span>
           </div>
-          ${
-            info.wikipediaUrl
-              ? `<a href="${info.wikipediaUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 12px; color: #2563eb; text-decoration: none; margin-left: auto;">Wikipedia →</a>`
-              : ""
-          }
+          <a href="${info.inaturalistUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 12px; color: #2563eb; text-decoration: none; margin-left: auto;">iNaturalist →</a>
         </div>
         ${
           info.photoAttribution
