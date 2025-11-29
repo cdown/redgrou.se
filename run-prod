@@ -20,10 +20,12 @@ echo "Building frontend..."
 # Cleanup on exit
 cleanup() {
     echo "Shutting down..."
+    # Kill entire process trees (npm spawns next as a child process)
+    pkill -TERM -P $FRONTEND_PID 2>/dev/null || true
     kill $BACKEND_PID $FRONTEND_PID 2>/dev/null || true
     wait
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 # Start backend
 echo "Starting backend on port $BACKEND_PORT..."
@@ -32,9 +34,9 @@ RUST_LOG=info \
     backend/target/release/redgrouse &
 BACKEND_PID=$!
 
-# Start frontend
+# Start frontend (--prefix avoids subshell, keeping PID tracking accurate)
 echo "Starting frontend on port $FRONTEND_PORT..."
-(cd frontend && PORT=$FRONTEND_PORT npm run start) &
+PORT=$FRONTEND_PORT npm run start --prefix frontend &
 FRONTEND_PID=$!
 
 echo "redgrou.se running"
