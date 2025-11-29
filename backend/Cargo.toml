@@ -29,5 +29,5 @@ country-boundaries = "1.2.0"
 ts-rs = "10"
 
 [profile.release]
-lto = true
+lto = "thin"
 codegen-units = 1
