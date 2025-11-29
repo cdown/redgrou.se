@@ -89,7 +89,7 @@ export function getOperatorLabel(operator: Operator, fieldType: string): string 
 }
 
 export function isFreeformOperator(operator: Operator): boolean {
-  return operator === "starts_with" || operator === "ends_with";
+  return operator === "contains" || operator === "starts_with" || operator === "ends_with";
 }
 
 export function createCondition(): Condition {
