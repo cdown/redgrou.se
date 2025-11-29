@@ -3,6 +3,11 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import {
+  getEditToken as getStoredEditToken,
+  setEditToken as setStoredEditToken,
+  removeEditToken,
+} from "@/lib/storage";
 import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
 import { QueryBuilder } from "@/components/query-builder";
@@ -24,9 +29,7 @@ function getEditToken(uploadId: string): string | null {
   const urlToken = urlParams.get("token");
   if (urlToken) return urlToken;
 
-  // Check localStorage
-  const editTokens = JSON.parse(localStorage.getItem("editTokens") || "{}");
-  return editTokens[uploadId] || null;
+  return getStoredEditToken(uploadId);
 }
 
 export default function UploadPage() {
@@ -64,9 +67,7 @@ export default function UploadPage() {
   useEffect(() => {
     const urlToken = searchParams.get("token");
     if (urlToken && uploadId) {
-      const editTokens = JSON.parse(localStorage.getItem("editTokens") || "{}");
-      editTokens[uploadId] = urlToken;
-      localStorage.setItem("editTokens", JSON.stringify(editTokens));
+      setStoredEditToken(uploadId, urlToken);
 
       // Remove token from URL without triggering navigation
       const cleanUrl = `${window.location.origin}/${uploadId}`;
@@ -139,11 +140,7 @@ export default function UploadPage() {
         throw new Error(data.error || "Delete failed");
       }
 
-      // Remove from localStorage
-      const editTokens = JSON.parse(localStorage.getItem("editTokens") || "{}");
-      delete editTokens[uploadId];
-      localStorage.setItem("editTokens", JSON.stringify(editTokens));
-
+      removeEditToken(uploadId);
       router.push("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delete failed");

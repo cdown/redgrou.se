@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
+import { setEditToken } from "@/lib/storage";
 
 interface UploadResult {
   upload_id: string;
@@ -44,14 +45,7 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
         }
 
         const result: UploadResult = await res.json();
-
-        // Store edit token in localStorage for future edits
-        const editTokens = JSON.parse(
-          localStorage.getItem("editTokens") || "{}"
-        );
-        editTokens[result.upload_id] = result.edit_token;
-        localStorage.setItem("editTokens", JSON.stringify(editTokens));
-
+        setEditToken(result.upload_id, result.edit_token);
         onUploadComplete(result);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Upload failed");
