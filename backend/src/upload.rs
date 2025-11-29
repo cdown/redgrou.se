@@ -7,6 +7,7 @@ use reverse_geocoder::ReverseGeocoder;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use sqlx::{QueryBuilder, SqlitePool};
+use subtle::ConstantTimeEq;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -42,8 +43,13 @@ pub fn hash_token(token: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
-pub fn verify_token(token: &str, hash: &str) -> bool {
-    hash_token(token) == hash
+pub fn verify_token(token: &str, stored_hash: &str) -> bool {
+    let computed_hash = hash_token(token);
+    // Constant-time comparison to prevent timing attacks
+    computed_hash
+        .as_bytes()
+        .ct_eq(stored_hash.as_bytes())
+        .into()
 }
 
 #[derive(Serialize)]

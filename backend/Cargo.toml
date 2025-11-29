@@ -25,6 +25,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 sha2 = "0.10"
 hex = "0.4"
+subtle = "2.5"
 
 [profile.release]
 lto = true
