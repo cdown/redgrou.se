@@ -6,7 +6,7 @@ use country_boundaries::{CountryBoundaries, LatLon, BOUNDARIES_ODBL_360X180};
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use sqlx::{QueryBuilder, SqlitePool};
+use sqlx::{Acquire, QueryBuilder, Sqlite, SqlitePool};
 use subtle::ConstantTimeEq;
 use tracing::{error, info};
 use ts_rs::TS;
@@ -181,11 +181,14 @@ fn parse_row(record: &csv::ByteRecord, col_map: &ColumnMap) -> Option<SightingRo
     })
 }
 
-async fn insert_batch(
-    pool: &SqlitePool,
+async fn insert_batch<'e, E>(
+    executor: E,
     upload_id: &str,
     rows: &[SightingRow],
-) -> Result<(), sqlx::Error> {
+) -> Result<(), sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
     if rows.is_empty() {
         return Ok(());
     }
@@ -209,7 +212,7 @@ async fn insert_batch(
             .push_bind(&row.trip_name);
     });
 
-    query_builder.build().execute(pool).await?;
+    query_builder.build().execute(executor).await?;
     Ok(())
 }
 
@@ -334,12 +337,28 @@ pub async fn upload_csv(
         let mut total_rows = 0usize;
         let mut record = csv::ByteRecord::new();
 
+        let mut tx = match pool.begin().await {
+            Ok(tx) => tx,
+            Err(e) => {
+                error!("Failed to begin transaction: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(UploadError {
+                        error: "Database error".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        };
+
         while reader.read_byte_record(&mut record).unwrap_or(false) {
             if let Some(row) = parse_row(&record, &col_map) {
                 batch.push(row);
 
                 if batch.len() >= BATCH_SIZE {
-                    if let Err(e) = insert_batch(&pool, &upload_id, &batch).await {
+                    if let Err(e) =
+                        insert_batch(tx.acquire().await.unwrap(), &upload_id, &batch).await
+                    {
                         error!("Batch insert failed: {}", e);
                         return (
                             StatusCode::INTERNAL_SERVER_ERROR,
@@ -356,7 +375,7 @@ pub async fn upload_csv(
         }
 
         if !batch.is_empty() {
-            if let Err(e) = insert_batch(&pool, &upload_id, &batch).await {
+            if let Err(e) = insert_batch(tx.acquire().await.unwrap(), &upload_id, &batch).await {
                 error!("Final batch insert failed: {}", e);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -367,6 +386,17 @@ pub async fn upload_csv(
                     .into_response();
             }
             total_rows += batch.len();
+        }
+
+        if let Err(e) = tx.commit().await {
+            error!("Failed to commit transaction: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UploadError {
+                    error: "Database error".to_string(),
+                }),
+            )
+                .into_response();
         }
 
         let _ = sqlx::query("UPDATE uploads SET row_count = ? WHERE id = ?")
@@ -557,12 +587,28 @@ pub async fn update_csv(
         let mut total_rows = 0usize;
         let mut record = csv::ByteRecord::new();
 
+        let mut tx = match pool.begin().await {
+            Ok(tx) => tx,
+            Err(e) => {
+                error!("Failed to begin transaction: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(UploadError {
+                        error: "Database error".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        };
+
         while reader.read_byte_record(&mut record).unwrap_or(false) {
             if let Some(row) = parse_row(&record, &col_map) {
                 batch.push(row);
 
                 if batch.len() >= BATCH_SIZE {
-                    if let Err(e) = insert_batch(&pool, &upload_id, &batch).await {
+                    if let Err(e) =
+                        insert_batch(tx.acquire().await.unwrap(), &upload_id, &batch).await
+                    {
                         error!("Batch insert failed: {}", e);
                         return (
                             StatusCode::INTERNAL_SERVER_ERROR,
@@ -579,7 +625,7 @@ pub async fn update_csv(
         }
 
         if !batch.is_empty() {
-            if let Err(e) = insert_batch(&pool, &upload_id, &batch).await {
+            if let Err(e) = insert_batch(tx.acquire().await.unwrap(), &upload_id, &batch).await {
                 error!("Final batch insert failed: {}", e);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -590,6 +636,17 @@ pub async fn update_csv(
                     .into_response();
             }
             total_rows += batch.len();
+        }
+
+        if let Err(e) = tx.commit().await {
+            error!("Failed to commit transaction: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(UploadError {
+                    error: "Database error".to_string(),
+                }),
+            )
+                .into_response();
         }
 
         let _ = sqlx::query("UPDATE uploads SET row_count = ?, filename = ? WHERE id = ?")
