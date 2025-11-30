@@ -1,0 +1,181 @@
+#!/bin/bash
+set -euo pipefail
+
+# Unified script to run redgrouse in prod or dev mode
+# Usage: rgrse prod | rgrse dev
+
+MODE="${1:-}"
+if [[ "$MODE" != "prod" && "$MODE" != "dev" ]]; then
+    echo "Usage: rgrse {prod|dev}" >&2
+    exit 1
+fi
+
+cd "$(dirname "$0")"
+
+# Configuration
+DATA_DIR="${REDGROUSE_DATA_DIR:-$PWD/data}"
+BACKEND_PORT="${REDGROUSE_BACKEND_PORT:-3001}"
+FRONTEND_PORT="${REDGROUSE_FRONTEND_PORT:-3000}"
+
+mkdir -p "$DATA_DIR"
+
+# Process tracking
+BACKEND_PID=""
+FRONTEND_PID=""
+FRONTEND_PGID=""
+BUILD_PID=""
+CLEANUP_DONE=false
+
+# Recursively kill a process and all its descendants
+kill_tree() {
+    local pid="$1"
+    local signal="${2:-TERM}"
+
+    # Kill all children recursively
+    for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+        kill_tree "$child" "$signal"
+    done
+
+    # Kill the process itself
+    kill -"$signal" "$pid" 2>/dev/null || true
+}
+
+# Cleanup function - handles Next.js forking properly
+cleanup() {
+    # Only run cleanup once
+    if [[ "$CLEANUP_DONE" == "true" ]]; then
+        return
+    fi
+    CLEANUP_DONE=true
+
+    echo ""
+    echo "[rgrse] Shutting down..." >&2
+
+    # Kill frontend and all its children (Next.js forks processes)
+    if [[ -n "$FRONTEND_PID" ]]; then
+        # First, kill all child processes of the npm/node process
+        pkill -TERM -P "$FRONTEND_PID" 2>/dev/null || true
+        # Then kill the main process
+        kill -TERM "$FRONTEND_PID" 2>/dev/null || true
+        # Give processes time to clean up
+        sleep 2
+        # Force kill if still running
+        pkill -KILL -P "$FRONTEND_PID" 2>/dev/null || true
+        kill -KILL "$FRONTEND_PID" 2>/dev/null || true
+    fi
+
+    # Also try killing by process group if we have it
+    if [[ -n "$FRONTEND_PGID" && "$FRONTEND_PGID" != "" ]]; then
+        kill -TERM -"$FRONTEND_PGID" 2>/dev/null || true
+        sleep 1
+        kill -KILL -"$FRONTEND_PGID" 2>/dev/null || true
+    fi
+
+    # Kill build process if it's running (prod mode)
+    if [[ -n "$BUILD_PID" ]]; then
+        kill_tree "$BUILD_PID" TERM
+        sleep 2
+        kill_tree "$BUILD_PID" KILL
+    fi
+
+    # Kill backend and any cargo processes
+    if [[ -n "$BACKEND_PID" ]]; then
+        # Kill any cargo processes that might be running
+        pkill -TERM -P "$BACKEND_PID" 2>/dev/null || true
+        kill -TERM "$BACKEND_PID" 2>/dev/null || true
+        sleep 1
+        pkill -KILL -P "$BACKEND_PID" 2>/dev/null || true
+        kill -KILL "$BACKEND_PID" 2>/dev/null || true
+    fi
+
+    # Wait for all processes to finish
+    wait 2>/dev/null || true
+
+    echo "[rgrse] Shutdown complete" >&2
+    exit 0
+}
+
+# Set up signal handlers
+trap cleanup EXIT INT TERM
+
+# Log prefixing function - prefixes lines with [backend] or [frontend]
+# Uses stdbuf for line buffering if available, falls back to unbuffered
+prefix_logs() {
+    local prefix="$1"
+    if command -v stdbuf >/dev/null 2>&1; then
+        stdbuf -oL -eL sed "s/^/[${prefix}] /"
+    else
+        sed "s/^/[${prefix}] /"
+    fi
+}
+
+if [[ "$MODE" == "prod" ]]; then
+    echo "[rgrse] Building for production..." >&2
+
+    # Build backend (release mode, optimized)
+    # Run in background and track PID so we can kill it if interrupted
+    echo "[rgrse] Building backend..." >&2
+    (cd backend && touch build.rs && RUSTFLAGS="-C target-cpu=native" cargo build --release) &
+    BUILD_PID=$!
+    wait $BUILD_PID
+    BUILD_PID=""
+
+    # Build frontend
+    echo "[rgrse] Building frontend..." >&2
+    (cd frontend && npm ci && NEXT_PUBLIC_API_URL="" npm run build) &
+    BUILD_PID=$!
+    wait $BUILD_PID
+    BUILD_PID=""
+
+    echo "[rgrse] Starting services..." >&2
+
+    # Start backend (release binary)
+    DATABASE_URL="sqlite:$DATA_DIR/redgrouse.db" \
+    RUST_LOG=info \
+    PORT=$BACKEND_PORT \
+        backend/target/release/redgrouse 2>&1 | prefix_logs "backend" &
+    BACKEND_PID=$!
+
+    # Start frontend (production server)
+    # Use setsid or run in a subshell to create a new process group for proper cleanup
+    (cd frontend && PORT=$FRONTEND_PORT npm run start) 2>&1 | prefix_logs "frontend" &
+    FRONTEND_PID=$!
+    # Wait a moment for process to start, then get process group
+    sleep 0.5
+    FRONTEND_PGID=$(ps -o pgid= -p "$FRONTEND_PID" 2>/dev/null | tr -d ' ' || echo "")
+
+elif [[ "$MODE" == "dev" ]]; then
+    echo "[rgrse] Starting in development mode..." >&2
+
+    # Ensure frontend dependencies are installed
+    if [[ ! -d "frontend/node_modules" ]]; then
+        echo "[rgrse] Installing frontend dependencies..." >&2
+        (cd frontend && npm install)
+    fi
+
+    # Start backend (dev mode with cargo run)
+    (cd backend && DATABASE_URL="sqlite:$DATA_DIR/redgrouse.db" \
+        RUST_LOG=debug \
+        PORT=$BACKEND_PORT \
+        cargo run --bin redgrouse) 2>&1 | prefix_logs "backend" &
+    BACKEND_PID=$!
+
+    # Start frontend (dev mode with hot reload)
+    # Use setsid or run in a subshell to create a new process group for proper cleanup
+    (cd frontend && PORT=$FRONTEND_PORT npm run dev) 2>&1 | prefix_logs "frontend" &
+    FRONTEND_PID=$!
+    # Wait a moment for process to start, then get process group
+    sleep 0.5
+    FRONTEND_PGID=$(ps -o pgid= -p "$FRONTEND_PID" 2>/dev/null | tr -d ' ' || echo "")
+fi
+
+echo "[rgrse] redgrou.se running" >&2
+echo "[rgrse]   Frontend: http://localhost:$FRONTEND_PORT" >&2
+echo "[rgrse]   Backend:  http://localhost:$BACKEND_PORT" >&2
+echo "[rgrse]   Data:     $DATA_DIR" >&2
+echo "[rgrse]   Mode:     $MODE" >&2
+echo "[rgrse] Press Ctrl+C to stop" >&2
+echo "" >&2
+
+# Wait for all background processes
+wait
