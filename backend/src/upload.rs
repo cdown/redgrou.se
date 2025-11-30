@@ -20,6 +20,7 @@ use tracing::{error, info};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
 
 // Initialised once to avoid reloading the dataset on every request.
@@ -42,6 +43,8 @@ const COL_LATITUDE: &str = "latitude";
 const COL_SCIENTIFIC_NAME: &str = "scientificName";
 const COL_COMMON_NAME: &str = "commonName";
 const COL_COUNT: &str = "count";
+const MAX_CSV_COLUMNS: usize = 256;
+const MAX_RECORD_BYTES: usize = 8 * 1024; // 8 KiB per record to prevent line bombs
 
 #[derive(Serialize, TS)]
 #[ts(export)]
@@ -155,6 +158,41 @@ fn size_limit_failure(err: &csv_async::Error) -> Option<ApiError> {
     None
 }
 
+fn validate_header_limits(headers: &csv_async::StringRecord) -> Result<(), ApiError> {
+    let column_count = headers.len();
+    if column_count > MAX_CSV_COLUMNS {
+        return Err(ApiError::bad_request(format!(
+            "CSV has {} columns; maximum supported is {}",
+            column_count, MAX_CSV_COLUMNS
+        )));
+    }
+    Ok(())
+}
+
+fn enforce_record_limits(
+    record: &csv_async::ByteRecord,
+    row_number: usize,
+) -> Result<(), ApiError> {
+    if record.len() > MAX_CSV_COLUMNS {
+        return Err(ApiError::bad_request(format!(
+            "Row {} has {} columns; maximum supported is {}",
+            row_number,
+            record.len(),
+            MAX_CSV_COLUMNS
+        )));
+    }
+
+    let byte_len = record.as_slice().len();
+    if byte_len > MAX_RECORD_BYTES {
+        return Err(ApiError::bad_request(format!(
+            "Row {} exceeds {} byte limit (row is {} bytes)",
+            row_number, MAX_RECORD_BYTES, byte_len
+        )));
+    }
+
+    Ok(())
+}
+
 struct SightingRow {
     sighting_uuid: String,
     common_name: String,
@@ -206,12 +244,30 @@ impl ColumnMap {
     }
 }
 
-fn get_field(record: &csv_async::ByteRecord, idx: Option<usize>) -> Option<String> {
-    idx.and_then(|i| record.get(i))
-        .and_then(|bytes| std::str::from_utf8(bytes).ok())
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+fn get_field(
+    record: &csv_async::ByteRecord,
+    idx: Option<usize>,
+    field_name: &str,
+    row_number: usize,
+) -> Result<Option<String>, ApiError> {
+    let bytes = match idx.and_then(|i| record.get(i)) {
+        Some(bytes) => bytes,
+        None => return Ok(None),
+    };
+
+    let value = std::str::from_utf8(bytes).map_err(|_| {
+        ApiError::bad_request(format!(
+            "Row {} has invalid UTF-8 in column {}",
+            row_number, field_name
+        ))
+    })?;
+
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(trimmed.to_string()))
 }
 
 fn extract_year(date_str: &str) -> i32 {
@@ -249,27 +305,57 @@ fn get_region_code(lat: f64, lon: f64) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn parse_row(record: &csv_async::ByteRecord, col_map: &ColumnMap) -> Option<SightingRow> {
-    let sighting_uuid = get_field(record, col_map.sighting_id)?;
-    let common_name = get_field(record, col_map.common_name)?;
-    let observed_at = get_field(record, col_map.date)?;
+fn parse_row(
+    record: &csv_async::ByteRecord,
+    col_map: &ColumnMap,
+    row_number: usize,
+) -> Result<Option<SightingRow>, ApiError> {
+    let sighting_uuid = match get_field(record, col_map.sighting_id, COL_SIGHTING_ID, row_number)? {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+    let common_name = match get_field(record, col_map.common_name, COL_COMMON_NAME, row_number)? {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+    let observed_at = match get_field(record, col_map.date, COL_DATE, row_number)? {
+        Some(value) => value,
+        None => return Ok(None),
+    };
 
-    let latitude: f64 = get_field(record, col_map.latitude)?.parse().ok()?;
-    let longitude: f64 = get_field(record, col_map.longitude)?.parse().ok()?;
+    let latitude = match get_field(record, col_map.latitude, COL_LATITUDE, row_number)? {
+        Some(value) => match value.parse::<f64>() {
+            Ok(parsed) => parsed,
+            Err(_) => return Ok(None),
+        },
+        None => return Ok(None),
+    };
+    let longitude = match get_field(record, col_map.longitude, COL_LONGITUDE, row_number)? {
+        Some(value) => match value.parse::<f64>() {
+            Ok(parsed) => parsed,
+            Err(_) => return Ok(None),
+        },
+        None => return Ok(None),
+    };
 
     let country_code = get_country_code(latitude, longitude);
     let region_code = get_region_code(latitude, longitude);
 
-    let count: i32 = get_field(record, col_map.count)
+    let count: i32 = get_field(record, col_map.count, COL_COUNT, row_number)?
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
 
     let year = extract_year(&observed_at);
 
-    Some(SightingRow {
+    Ok(Some(SightingRow {
         sighting_uuid,
         common_name,
-        scientific_name: get_field(record, col_map.scientific_name),
+        scientific_name: get_field(
+            record,
+            col_map.scientific_name,
+            COL_SCIENTIFIC_NAME,
+            row_number,
+        )?,
         count,
         latitude,
         longitude,
@@ -277,14 +363,14 @@ fn parse_row(record: &csv_async::ByteRecord, col_map: &ColumnMap) -> Option<Sigh
         region_code,
         observed_at,
         year,
-    })
+    }))
 }
 
 async fn insert_batch<'e, E>(
     executor: E,
     upload_id: &str,
     rows: &[SightingRow],
-) -> Result<(), sqlx::Error>
+) -> Result<(), DbQueryError>
 where
     E: sqlx::Executor<'e, Database = Sqlite>,
 {
@@ -310,7 +396,7 @@ where
             .push_bind(row.year);
     });
 
-    query_builder.build().execute(executor).await?;
+    db::query_with_timeout(query_builder.build().execute(executor)).await?;
     Ok(())
 }
 
@@ -333,8 +419,7 @@ async fn flush_batch(
         })?;
 
         insert_batch(conn, upload_id, batch).await.map_err(|e| {
-            error!("Batch insert failed: {}", e);
-            ApiError::internal("Failed to insert sightings")
+            e.into_api_error("inserting sightings batch", "Failed to insert sightings")
         })?;
     }
 
@@ -369,6 +454,8 @@ where
         .await
         .map_err(|err| map_csv_error(err, "Failed to read CSV headers", "Invalid CSV headers"))?;
 
+    validate_header_limits(&headers)?;
+
     let col_map = ColumnMap::from_headers(&headers);
     if !col_map.is_valid() {
         error!("CSV missing required columns");
@@ -377,34 +464,35 @@ where
         ));
     }
 
-    let mut tx = pool.begin().await.map_err(|e| {
-        error!("Failed to begin transaction: {}", e);
-        ApiError::internal("Database error")
-    })?;
+    let mut tx = db::query_with_timeout(pool.begin())
+        .await
+        .map_err(|e| e.into_api_error("starting upload transaction", "Database error"))?;
 
     let mut batch: Vec<SightingRow> = Vec::with_capacity(BATCH_SIZE);
     let mut total_rows = 0usize;
     let mut record = csv_async::ByteRecord::new();
+    let mut row_number = 1usize;
 
     while csv_reader
         .read_byte_record(&mut record)
         .await
         .map_err(|err| map_csv_error(err, "Failed to read CSV row", "Invalid CSV data"))?
     {
-        if let Some(row) = parse_row(&record, &col_map) {
+        enforce_record_limits(&record, row_number)?;
+        if let Some(row) = parse_row(&record, &col_map, row_number)? {
             batch.push(row);
             if batch.len() >= BATCH_SIZE {
                 flush_batch(&mut tx, upload_id, &mut batch, &mut total_rows).await?;
             }
         }
+        row_number += 1;
     }
 
     flush_batch(&mut tx, upload_id, &mut batch, &mut total_rows).await?;
 
-    tx.commit().await.map_err(|e| {
-        error!("Failed to commit transaction: {}", e);
-        ApiError::internal("Database error")
-    })?;
+    db::query_with_timeout(tx.commit())
+        .await
+        .map_err(|e| e.into_api_error("committing upload transaction", "Database error"))?;
 
     Ok(total_rows)
 }
@@ -414,31 +502,35 @@ where
 async fn compute_lifer_and_year_tick(
     pool: &SqlitePool,
     upload_id: &str,
-) -> Result<(), sqlx::Error> {
+) -> Result<(), DbQueryError> {
     // A lifer is the first sighting of a species (by common_name) ever within this upload
-    sqlx::query(
-        "UPDATE sightings SET lifer = 1 WHERE id IN (
+    db::query_with_timeout(
+        sqlx::query(
+            "UPDATE sightings SET lifer = 1 WHERE id IN (
             SELECT id FROM (
                 SELECT id, ROW_NUMBER() OVER (PARTITION BY common_name ORDER BY observed_at) as rn
                 FROM sightings WHERE upload_id = ?
             ) WHERE rn = 1
         )",
+        )
+        .bind(upload_id)
+        .execute(pool),
     )
-    .bind(upload_id)
-    .execute(pool)
     .await?;
 
     // A year tick is the first sighting of a species in each year (lifers are also year ticks)
-    sqlx::query(
+    db::query_with_timeout(
+        sqlx::query(
         "UPDATE sightings SET year_tick = 1 WHERE id IN (
             SELECT id FROM (
                 SELECT id, ROW_NUMBER() OVER (PARTITION BY common_name, year ORDER BY observed_at) as rn
                 FROM sightings WHERE upload_id = ?
             ) WHERE rn = 1
         )"
+        )
+        .bind(upload_id)
+        .execute(pool),
     )
-    .bind(upload_id)
-    .execute(pool)
     .await?;
 
     Ok(())
@@ -464,16 +556,18 @@ pub async fn upload_csv(
         let edit_token = Uuid::new_v4().to_string();
         let edit_token_hash = hash_token(&edit_token);
 
-        if let Err(e) =
+        if let Err(e) = db::query_with_timeout(
             sqlx::query("INSERT INTO uploads (id, filename, edit_token_hash) VALUES (?, ?, ?)")
                 .bind(&upload_id)
                 .bind(&filename)
                 .bind(&edit_token_hash)
-                .execute(&pool)
-                .await
+                .execute(&pool),
+        )
+        .await
         {
-            error!("Failed to create upload record: {}", e);
-            return ApiError::internal("Database error").into_response();
+            return e
+                .into_api_error("creating upload record", "Database error")
+                .into_response();
         }
 
         let total_rows = match ingest_csv_field(field, &pool, &upload_id).await {
@@ -481,14 +575,19 @@ pub async fn upload_csv(
             Err(err) => return err.into_response(),
         };
 
-        let _ = sqlx::query("UPDATE uploads SET row_count = ? WHERE id = ?")
-            .bind(total_rows as i64)
-            .bind(&upload_id)
-            .execute(&pool)
-            .await;
+        if let Err(e) = db::query_with_timeout(
+            sqlx::query("UPDATE uploads SET row_count = ? WHERE id = ?")
+                .bind(total_rows as i64)
+                .bind(&upload_id)
+                .execute(&pool),
+        )
+        .await
+        {
+            e.log("updating upload row_count");
+        }
 
         if let Err(e) = compute_lifer_and_year_tick(&pool, &upload_id).await {
-            error!("Failed to compute lifer/year_tick: {}", e);
+            e.log("computing lifer/year_tick flags");
         }
 
         info!(
@@ -523,12 +622,13 @@ async fn verify_upload_access(
     pool: &SqlitePool,
     upload_id: &str,
     token: &str,
-) -> Result<bool, sqlx::Error> {
-    let hash =
+) -> Result<bool, DbQueryError> {
+    let hash = db::query_with_timeout(
         sqlx::query_scalar::<_, Option<String>>("SELECT edit_token_hash FROM uploads WHERE id = ?")
             .bind(upload_id)
-            .fetch_optional(pool)
-            .await?;
+            .fetch_optional(pool),
+    )
+    .await?;
 
     match hash {
         Some(Some(stored_hash)) => Ok(verify_token(token, &stored_hash)),
@@ -564,8 +664,9 @@ pub async fn update_csv(
             return ApiError::forbidden("Invalid edit token").into_response();
         }
         Err(e) => {
-            error!("Database error verifying token: {}", e);
-            return ApiError::internal("Database error").into_response();
+            return e
+                .into_api_error("verifying edit token", "Database error")
+                .into_response();
         }
     }
 
@@ -582,13 +683,16 @@ pub async fn update_csv(
         }
 
         // Delete existing sightings
-        if let Err(e) = sqlx::query("DELETE FROM sightings WHERE upload_id = ?")
-            .bind(&upload_id)
-            .execute(&pool)
-            .await
+        if let Err(e) = db::query_with_timeout(
+            sqlx::query("DELETE FROM sightings WHERE upload_id = ?")
+                .bind(&upload_id)
+                .execute(&pool),
+        )
+        .await
         {
-            error!("Failed to delete existing sightings: {}", e);
-            return ApiError::internal("Database error").into_response();
+            return e
+                .into_api_error("deleting existing sightings", "Database error")
+                .into_response();
         }
 
         let total_rows = match ingest_csv_field(field, &pool, &upload_id).await {
@@ -596,15 +700,20 @@ pub async fn update_csv(
             Err(err) => return err.into_response(),
         };
 
-        let _ = sqlx::query("UPDATE uploads SET row_count = ?, filename = ? WHERE id = ?")
-            .bind(total_rows as i64)
-            .bind(&filename)
-            .bind(&upload_id)
-            .execute(&pool)
-            .await;
+        if let Err(e) = db::query_with_timeout(
+            sqlx::query("UPDATE uploads SET row_count = ?, filename = ? WHERE id = ?")
+                .bind(total_rows as i64)
+                .bind(&filename)
+                .bind(&upload_id)
+                .execute(&pool),
+        )
+        .await
+        {
+            e.log("updating upload metadata after replace");
+        }
 
         if let Err(e) = compute_lifer_and_year_tick(&pool, &upload_id).await {
-            error!("Failed to compute lifer/year_tick: {}", e);
+            e.log("computing lifer/year_tick flags");
         }
 
         info!(
@@ -650,16 +759,19 @@ pub async fn delete_upload(
             return ApiError::forbidden("Invalid edit token").into_response();
         }
         Err(e) => {
-            error!("Database error verifying token: {}", e);
-            return ApiError::internal("Database error").into_response();
+            return e
+                .into_api_error("verifying edit token", "Database error")
+                .into_response();
         }
     }
 
     // CASCADE will delete associated sightings
-    match sqlx::query("DELETE FROM uploads WHERE id = ?")
-        .bind(&upload_id)
-        .execute(&pool)
-        .await
+    match db::query_with_timeout(
+        sqlx::query("DELETE FROM uploads WHERE id = ?")
+            .bind(&upload_id)
+            .execute(&pool),
+    )
+    .await
     {
         Ok(_) => {
             info!("Deleted upload: {}", upload_id);
@@ -669,9 +781,8 @@ pub async fn delete_upload(
             )
                 .into_response()
         }
-        Err(e) => {
-            error!("Failed to delete upload: {}", e);
-            ApiError::internal("Database error").into_response()
-        }
+        Err(e) => e
+            .into_api_error("deleting upload", "Database error")
+            .into_response(),
     }
 }
