@@ -147,6 +147,49 @@ function updatePopupWithSpeciesInfo(
   `;
 }
 
+/**
+ * Shows a species popup on the map at the given coordinates.
+ * Creates an initial popup with loading state, then fetches species info
+ * and replaces it with the full content.
+ */
+function showSpeciesPopup(
+  map: maplibregl.Map,
+  lat: number,
+  lng: number,
+  name: string,
+  count: number,
+  scientificName?: string
+): void {
+  const popupContent = createPopupContent(name, count, scientificName);
+
+  let popup = new maplibregl.Popup({
+    maxWidth: "none",
+    subpixelPositioning: false,
+  })
+    .setLngLat([lng, lat])
+    .setDOMContent(popupContent)
+    .addTo(map);
+
+  fetchSpeciesInfo(name).then((info) => {
+    if (popup.isOpen()) {
+      // Don't update the existing popup's content in place — it results
+      // in blurry text, presumably because MapLibre repositions the popup
+      // with subpixel values when its size changes.
+      popup.remove();
+      const finalContent = document.createElement("div");
+      finalContent.className = "species-popup";
+      updatePopupWithSpeciesInfo(finalContent, name, count, info);
+      popup = new maplibregl.Popup({
+        maxWidth: "none",
+        subpixelPositioning: false,
+      })
+        .setLngLat([lng, lat])
+        .setDOMContent(finalContent)
+        .addTo(map);
+    }
+  });
+}
+
 export function SightingsMap({
   uploadId,
   filter,
@@ -322,49 +365,20 @@ export function SightingsMap({
         }
 
         // Zoom level 15 is appropriate for a detailed view
-        // Store sighting data for the moveend handler
+        // Store sighting data for the idle handler
         const showPopup = () => {
           if (!sightingData) {
             console.warn("No sighting data provided for popup");
             return;
           }
-          const popupContent = createPopupContent(
+          showSpeciesPopup(
+            map,
+            lat,
+            lng,
             sightingData.name,
             sightingData.count,
             sightingData.scientificName || undefined
           );
-
-          let popup = new maplibregl.Popup({
-            maxWidth: "none",
-            subpixelPositioning: false,
-          })
-            .setLngLat([lng, lat])
-            .setDOMContent(popupContent)
-            .addTo(map);
-
-          fetchSpeciesInfo(sightingData.name).then((info) => {
-            if (popup.isOpen()) {
-              // Don't update the existing popup's content in place — it results
-              // in blurry text, presumably because MapLibre repositions the popup
-              // with subpixel values when its size changes.
-              popup.remove();
-              const finalContent = document.createElement("div");
-              finalContent.className = "species-popup";
-              updatePopupWithSpeciesInfo(
-                finalContent,
-                sightingData.name,
-                sightingData.count,
-                info
-              );
-              popup = new maplibregl.Popup({
-                maxWidth: "none",
-                subpixelPositioning: false,
-              })
-                .setLngLat([lng, lat])
-                .setDOMContent(finalContent)
-                .addTo(map);
-            }
-          });
         };
 
         // Use idle event to show popup when map finishes loading tiles
@@ -417,34 +431,14 @@ export function SightingsMap({
         const count = feature.properties?.count || 1;
         const lngLat = e.lngLat;
 
-        const popupContent = createPopupContent(name, count, scientificName);
-
-        let popup = new maplibregl.Popup({
-          maxWidth: "none",
-          subpixelPositioning: false,
-        })
-          .setLngLat(lngLat)
-          .setDOMContent(popupContent)
-          .addTo(map);
-
-        fetchSpeciesInfo(name).then((info) => {
-          if (popup.isOpen()) {
-            // Don't update the existing popup's content in place — it results
-            // in blurry text, presumably because MapLibre repositions the popup
-            // with subpixel values when its size changes.
-            popup.remove();
-            const finalContent = document.createElement("div");
-            finalContent.className = "species-popup";
-            updatePopupWithSpeciesInfo(finalContent, name, count, info);
-            popup = new maplibregl.Popup({
-              maxWidth: "none",
-              subpixelPositioning: false,
-            })
-              .setLngLat(lngLat)
-              .setDOMContent(finalContent)
-              .addTo(map);
-          }
-        });
+        showSpeciesPopup(
+          map,
+          lngLat.lat,
+          lngLat.lng,
+          name,
+          count,
+          scientificName
+        );
       });
 
       map.on("mouseenter", "sightings-circles", () => {
