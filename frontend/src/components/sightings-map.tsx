@@ -1,13 +1,14 @@
 "use client";
 
 import { useRef, useEffect } from "react";
+import { createRoot, Root } from "react-dom/client";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { getApiUrl, buildApiUrl } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { fetchSpeciesInfo } from "@/lib/species-api";
 import { TILE_ROUTE } from "@/lib/generated/api_constants";
-import { sanitizeText, sanitizeUrl } from "@/lib/sanitize";
+import { SpeciesPopup, SpeciesPopupLoading } from "@/components/species-popup";
 
 interface SightingsMapProps {
   uploadId: string;
@@ -17,90 +18,23 @@ interface SightingsMapProps {
   onMapReady?: (navigateToLocation: (lat: number, lng: number) => void) => void;
 }
 
-function stripHtml(html: string): string {
-  return html.replace(/<[^>]*>/g, "");
-}
-
-const MAX_DESCRIPTION_LENGTH = 350;
-
-/**
- * Format an ISO 8601 date string to a readable format
- */
-function formatDate(dateString: string): string {
-  try {
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return dateString;
-  }
-}
-
-function firstParagraph(text: string): string {
-  const stripped = stripHtml(text);
-  const para = stripped.split(/\n\n|\r\n\r\n/)[0].trim();
-
-  if (para.length <= MAX_DESCRIPTION_LENGTH) {
-    return para;
-  }
-
-  // Text exceeds limit - find last complete sentence that fits
-  const truncated = para.slice(0, MAX_DESCRIPTION_LENGTH);
-  const lastSentenceEnd = Math.max(
-    truncated.lastIndexOf(". "),
-    truncated.lastIndexOf("! "),
-    truncated.lastIndexOf("? "),
-    truncated.lastIndexOf("."),
-  );
-
-  if (lastSentenceEnd > 0) {
-    return para.slice(0, lastSentenceEnd + 1);
-  }
-
-  return truncated;
-}
-
 function createPopupContent(
   name: string,
   count: number,
   scientificName?: string,
-): HTMLDivElement {
-  const safeName = sanitizeText(name);
-  const safeScientificName = sanitizeText(scientificName);
-
+): { container: HTMLDivElement; root: Root } {
   const container = document.createElement("div");
   container.className = "species-popup";
-  container.innerHTML = `
-    <div style="width: 280px; font-family: system-ui, -apple-system, sans-serif;">
-      <div style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <div style="width: 32px; height: 32px; border-radius: 6px; background: #f3f4f6; display: flex; align-items: center; justify-content: center;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M12 6v6l4 2"/>
-            </svg>
-          </div>
-          <div style="flex: 1; min-width: 0;">
-            <div style="font-weight: 600; font-size: 15px; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${safeName}</div>
-            ${
-              scientificName
-                ? `<div style="font-size: 13px; color: #6b7280; font-style: italic;">${safeScientificName}</div>`
-                : ""
-            }
-          </div>
-        </div>
-        <div style="font-size: 13px; color: #6b7280;">Loading species info…</div>
-      </div>
-    </div>
-  `;
-  return container;
+  const root = createRoot(container);
+  root.render(
+    <SpeciesPopupLoading name={name} scientificName={scientificName} />,
+  );
+  return { container, root };
 }
 
 function updatePopupWithSpeciesInfo(
   container: HTMLDivElement,
+  root: Root,
   name: string,
   count: number,
   info: {
@@ -116,191 +50,17 @@ function updatePopupWithSpeciesInfo(
   isLifer?: boolean,
   isYearTick?: boolean,
 ): void {
-  const safeName = sanitizeText(name);
-  const safeCount = sanitizeText(count);
-  const badges: string[] = [];
-  if (isLifer) badges.push("Lifer");
-  if (isYearTick) badges.push("Year Tick");
-
-  if (!info) {
-    const dateDisplay = observedAt ? formatDate(observedAt) : "";
-
-    container.innerHTML = `
-      <div style="width: 280px; font-family: system-ui, -apple-system, sans-serif;">
-        <div style="padding: 12px;">
-          <div style="font-weight: 600; font-size: 15px; color: #111827; margin-bottom: 4px;">${safeName}</div>
-          <div style="font-size: 13px; color: #6b7280; margin-bottom: 8px;">Count: ${safeCount}</div>
-          ${
-            dateDisplay
-              ? `
-            <div style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: #6b7280; margin-bottom: 4px;">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                <line x1="16" y1="2" x2="16" y2="6"/>
-                <line x1="8" y1="2" x2="8" y2="6"/>
-                <line x1="3" y1="10" x2="21" y2="10"/>
-              </svg>
-              <span>${sanitizeText(dateDisplay)}</span>
-            </div>
-          `
-              : ""
-          }
-          ${
-            badges.length > 0
-              ? `
-            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
-              ${
-                isLifer
-                  ? `
-                <div style="display: flex; align-items: center; gap: 4px; padding: 2px 8px; background: #f3f4f6; border-radius: 4px; font-size: 12px; color: #374151;">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2.5">
-                    <polyline points="20 6 9 17 4 12"/>
-                  </svg>
-                  <span>Lifer</span>
-                </div>
-              `
-                  : ""
-              }
-              ${
-                isYearTick
-                  ? `
-                <div style="display: flex; align-items: center; gap: 4px; padding: 2px 8px; background: #f3f4f6; border-radius: 4px; font-size: 12px; color: #374151;">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2">
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                    <line x1="16" y1="2" x2="16" y2="6"/>
-                    <line x1="8" y1="2" x2="8" y2="6"/>
-                    <line x1="3" y1="10" x2="21" y2="10"/>
-                  </svg>
-                  <span>Year Tick</span>
-                </div>
-              `
-                  : ""
-              }
-            </div>
-          `
-              : ""
-          }
-        </div>
-      </div>
-    `;
-    return;
-  }
-
-  const summary = info.wikipediaSummary
-    ? firstParagraph(info.wikipediaSummary)
-    : null;
-  const safeSummary = summary ? sanitizeText(summary) : null;
-  const safeCommonName = sanitizeText(info.commonName);
-  const safeScientificInfoName = sanitizeText(info.scientificName);
-  const safeAttribution = sanitizeText(info.photoAttribution);
-  const safePhotoUrl = sanitizeUrl(info.photoUrl);
-  const safeInatUrl = sanitizeUrl(info.inaturalistUrl);
-  const safeDateDisplay = observedAt
-    ? sanitizeText(formatDate(observedAt))
-    : null;
-
-  container.innerHTML = `
-    <div style="width: 300px; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; border-radius: 8px;">
-      ${
-        safePhotoUrl
-          ? `<div style="position: relative;">
-              <img
-                src="${safePhotoUrl}"
-                alt="${safeCommonName}"
-                style="width: 100%; height: 160px; object-fit: cover; display: block;"
-              />
-              <div style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.7)); padding: 8px 12px;">
-                <div style="font-weight: 600; font-size: 16px; color: white;">${safeCommonName}</div>
-                <div style="font-size: 13px; color: rgba(255,255,255,0.85); font-style: italic;">${safeScientificInfoName}</div>
-              </div>
-            </div>`
-          : `<div style="padding: 12px 12px 0;">
-              <div style="font-weight: 600; font-size: 16px; color: #111827;">${safeCommonName}</div>
-              <div style="font-size: 13px; color: #6b7280; font-style: italic;">${safeScientificInfoName}</div>
-            </div>`
-      }
-      <div style="padding: 12px;">
-        ${
-          safeSummary
-            ? `<p style="font-size: 13px; line-height: 1.5; color: #374151; margin: 0 0 10px;">${safeSummary}</p>`
-            : ""
-        }
-        <div style="display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
-          <div style="display: flex; gap: 12px; align-items: center; justify-content: space-between;">
-            <div style="display: flex; gap: 12px; align-items: center;">
-              <div style="display: flex; align-items: center; gap: 4px;">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                  <circle cx="12" cy="7" r="4"/>
-                </svg>
-                <span style="font-size: 12px; color: #6b7280;">Count: ${safeCount}</span>
-              </div>
-              ${
-                safeDateDisplay
-                  ? `
-                <div style="display: flex; align-items: center; gap: 4px;">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2">
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                    <line x1="16" y1="2" x2="16" y2="6"/>
-                    <line x1="8" y1="2" x2="8" y2="6"/>
-                    <line x1="3" y1="10" x2="21" y2="10"/>
-                  </svg>
-                  <span style="font-size: 12px; color: #6b7280;">${safeDateDisplay}</span>
-                </div>
-              `
-                  : ""
-              }
-            </div>
-            ${
-              safeInatUrl
-                ? `<a href="${safeInatUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 12px; color: #2563eb; text-decoration: none;">iNaturalist →</a>`
-                : ""
-            }
-          </div>
-          ${
-            isLifer || isYearTick
-              ? `
-            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-              ${
-                isLifer
-                  ? `
-                <div style="display: flex; align-items: center; gap: 4px; padding: 2px 8px; background: #f3f4f6; border-radius: 4px; font-size: 12px; color: #374151;">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2.5">
-                    <polyline points="20 6 9 17 4 12"/>
-                  </svg>
-                  <span>Lifer</span>
-                </div>
-              `
-                  : ""
-              }
-              ${
-                isYearTick
-                  ? `
-                <div style="display: flex; align-items: center; gap: 4px; padding: 2px 8px; background: #f3f4f6; border-radius: 4px; font-size: 12px; color: #374151;">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2">
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                    <line x1="16" y1="2" x2="16" y2="6"/>
-                    <line x1="8" y1="2" x2="8" y2="6"/>
-                    <line x1="3" y1="10" x2="21" y2="10"/>
-                  </svg>
-                  <span>Year Tick</span>
-                </div>
-              `
-                  : ""
-              }
-            </div>
-          `
-              : ""
-          }
-        </div>
-        ${
-          safeAttribution
-            ? `<div style="font-size: 10px; color: #9ca3af; margin-top: 8px;">Photo: ${safeAttribution}</div>`
-            : ""
-        }
-      </div>
-    </div>
-  `;
+  root.render(
+    <SpeciesPopup
+      name={name}
+      count={count}
+      scientificName={info?.scientificName}
+      info={info || undefined}
+      observedAt={observedAt}
+      isLifer={isLifer}
+      isYearTick={isYearTick}
+    />,
+  );
 }
 
 /**
@@ -319,14 +79,14 @@ function showSpeciesPopup(
   isLifer?: boolean,
   isYearTick?: boolean,
 ): void {
-  const popupContent = createPopupContent(name, count, scientificName);
+  const { container, root } = createPopupContent(name, count, scientificName);
 
   let popup = new maplibregl.Popup({
     maxWidth: "none",
     subpixelPositioning: false,
   })
     .setLngLat([lng, lat])
-    .setDOMContent(popupContent)
+    .setDOMContent(container)
     .addTo(map);
 
   fetchSpeciesInfo(name).then((info) => {
@@ -334,11 +94,14 @@ function showSpeciesPopup(
       // Don't update the existing popup's content in place — it results
       // in blurry text, presumably because MapLibre repositions the popup
       // with subpixel values when its size changes.
+      root.unmount();
       popup.remove();
-      const finalContent = document.createElement("div");
-      finalContent.className = "species-popup";
+      const finalContainer = document.createElement("div");
+      finalContainer.className = "species-popup";
+      const finalRoot = createRoot(finalContainer);
       updatePopupWithSpeciesInfo(
-        finalContent,
+        finalContainer,
+        finalRoot,
         name,
         count,
         info,
@@ -351,8 +114,10 @@ function showSpeciesPopup(
         subpixelPositioning: false,
       })
         .setLngLat([lng, lat])
-        .setDOMContent(finalContent)
+        .setDOMContent(finalContainer)
         .addTo(map);
+    } else {
+      root.unmount();
     }
   });
 }
