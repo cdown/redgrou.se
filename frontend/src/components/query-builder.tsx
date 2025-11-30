@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { X } from "lucide-react";
 import { apiFetch, buildApiUrl } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,7 +42,7 @@ import {
 
 function toComboboxOptions(
   values: string[],
-  fieldName?: string
+  fieldName?: string,
 ): ComboboxOption[] {
   return values.map((v) => ({
     value: v,
@@ -89,7 +90,7 @@ export function QueryBuilder({
         console.error(e);
       }
     },
-    [uploadId, fieldValues]
+    [uploadId, fieldValues],
   );
 
   const updateRule = useCallback(
@@ -100,7 +101,7 @@ export function QueryBuilder({
             return {
               ...group,
               rules: group.rules.map((r, i) =>
-              i === path[pathIndex] ? updater(r) : r
+                i === path[pathIndex] ? updater(r) : r,
               ),
             };
           }
@@ -109,14 +110,14 @@ export function QueryBuilder({
             rules: group.rules.map((r, i) =>
               i === path[pathIndex] && isGroup(r)
                 ? update(r, pathIndex + 1)
-                : r
+                : r,
             ),
           };
         };
         return update(prev, 0);
       });
     },
-    []
+    [],
   );
 
   const addRule = useCallback((path: number[], rule: Rule) => {
@@ -128,7 +129,7 @@ export function QueryBuilder({
         return {
           ...group,
           rules: group.rules.map((r, i) =>
-            i === path[pathIndex] && isGroup(r) ? add(r, pathIndex + 1) : r
+            i === path[pathIndex] && isGroup(r) ? add(r, pathIndex + 1) : r,
           ),
         };
       };
@@ -148,7 +149,7 @@ export function QueryBuilder({
         return {
           ...group,
           rules: group.rules.map((r, i) =>
-            i === path[pathIndex] && isGroup(r) ? remove(r, pathIndex + 1) : r
+            i === path[pathIndex] && isGroup(r) ? remove(r, pathIndex + 1) : r,
           ),
         };
       };
@@ -168,19 +169,19 @@ export function QueryBuilder({
             rules: group.rules.map((r, i) =>
               i === path[pathIndex] && isGroup(r)
                 ? update(r, pathIndex + 1)
-                : r
+                : r,
             ),
           };
         };
         return update(prev, 0);
       });
     },
-    []
+    [],
   );
 
   const applyFilter = useCallback(() => {
     const hasValidRules = filter.rules.some((r) =>
-      isGroup(r) ? r.rules.length > 0 : r.field !== ""
+      isGroup(r) ? r.rules.length > 0 : r.field !== "",
     );
     onFilterChange(hasValidRules ? filter : null);
     if (isPanel && onClose) {
@@ -196,7 +197,7 @@ export function QueryBuilder({
   }, [onFilterChange]);
 
   const activeCount = filter.rules.filter((r) =>
-    isGroup(r) ? r.rules.length > 0 : r.field !== ""
+    isGroup(r) ? r.rules.length > 0 : r.field !== "",
   ).length;
 
   if (isPanel) {
@@ -208,20 +209,7 @@ export function QueryBuilder({
             onClick={onClose}
             className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-stone-100 transition-colors"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
+            <X className="h-5 w-5" />
           </button>
         </div>
 
@@ -450,7 +438,8 @@ function ConditionBuilder({
   const operators = field ? getOperatorsForType(fieldType) : [];
   const values = fieldValues[condition.field] || [];
   const isFreeform = isFreeformOperator(condition.operator);
-  const isMultiValue = condition.operator === "in" || condition.operator === "not_in";
+  const isMultiValue =
+    condition.operator === "in" || condition.operator === "not_in";
 
   const skipOperator = fieldType === "boolean";
 
@@ -525,9 +514,8 @@ function ConditionBuilder({
           searchPlaceholder="Search..."
           className="min-w-32 flex-1"
         />
-      ) : condition.field && fieldType === "boolean" ? (
-        null
-      ) : condition.field && fieldType === "date" ? (
+      ) : condition.field && fieldType === "boolean" ? null : condition.field &&
+        fieldType === "date" ? (
         <DatePicker
           value={String(condition.value)}
           onChange={(v) => updateRule(path, () => ({ ...condition, value: v }))}

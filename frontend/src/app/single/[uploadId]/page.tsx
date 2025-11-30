@@ -8,7 +8,22 @@ import {
   setEditToken as setStoredEditToken,
   removeEditToken,
 } from "@/lib/storage";
-import { Sparkles, MoreVertical, ChevronDown } from "lucide-react";
+import {
+  Sparkles,
+  MoreVertical,
+  ChevronDown,
+  X,
+  Calendar,
+  Map,
+  List,
+  Search,
+  Check,
+  Link,
+  Edit,
+  RefreshCw,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
 import { QueryBuilder } from "@/components/query-builder";
@@ -66,15 +81,16 @@ export default function UploadPage() {
   const [menuExpanded, setMenuExpanded] = useState(false);
   const [tableTopOffset, setTableTopOffset] = useState(200);
   const navigateToLocationRef = useRef<
-    ((
-      lat: number,
-      lng: number,
-      sightingData?: {
-        name: string;
-        scientificName?: string | null;
-        count: number;
-      }
-    ) => void) | null
+    | ((
+        lat: number,
+        lng: number,
+        sightingData?: {
+          name: string;
+          scientificName?: string | null;
+          count: number;
+        },
+      ) => void)
+    | null
   >(null);
   const [mapReady, setMapReady] = useState(false);
 
@@ -345,20 +361,7 @@ export default function UploadPage() {
               onClick={() => setViewMode("map")}
               className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-stone-100 transition-colors"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M18 6 6 18" />
-                <path d="m6 6 12 12" />
-              </svg>
+              <X className="h-5 w-5" />
             </button>
           </div>
           <div className="relative flex-1 overflow-hidden">
@@ -376,7 +379,7 @@ export default function UploadPage() {
                         name: string;
                         scientificName?: string | null;
                         count: number;
-                      }
+                      },
                     ) => {
                       setViewMode("map");
                       if (navigateToLocationRef.current) {
@@ -466,39 +469,18 @@ export default function UploadPage() {
                 ))}
               </select>
               <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className={yearTickYear ? "text-white" : "text-stone-600"}
-                >
-                  <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
-                  <line x1="16" x2="16" y1="2" y2="6" />
-                  <line x1="8" x2="8" y1="2" y2="6" />
-                  <line x1="3" x2="21" y1="10" y2="10" />
-                </svg>
+                <Calendar
+                  className={`h-4 w-4 ${
+                    yearTickYear ? "text-white" : "text-stone-600"
+                  }`}
+                />
               </div>
               <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className={yearTickYear ? "text-white" : "text-stone-400"}
-                >
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
+                <ChevronDown
+                  className={`h-3 w-3 ${
+                    yearTickYear ? "text-white" : "text-stone-400"
+                  }`}
+                />
               </div>
             </div>
           )}
@@ -514,21 +496,7 @@ export default function UploadPage() {
                 : "text-stone-600 hover:bg-stone-50"
             }`}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z" />
-              <path d="M15 5.764v15" />
-              <path d="M9 3.236v15" />
-            </svg>
+            <Map className="h-4 w-4" />
             Map
           </button>
           <button
@@ -539,22 +507,7 @@ export default function UploadPage() {
                 : "text-stone-600 hover:bg-stone-50"
             }`}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 3v18" />
-              <rect width="18" height="18" x="3" y="3" rx="2" />
-              <path d="M3 9h18" />
-              <path d="M3 15h18" />
-            </svg>
+            <List className="h-4 w-4" />
             List
           </button>
         </div>
@@ -586,20 +539,7 @@ export default function UploadPage() {
                   }}
                   className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <circle cx="11" cy="11" r="8" />
-                    <path d="m21 21-4.3-4.3" />
-                  </svg>
+                  <Search className="h-4 w-4" />
                   <span>Advanced filtering</span>
                   {filter && (
                     <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-medium text-white">
@@ -614,38 +554,12 @@ export default function UploadPage() {
               >
                 {copied ? (
                   <>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="text-emerald-500"
-                    >
-                      <path d="M20 6 9 17l-5-5" />
-                    </svg>
+                    <Check className="h-4 w-4 text-emerald-500" />
                     <span className="text-emerald-600">Copied!</span>
                   </>
                 ) : (
                   <>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                    </svg>
+                    <Link className="h-4 w-4" />
                     Copy link
                   </>
                 )}
@@ -659,39 +573,12 @@ export default function UploadPage() {
                   >
                     {copiedEditLink ? (
                       <>
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="text-emerald-500"
-                        >
-                          <path d="M20 6 9 17l-5-5" />
-                        </svg>
+                        <Check className="h-4 w-4 text-emerald-500" />
                         <span className="text-emerald-600">Copied!</span>
                       </>
                     ) : (
                       <>
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <circle cx="7.5" cy="15.5" r="5.5" />
-                          <path d="m21 2-9.6 9.6" />
-                          <path d="m15.5 7.5 3 3L22 7l-3-3" />
-                        </svg>
+                        <Edit className="h-4 w-4" />
                         Copy edit link
                       </>
                     )}
@@ -703,45 +590,14 @@ export default function UploadPage() {
                     }}
                     className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                      <path d="M3 3v5h5" />
-                      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-                      <path d="M16 16h5v5" />
-                    </svg>
+                    <RefreshCw className="h-4 w-4" />
                     Replace data
                   </button>
                   <button
                     onClick={() => setShowDeleteConfirm(true)}
                     className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-rose-600 hover:bg-rose-50 transition-colors"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M3 6h18" />
-                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                      <line x1="10" x2="10" y1="11" y2="17" />
-                      <line x1="14" x2="14" y1="11" y2="17" />
-                    </svg>
+                    <Trash2 className="h-4 w-4" />
                     Delete
                   </button>
                 </>
@@ -754,21 +610,7 @@ export default function UploadPage() {
                 }}
                 className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1="12" x2="12" y1="3" y2="15" />
-                </svg>
+                <Upload className="h-4 w-4" />
                 Upload new
               </button>
             </>
@@ -881,21 +723,7 @@ export default function UploadPage() {
                   </>
                 ) : (
                   <>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="17 8 12 3 7 8" />
-                      <line x1="12" x2="12" y1="3" y2="15" />
-                    </svg>
+                    <Upload className="h-4 w-4" />
                     Choose file
                   </>
                 )}

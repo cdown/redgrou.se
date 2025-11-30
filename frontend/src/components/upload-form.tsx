@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { Upload, FileText } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { setEditToken } from "@/lib/storage";
 import { UPLOAD_ROUTE } from "@/lib/generated/api_constants";
@@ -54,7 +55,7 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
         setIsUploading(false);
       }
     },
-    [onUploadComplete]
+    [onUploadComplete],
   );
 
   const handleDrop = useCallback(
@@ -64,7 +65,7 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
       const file = e.dataTransfer.files[0];
       if (file) handleUpload(file);
     },
-    [handleUpload]
+    [handleUpload],
   );
 
   const handleFileSelect = useCallback(
@@ -72,7 +73,7 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
       const file = e.target.files?.[0];
       if (file) handleUpload(file);
     },
-    [handleUpload]
+    [handleUpload],
   );
 
   return (
@@ -97,43 +98,13 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
       ) : (
         <>
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-stone-100">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="text-stone-500"
-            >
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" x2="12" y1="3" y2="15" />
-            </svg>
+            <Upload className="h-5 w-5 text-stone-500" />
           </div>
           <p className="mb-4 text-sm text-stone-600">
             Drag and drop your CSV file here, or
           </p>
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-stone-800 hover:shadow-md active:scale-[0.98]">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4" />
-              <path d="M14 2v4a2 2 0 0 0 2 2h4" />
-              <path d="M3 15h6" />
-              <path d="m6 12-3 3 3 3" />
-            </svg>
+            <FileText className="h-4 w-4" />
             Choose file
             <input
               type="file"

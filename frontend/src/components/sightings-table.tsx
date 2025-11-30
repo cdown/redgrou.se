@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useRef } from "react";
+import { MapPin } from "lucide-react";
 import { apiFetch, buildApiUrl } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { formatCountry } from "@/lib/countries";
@@ -30,7 +31,7 @@ interface SightingsTableProps {
       name: string;
       scientificName?: string | null;
       count: number;
-    }
+    },
   ) => void;
 }
 
@@ -345,9 +346,7 @@ export function SightingsTable({
                   </button>
                 </div>
               ))}
-              <div className="w-[140px] shrink-0 px-3 py-2">
-                Region
-              </div>
+              <div className="w-[140px] shrink-0 px-3 py-2">Region</div>
               {COLUMNS.slice(4).map((col) => (
                 <div
                   key={col.field}
@@ -447,20 +446,7 @@ export function SightingsTable({
                           className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           title="Show on map"
                         >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                            <circle cx="12" cy="10" r="3" />
-                          </svg>
+                          <MapPin className="h-4 w-4" />
                         </button>
                       ) : null}
                     </div>
