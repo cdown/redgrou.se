@@ -8,7 +8,7 @@ import {
   setEditToken as setStoredEditToken,
   removeEditToken,
 } from "@/lib/storage";
-import { Sparkles } from "lucide-react";
+import { Sparkles, MoreVertical, ChevronDown } from "lucide-react";
 import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
 import { QueryBuilder } from "@/components/query-builder";
@@ -63,6 +63,7 @@ export default function UploadPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [copiedEditLink, setCopiedEditLink] = useState(false);
+  const [menuExpanded, setMenuExpanded] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -147,6 +148,7 @@ export default function UploadPage() {
     const url = window.location.origin + "/single/" + uploadId;
     await navigator.clipboard.writeText(url);
     setCopied(true);
+    setMenuExpanded(false);
     setTimeout(() => setCopied(false), 2000);
   }, [uploadId]);
 
@@ -155,6 +157,7 @@ export default function UploadPage() {
     const url = `${window.location.origin}/single/${uploadId}?token=${editToken}`;
     await navigator.clipboard.writeText(url);
     setCopiedEditLink(true);
+    setMenuExpanded(false);
     setTimeout(() => setCopiedEditLink(false), 2000);
   }, [uploadId, editToken]);
 
@@ -531,55 +534,27 @@ export default function UploadPage() {
         {/* More options */}
         <div className="flex flex-col overflow-hidden rounded-lg bg-white shadow-lg">
           <button
-            onClick={handleCopyLink}
-            className="flex items-center gap-2 px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
+            onClick={() => setMenuExpanded(!menuExpanded)}
+            className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
           >
-            {copied ? (
-              <>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="text-emerald-500"
-                >
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-                <span className="text-emerald-600">Copied!</span>
-              </>
-            ) : (
-              <>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                </svg>
-                Copy link
-              </>
-            )}
+            <div className="flex items-center gap-2">
+              <MoreVertical className="h-4 w-4" />
+              <span>Actions</span>
+            </div>
+            <ChevronDown
+              className={`h-4 w-4 transition-transform ${
+                menuExpanded ? "rotate-180" : ""
+              }`}
+            />
           </button>
 
-          {canEdit && (
+          {menuExpanded && (
             <>
               <button
-                onClick={handleCopyEditLink}
+                onClick={handleCopyLink}
                 className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
               >
-                {copiedEditLink ? (
+                {copied ? (
                   <>
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -610,16 +585,115 @@ export default function UploadPage() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     >
-                      <circle cx="7.5" cy="15.5" r="5.5" />
-                      <path d="m21 2-9.6 9.6" />
-                      <path d="m15.5 7.5 3 3L22 7l-3-3" />
+                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                     </svg>
-                    Copy edit link
+                    Copy link
                   </>
                 )}
               </button>
+
+              {canEdit && (
+                <>
+                  <button
+                    onClick={handleCopyEditLink}
+                    className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
+                  >
+                    {copiedEditLink ? (
+                      <>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="text-emerald-500"
+                        >
+                          <path d="M20 6 9 17l-5-5" />
+                        </svg>
+                        <span className="text-emerald-600">Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <circle cx="7.5" cy="15.5" r="5.5" />
+                          <path d="m21 2-9.6 9.6" />
+                          <path d="m15.5 7.5 3 3L22 7l-3-3" />
+                        </svg>
+                        Copy edit link
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowUpdateModal(true);
+                      setMenuExpanded(false);
+                    }}
+                    className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                      <path d="M3 3v5h5" />
+                      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                      <path d="M16 16h5v5" />
+                    </svg>
+                    Replace data
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-rose-600 hover:bg-rose-50 transition-colors"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M3 6h18" />
+                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                      <line x1="10" x2="10" y1="11" y2="17" />
+                      <line x1="14" x2="14" y1="11" y2="17" />
+                    </svg>
+                    Delete
+                  </button>
+                </>
+              )}
+
               <button
-                onClick={() => setShowUpdateModal(true)}
+                onClick={() => {
+                  router.push("/");
+                  setMenuExpanded(false);
+                }}
                 className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
               >
                 <svg
@@ -633,60 +707,14 @@ export default function UploadPage() {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 >
-                  <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                  <path d="M3 3v5h5" />
-                  <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-                  <path d="M16 16h5v5" />
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" x2="12" y1="3" y2="15" />
                 </svg>
-                Replace data
-              </button>
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-rose-600 hover:bg-rose-50 transition-colors"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M3 6h18" />
-                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                  <line x1="10" x2="10" y1="11" y2="17" />
-                  <line x1="14" x2="14" y1="11" y2="17" />
-                </svg>
-                Delete
+                Upload new
               </button>
             </>
           )}
-
-          <button
-            onClick={() => router.push("/")}
-            className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" x2="12" y1="3" y2="15" />
-            </svg>
-            Upload new
-          </button>
         </div>
       </div>
 
