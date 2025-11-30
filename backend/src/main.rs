@@ -68,7 +68,12 @@ async fn main() -> anyhow::Result<()> {
         .layer(TraceLayer::new_for_http())
         .with_state(pool);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
+    let port = env::var("PORT")
+        .or_else(|_| env::var("REDGROUSE_BACKEND_PORT"))
+        .unwrap_or_else(|_| "3001".to_string())
+        .parse::<u16>()
+        .map_err(|e| anyhow::anyhow!("Invalid port: {}", e))?;
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("Listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
