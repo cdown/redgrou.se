@@ -135,13 +135,15 @@ async fn get_upload(
     State(pool): State<SqlitePool>,
     Path(upload_id): Path<String>,
 ) -> Result<Json<UploadMetadata>, ApiError> {
-    let row = sqlx::query_as::<_, (String, String, i64)>(
-        "SELECT id, filename, row_count FROM uploads WHERE id = ?",
+    let row = db::query_with_timeout(
+        sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT id, filename, row_count FROM uploads WHERE id = ?",
+        )
+        .bind(&upload_id)
+        .fetch_optional(&pool),
     )
-    .bind(&upload_id)
-    .fetch_optional(&pool)
     .await
-    .map_err(|_| ApiError::internal("Database error"))?
+    .map_err(|e| e.into_api_error("loading upload metadata", "Database error"))?
     .ok_or_else(|| ApiError::not_found("Upload not found"))?;
 
     Ok(Json(UploadMetadata {
@@ -213,10 +215,9 @@ async fn get_filtered_count(
         db_query = db_query.bind(param);
     }
 
-    let count = db_query
-        .fetch_one(&pool)
+    let count = db::query_with_timeout(db_query.fetch_one(&pool))
         .await
-        .map_err(|_| ApiError::internal("Database error"))?;
+        .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
     Ok(Json(CountResponse { count }))
 }
@@ -228,10 +229,10 @@ async fn fields_metadata() -> Json<Vec<FieldMetadata>> {
 async fn field_values(
     State(pool): State<SqlitePool>,
     Path((upload_id, field)): Path<(String, String)>,
-) -> Json<FieldValues> {
+) -> Result<Json<FieldValues>, ApiError> {
     let values = get_distinct_values(&pool, &upload_id, &field)
         .await
-        .unwrap_or_default();
+        .map_err(|e| e.into_api_error("loading field values", "Database error"))?;
 
-    Json(FieldValues { field, values })
+    Ok(Json(FieldValues { field, values }))
 }

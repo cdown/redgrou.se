@@ -6,6 +6,7 @@ use serde::Deserialize;
 use sqlx::{Row, SqlitePool};
 use tracing::{debug, error};
 
+use crate::db;
 use crate::error::ApiError;
 use crate::filter::FilterGroup;
 
@@ -147,13 +148,9 @@ pub async fn get_tile(
         db_query = db_query.bind(param);
     }
 
-    let rows = match db_query.fetch_all(&pool).await {
-        Ok(r) => r,
-        Err(e) => {
-            error!("Failed to query sightings: {}", e);
-            return Err(ApiError::internal("Database error"));
-        }
-    };
+    let rows = db::query_with_timeout(db_query.fetch_all(&pool))
+        .await
+        .map_err(|e| e.into_api_error("loading tile sightings", "Database error"))?;
 
     let points: Vec<SightingPoint> = rows
         .iter()

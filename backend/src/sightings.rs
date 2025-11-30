@@ -5,6 +5,7 @@ use sqlx::{FromRow, Row, SqlitePool};
 use ts_rs::TS;
 
 use crate::api_constants;
+use crate::db;
 use crate::error::ApiError;
 use crate::filter::FilterGroup;
 
@@ -115,7 +116,8 @@ pub async fn get_sightings(
         .page_size
         .unwrap_or(api_constants::DEFAULT_PAGE_SIZE)
         .min(api_constants::MAX_PAGE_SIZE);
-    let offset = (page - 1) * page_size;
+    let offset = ((page as u64 - 1) * page_size as u64).min(i64::MAX as u64);
+    let offset_i64 = offset as i64;
 
     let mut params: Vec<String> = vec![upload_id.clone()];
 
@@ -201,10 +203,9 @@ pub async fn get_sightings(
             count_query = count_query.bind(param);
         }
 
-        let total = count_query
-            .fetch_one(&pool)
+        let total = db::query_with_timeout(count_query.fetch_one(&pool))
             .await
-            .map_err(|_| ApiError::internal("Database error"))?;
+            .map_err(|e| e.into_api_error("counting grouped sightings", "Database error"))?;
 
         // Determine sort field (must be one of the grouped fields, count, or species_count)
         let sort_field = if let Some(sf) = query.sort_field {
@@ -249,12 +250,11 @@ pub async fn get_sightings(
             select_query = select_query.bind(param);
         }
         select_query = select_query.bind(page_size as i64);
-        select_query = select_query.bind(offset as i64);
+        select_query = select_query.bind(offset_i64);
 
-        let rows = select_query
-            .fetch_all(&pool)
+        let rows = db::query_with_timeout(select_query.fetch_all(&pool))
             .await
-            .map_err(|_| ApiError::internal("Database error"))?;
+            .map_err(|e| e.into_api_error("loading grouped sightings", "Database error"))?;
 
         // Parse results into GroupedSighting
         let mut groups = Vec::new();
@@ -320,10 +320,9 @@ pub async fn get_sightings(
         count_query = count_query.bind(param);
     }
 
-    let total = count_query
-        .fetch_one(&pool)
+    let total = db::query_with_timeout(count_query.fetch_one(&pool))
         .await
-        .map_err(|_| ApiError::internal("Database error"))?;
+        .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
     let select_sql = format!(
         r#"SELECT id, common_name, scientific_name, count, latitude, longitude,
@@ -338,7 +337,7 @@ pub async fn get_sightings(
     );
 
     params.push(page_size.to_string());
-    params.push(offset.to_string());
+    params.push(offset_i64.to_string());
 
     let mut select_query = sqlx::query_as::<_, Sighting>(&select_sql);
 
@@ -346,10 +345,9 @@ pub async fn get_sightings(
         select_query = select_query.bind(param);
     }
 
-    let sightings = select_query
-        .fetch_all(&pool)
+    let sightings = db::query_with_timeout(select_query.fetch_all(&pool))
         .await
-        .map_err(|_| ApiError::internal("Database error"))?;
+        .map_err(|e| e.into_api_error("loading sightings", "Database error"))?;
 
     let total_pages = ((total as f64) / (page_size as f64)).ceil() as u32;
 

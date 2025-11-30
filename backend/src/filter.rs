@@ -1,3 +1,4 @@
+use crate::db::{self, DbQueryError};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use ts_rs::TS;
@@ -306,7 +307,7 @@ pub async fn get_distinct_values(
     pool: &SqlitePool,
     upload_id: &str,
     field: &str,
-) -> Result<Vec<String>, sqlx::Error> {
+) -> Result<Vec<String>, DbQueryError> {
     if !is_allowed_field(field) {
         return Ok(vec![]);
     }
@@ -316,10 +317,8 @@ pub async fn get_distinct_values(
         field, field, field
     );
 
-    let rows: Vec<(String,)> = sqlx::query_as(&query)
-        .bind(upload_id)
-        .fetch_all(pool)
-        .await?;
+    let rows: Vec<(String,)> =
+        db::query_with_timeout(sqlx::query_as(&query).bind(upload_id).fetch_all(pool)).await?;
 
     Ok(rows.into_iter().map(|(v,)| v).collect())
 }
