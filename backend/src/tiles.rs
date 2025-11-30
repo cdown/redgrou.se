@@ -69,6 +69,13 @@ pub async fn get_tile(
 
     let (lon_min, lat_min, lon_max, lat_max) = tile_to_bbox(z, x, y);
 
+    // TODO: Currently we query every point for every tile request, regardless of zoom level.
+    // For small datasets (~1.5k points), this means we re-send the same points as the user zooms in,
+    // which is bandwidth-wasteful but functionally correct.
+    //
+    // In the future (Phase 4), we will implement clustering at low zoom levels (e.g. z < 10).
+    // The client (MapLibre) correctly requests new tiles on zoom because it expects
+    // the backend to provide different data (higher detail) at higher zoom levels.
     debug!(
         "Tile request: z={} x={} y={} bbox=[{},{},{},{}]",
         z, x, y, lon_min, lat_min, lon_max, lat_max
