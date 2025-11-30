@@ -434,7 +434,6 @@ interface ConditionBuilderProps {
   fetchFieldValues: (field: string) => void;
   updateRule: (path: number[], updater: (rule: Rule) => Rule) => void;
   removeRule: (path: number[]) => void;
-  uploadId: string;
 }
 
 function ConditionBuilder({
