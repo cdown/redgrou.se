@@ -420,11 +420,11 @@ export default function UploadPage() {
         <div className="flex gap-2">
           <button
             onClick={() => {
-              setLifersOnly(!lifersOnly);
-              if (!lifersOnly) {
-                // When enabling lifers, clear year tick
-                setYearTickYear(null);
-              }
+              const newLifersOnly = !lifersOnly;
+              setLifersOnly(newLifersOnly);
+              // Always clear year tick when enabling lifers to ensure mutual exclusivity
+              // (If disabling, year tick should already be null, but clear it anyway to be safe)
+              setYearTickYear(null);
             }}
             className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors shadow-lg ${
               lifersOnly
@@ -445,10 +445,8 @@ export default function UploadPage() {
                     ? parseInt(e.target.value, 10)
                     : null;
                   setYearTickYear(year);
-                  // When selecting a year tick, clear lifers
-                  if (year !== null) {
-                    setLifersOnly(false);
-                  }
+                  // Always clear lifers when changing year tick to ensure mutual exclusivity
+                  setLifersOnly(false);
                 }}
                 className={`flex items-center gap-2 rounded-lg pl-9 pr-8 py-2 text-sm font-medium transition-colors shadow-lg cursor-pointer ${
                   yearTickYear
