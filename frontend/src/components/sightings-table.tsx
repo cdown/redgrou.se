@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useRef } from "react";
+import { SparklesIcon } from "lucide-react";
 import { apiFetch, buildApiUrl } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { formatCountry } from "@/lib/countries";
@@ -247,21 +248,7 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
             }`}
             title={lifersOnly ? "Show all sightings" : "Show lifers only"}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 2L2 7l10 5 10-5-10-5z" />
-              <path d="M2 17l10 5 10-5" />
-              <path d="M2 12l10 5 10-5" />
-            </svg>
+            <SparklesIcon className="h-3.5 w-3.5" />
             Lifers only
           </button>
           <span className="text-muted-foreground text-xs">Group by:</span>
