@@ -425,7 +425,11 @@ export default function UploadPage() {
                 }`}
                 style={{ appearance: "none" }}
               >
-                <option value="">Year tick</option>
+                {yearTickYear ? (
+                  <option value="">Clear</option>
+                ) : (
+                  <option value="">Year tick</option>
+                )}
                 {availableYears.map((year) => (
                   <option key={year} value={year}>
                     {year}
