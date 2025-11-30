@@ -589,8 +589,34 @@ export function SightingsMap({
 
       // Only zoom if we're moving to a different integer level
       if (clampedZoom !== roundedCurrentZoom) {
+        // Get mouse position relative to map container
+        const mapContainer = containerRef.current;
+        if (!mapContainer) return;
+
+        const rect = mapContainer.getBoundingClientRect();
+        const point: [number, number] = [
+          e.clientX - rect.left,
+          e.clientY - rect.top,
+        ];
+
+        // Convert pixel coordinates to lng/lat - this is the point we want to keep fixed
+        const mouseLngLat = map.unproject(point);
+
+        // Calculate the scale factor for the zoom change
+        const zoomDiff = clampedZoom - currentZoom;
+        const scale = Math.pow(2, zoomDiff);
+
+        // Calculate new center so that the point under the mouse stays fixed
+        // The center needs to shift to compensate for the zoom scaling
+        const currentCenter = map.getCenter();
+        const newCenter: [number, number] = [
+          mouseLngLat.lng - (mouseLngLat.lng - currentCenter.lng) / scale,
+          mouseLngLat.lat - (mouseLngLat.lat - currentCenter.lat) / scale,
+        ];
+
         isProgrammaticZoom = true;
         map.easeTo({
+          center: newCenter,
           zoom: clampedZoom,
           duration: 200,
         });
