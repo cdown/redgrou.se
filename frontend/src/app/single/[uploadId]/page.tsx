@@ -355,36 +355,6 @@ export default function UploadPage() {
 
       {/* Top-right: View controls */}
       <div className="absolute right-4 top-4 flex flex-col gap-2">
-        {/* Filter button */}
-        {!filterOpen && (
-          <button
-            onClick={() => setFilterOpen(true)}
-            className="flex items-center gap-3 rounded-lg bg-white px-4 py-3 shadow-lg hover:shadow-xl transition-shadow"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="text-stone-500"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <path d="m21 21-4.3-4.3" />
-            </svg>
-            <span className="text-stone-500">Filter sightings...</span>
-            {filter && (
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-medium text-white">
-                ✓
-              </span>
-            )}
-          </button>
-        )}
-
         {/* Lifers and Year Tick filters - mutually exclusive */}
         <div className="flex gap-2">
           <button
@@ -550,6 +520,36 @@ export default function UploadPage() {
 
           {menuExpanded && (
             <>
+              {!filterOpen && (
+                <button
+                  onClick={() => {
+                    setFilterOpen(true);
+                    setMenuExpanded(false);
+                  }}
+                  className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <circle cx="11" cy="11" r="8" />
+                    <path d="m21 21-4.3-4.3" />
+                  </svg>
+                  <span>Advanced filtering</span>
+                  {filter && (
+                    <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-medium text-white">
+                      ✓
+                    </span>
+                  )}
+                </button>
+              )}
               <button
                 onClick={handleCopyLink}
                 className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
