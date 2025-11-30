@@ -141,18 +141,38 @@ pub async fn get_sightings(
             ));
         }
 
-        // Build GROUP BY clause
-        let group_by_clause = validated_fields.join(", ");
+        // Build GROUP BY clause - use DATE() for observed_at to group by date only
+        let group_by_clause: Vec<String> = validated_fields
+            .iter()
+            .map(|f| {
+                if f == "observed_at" {
+                    "DATE(observed_at)".to_string()
+                } else {
+                    f.clone()
+                }
+            })
+            .collect();
+        let group_by_clause_str = group_by_clause.join(", ");
 
-        // Build SELECT clause (preserve NULLs, don't use COALESCE)
-        let select_clause = validated_fields.join(", ");
+        // Build SELECT clause - use DATE() for observed_at, preserve NULLs for others
+        let select_clause: Vec<String> = validated_fields
+            .iter()
+            .map(|f| {
+                if f == "observed_at" {
+                    "DATE(observed_at) as observed_at".to_string()
+                } else {
+                    f.clone()
+                }
+            })
+            .collect();
+        let select_clause_str = select_clause.join(", ");
 
         // Count total groups
         let count_sql = format!(
             "SELECT COUNT(*) FROM (SELECT {} FROM sightings WHERE upload_id = ?{} GROUP BY {})",
-            select_clause,
+            select_clause_str,
             filter_clause.as_deref().unwrap_or(""),
-            group_by_clause
+            group_by_clause_str
         );
 
         let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
@@ -183,12 +203,19 @@ pub async fn get_sightings(
         };
 
         // Build SELECT query with COUNT(*)
+        // For sorting by observed_at, use DATE() to match the grouping
+        let sort_field_actual = if sort_field == "observed_at" {
+            "DATE(observed_at)"
+        } else {
+            sort_field
+        };
+
         let select_sql = format!(
             "SELECT {}, COUNT(*) as count FROM sightings WHERE upload_id = ?{} GROUP BY {} ORDER BY {} {} LIMIT ? OFFSET ?",
-            select_clause,
+            select_clause_str,
             filter_clause.as_deref().unwrap_or(""),
-            group_by_clause,
-            sort_field,
+            group_by_clause_str,
+            sort_field_actual,
             sort_dir
         );
 
