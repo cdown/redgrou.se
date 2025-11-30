@@ -195,7 +195,9 @@ function updatePopupWithSpeciesInfo(
   const safeAttribution = sanitizeText(info.photoAttribution);
   const safePhotoUrl = sanitizeUrl(info.photoUrl);
   const safeInatUrl = sanitizeUrl(info.inaturalistUrl);
-  const safeDateDisplay = observedAt ? sanitizeText(formatDate(observedAt)) : null;
+  const safeDateDisplay = observedAt
+    ? sanitizeText(formatDate(observedAt))
+    : null;
 
   container.innerHTML = `
     <div style="width: 300px; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; border-radius: 8px;">
@@ -495,6 +497,7 @@ export function SightingsMap({
       },
       center: [0, 20],
       zoom: 2,
+      pixelRatio: typeof window !== "undefined" ? window.devicePixelRatio : 1,
       transformRequest: (
         url: string,
         resourceType?: maplibregl.ResourceType,
