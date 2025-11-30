@@ -168,11 +168,24 @@ export default function UploadPage() {
   }, [uploadId]);
 
   useEffect(() => {
-    if (!uploadId || !filter) return;
+    if (!uploadId) return;
 
     let cancelled = false;
-    const filterParam = encodeURIComponent(filterToJson(filter));
-    const url = `${buildApiUrl(UPLOAD_COUNT_ROUTE, { upload_id: uploadId })}?filter=${filterParam}`;
+    const params = new URLSearchParams();
+
+    if (filter) {
+      params.set("filter", filterToJson(filter));
+    }
+
+    if (lifersOnly) {
+      params.set("lifers_only", "true");
+    }
+
+    if (yearTickYear !== null) {
+      params.set("year_tick_year", String(yearTickYear));
+    }
+
+    const url = `${buildApiUrl(UPLOAD_COUNT_ROUTE, { upload_id: uploadId })}?${params}`;
 
     apiFetch(url)
       .then((res) => res.json())
@@ -187,7 +200,7 @@ export default function UploadPage() {
       cancelled = true;
       setFilteredCount(null);
     };
-  }, [uploadId, filter]);
+  }, [uploadId, filter, lifersOnly, yearTickYear]);
 
   const handleCopyLink = useCallback(async () => {
     const url = window.location.origin + "/single/" + uploadId;
@@ -324,7 +337,9 @@ export default function UploadPage() {
   }
 
   const showingFiltered =
-    filter && filteredCount !== null && filteredCount !== upload.row_count;
+    (filter || lifersOnly || yearTickYear !== null) &&
+    filteredCount !== null &&
+    filteredCount !== upload.row_count;
   const canEdit = !!editToken;
 
   return (
