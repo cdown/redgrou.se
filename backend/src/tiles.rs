@@ -53,6 +53,8 @@ struct SightingPoint {
 #[derive(Debug, Deserialize)]
 pub struct TileQuery {
     filter: Option<String>,
+    lifers_only: Option<bool>,
+    year_tick_year: Option<i32>,
 }
 
 pub async fn get_tile(
@@ -89,7 +91,7 @@ pub async fn get_tile(
         lon_max.to_string(),
     ];
 
-    let filter_clause = if let Some(filter_json) = &query.filter {
+    let mut filter_clause = if let Some(filter_json) = &query.filter {
         match serde_json::from_str::<FilterGroup>(filter_json) {
             Ok(filter) => filter
                 .to_sql(&mut params)
@@ -102,6 +104,25 @@ pub async fn get_tile(
     } else {
         None
     };
+
+    // Add lifers_only filter if requested
+    if query.lifers_only == Some(true) {
+        let lifer_clause = " AND lifer = 1".to_string();
+        filter_clause = Some(match filter_clause {
+            Some(existing) => format!("{}{}", existing, lifer_clause),
+            None => lifer_clause,
+        });
+    }
+
+    // Add year_tick filter if requested
+    if let Some(year) = query.year_tick_year {
+        params.push(year.to_string());
+        let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();
+        filter_clause = Some(match filter_clause {
+            Some(existing) => format!("{}{}", existing, year_tick_clause),
+            None => year_tick_clause,
+        });
+    }
 
     let sql = format!(
         r#"

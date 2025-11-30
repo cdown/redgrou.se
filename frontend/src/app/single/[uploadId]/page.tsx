@@ -15,6 +15,7 @@ import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import {
   UPLOAD_DETAILS_ROUTE,
   UPLOAD_COUNT_ROUTE,
+  FIELD_VALUES_ROUTE,
 } from "@/lib/generated/api_constants";
 
 type ViewMode = "map" | "table";
@@ -50,6 +51,9 @@ export default function UploadPage() {
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("map");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [lifersOnly, setLifersOnly] = useState(false);
+  const [yearTickYear, setYearTickYear] = useState<number | null>(null);
+  const [availableYears, setAvailableYears] = useState<number[]>([]);
 
   const [editToken, setEditToken] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -90,6 +94,30 @@ export default function UploadPage() {
       .then(setUpload)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
+
+    // Fetch available years for year tick filter
+    apiFetch(
+      buildApiUrl(FIELD_VALUES_ROUTE, {
+        upload_id: uploadId,
+        field: "year",
+      })
+    )
+      .then((res) => {
+        if (res.ok) {
+          return res.json();
+        }
+        return { values: [] };
+      })
+      .then((data: { values: string[] }) => {
+        const years = data.values
+          .map((y) => parseInt(y, 10))
+          .filter((y) => !isNaN(y))
+          .sort((a, b) => b - a); // Sort descending (most recent first)
+        setAvailableYears(years);
+      })
+      .catch(() => {
+        // Ignore errors, just don't show year selector
+      });
   }, [uploadId]);
 
   useEffect(() => {
@@ -254,7 +282,12 @@ export default function UploadPage() {
     <main className="fixed inset-0 overflow-hidden">
       {/* Full-screen map */}
       <div className="absolute inset-0">
-        <SightingsMap uploadId={upload.upload_id} filter={filter} />
+        <SightingsMap
+          uploadId={upload.upload_id}
+          filter={filter}
+          lifersOnly={lifersOnly}
+          yearTickYear={yearTickYear}
+        />
       </div>
 
       {/* Table overlay (slides up from bottom when active) */}
@@ -292,7 +325,12 @@ export default function UploadPage() {
             </button>
           </div>
           <div className="relative flex-1 overflow-hidden">
-            <SightingsTable uploadId={upload.upload_id} filter={filter} />
+            <SightingsTable
+              uploadId={upload.upload_id}
+              filter={filter}
+              lifersOnly={lifersOnly}
+              yearTickYear={yearTickYear}
+            />
           </div>
         </div>
       </div>
@@ -347,6 +385,62 @@ export default function UploadPage() {
 
       {/* Top-right: View controls */}
       <div className="absolute right-4 top-4 flex flex-col gap-2">
+        {/* Lifers and Year Tick filters - mutually exclusive */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              setLifersOnly(!lifersOnly);
+              if (!lifersOnly) {
+                // When enabling lifers, clear year tick
+                setYearTickYear(null);
+              }
+            }}
+            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors shadow-lg ${
+              lifersOnly
+                ? "bg-stone-900 text-white"
+                : "bg-white text-stone-600 hover:bg-stone-50"
+            }`}
+            title={lifersOnly ? "Show all sightings" : "Show lifers only"}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg>
+            Lifers
+          </button>
+          {availableYears.length > 0 && (
+            <select
+              value={yearTickYear || ""}
+              onChange={(e) => {
+                const year = e.target.value ? parseInt(e.target.value, 10) : null;
+                setYearTickYear(year);
+                // When selecting a year tick, clear lifers
+                if (year !== null) {
+                  setLifersOnly(false);
+                }
+              }}
+              className="rounded-lg border-0 bg-white px-3 py-2 text-sm font-medium text-stone-600 shadow-lg hover:bg-stone-50 transition-colors cursor-pointer"
+              style={{ appearance: "auto" }}
+            >
+              <option value="">Year tick</option>
+              {availableYears.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
         {/* View toggle */}
         <div className="flex overflow-hidden rounded-lg bg-white shadow-lg">
           <button

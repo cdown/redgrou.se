@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { apiFetch, buildApiUrl } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -238,7 +238,6 @@ export function QueryBuilder({
             setCombinator={setCombinator}
             isRoot
             depth={0}
-            uploadId={uploadId}
           />
         </div>
 
@@ -294,7 +293,6 @@ export function QueryBuilder({
             setCombinator={setCombinator}
             isRoot
             depth={0}
-            uploadId={uploadId}
           />
 
           <div className="mt-4 flex gap-2">
@@ -331,7 +329,6 @@ interface GroupBuilderProps {
   setCombinator: (path: number[], combinator: "and" | "or") => void;
   isRoot?: boolean;
   depth?: number;
-  uploadId: string;
 }
 
 function GroupBuilder({
@@ -346,7 +343,6 @@ function GroupBuilder({
   setCombinator,
   isRoot,
   depth = 0,
-  uploadId,
 }: GroupBuilderProps) {
   const bgColour = GROUP_COLOURS[depth % GROUP_COLOURS.length];
 
@@ -384,7 +380,6 @@ function GroupBuilder({
                 removeRule={removeRule}
                 setCombinator={setCombinator}
                 depth={depth + 1}
-                uploadId={uploadId}
               />
               <Button
                 variant="ghost"
@@ -404,7 +399,6 @@ function GroupBuilder({
               fetchFieldValues={fetchFieldValues}
               updateRule={updateRule}
               removeRule={removeRule}
-              uploadId={uploadId}
             />
           )}
         </div>
@@ -451,7 +445,6 @@ function ConditionBuilder({
   fetchFieldValues,
   updateRule,
   removeRule,
-  uploadId,
 }: ConditionBuilderProps) {
   const field = fields.find((f) => f.name === condition.field);
   const fieldType = field?.field_type || "string";
@@ -460,7 +453,7 @@ function ConditionBuilder({
   const isFreeform = isFreeformOperator(condition.operator);
   const isMultiValue = condition.operator === "in" || condition.operator === "not_in";
 
-  const skipOperator = fieldType === "boolean" || fieldType === "year_tick";
+  const skipOperator = fieldType === "boolean";
 
   return (
     <div className="flex flex-1 flex-wrap items-center gap-2">
@@ -478,9 +471,6 @@ function ConditionBuilder({
           } else if (newFieldType === "boolean") {
             defaultOp = "eq";
             defaultValue = 1;
-          } else if (newFieldType === "year_tick") {
-            defaultOp = "in";
-            defaultValue = [];
           }
 
           updateRule(path, () => ({
@@ -527,13 +517,7 @@ function ConditionBuilder({
         </Select>
       )}
 
-      {condition.field && fieldType === "year_tick" ? (
-        <YearMultiSelect
-          uploadId={uploadId}
-          values={Array.isArray(condition.value) ? condition.value.map(String) : []}
-          onChange={(v) => updateRule(path, () => ({ ...condition, value: v }))}
-        />
-      ) : condition.field && isMultiValue ? (
+      {condition.field && isMultiValue ? (
         <MultiCombobox
           options={toComboboxOptions(values, condition.field)}
           values={Array.isArray(condition.value) ? condition.value : []}
@@ -636,52 +620,5 @@ function DatePicker({ value, onChange }: DatePickerProps) {
         />
       </PopoverContent>
     </Popover>
-  );
-}
-
-interface YearMultiSelectProps {
-  uploadId: string;
-  values: string[];
-  onChange: (values: string[]) => void;
-}
-
-function YearMultiSelect({ uploadId, values, onChange }: YearMultiSelectProps) {
-  const [years, setYears] = useState<string[]>([]);
-
-  useEffect(() => {
-    const url = buildApiUrl(FIELD_VALUES_ROUTE, {
-      upload_id: uploadId,
-      field: "year",
-    });
-
-    apiFetch(url)
-      .then((res) => res.json())
-      .then((data) => {
-        const sortedYears = (data.values as string[])
-          .filter((y) => y && y !== "0")
-          .sort((a, b) => Number(b) - Number(a));
-        setYears(sortedYears);
-      })
-      .catch(console.error);
-  }, [uploadId]);
-
-  const options = useMemo(
-    () => years.map((y) => ({ value: y, label: y })),
-    [years]
-  );
-
-  const handleChange = (newValues: string[]) => {
-    onChange(newValues.sort((a, b) => Number(b) - Number(a)));
-  };
-
-  return (
-    <MultiCombobox
-      options={options}
-      values={values}
-      onChange={handleChange}
-      placeholder="Select years..."
-      searchPlaceholder="Search years..."
-      className="min-w-32 flex-1"
-    />
   );
 }

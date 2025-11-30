@@ -42,6 +42,7 @@ pub struct SightingsQuery {
     page_size: Option<u32>,
     group_by: Option<String>,
     lifers_only: Option<bool>,
+    year_tick_year: Option<i32>,
 }
 
 #[derive(Debug, Serialize, TS)]
@@ -134,6 +135,16 @@ pub async fn get_sightings(
         filter_clause = Some(match filter_clause {
             Some(existing) => format!("{}{}", existing, lifer_clause),
             None => lifer_clause,
+        });
+    }
+
+    // Add year_tick filter if requested
+    if let Some(year) = query.year_tick_year {
+        params.push(year.to_string());
+        let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();
+        filter_clause = Some(match filter_clause {
+            Some(existing) => format!("{}{}", existing, year_tick_clause),
+            None => year_tick_clause,
         });
     }
 

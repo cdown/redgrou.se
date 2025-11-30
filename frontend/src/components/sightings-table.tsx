@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState, useRef } from "react";
-import { SparklesIcon } from "lucide-react";
 import { apiFetch, buildApiUrl } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { formatCountry } from "@/lib/countries";
@@ -21,6 +20,8 @@ import {
 interface SightingsTableProps {
   uploadId: string;
   filter: FilterGroup | null;
+  lifersOnly: boolean;
+  yearTickYear: number | null;
 }
 
 type SortDir = "asc" | "desc";
@@ -49,7 +50,12 @@ const GROUP_BY_OPTIONS: MultiComboboxOption[] = [
   { value: "observed_at", label: "Date" },
 ];
 
-export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
+export function SightingsTable({
+  uploadId,
+  filter,
+  lifersOnly,
+  yearTickYear,
+}: SightingsTableProps) {
   const [sightings, setSightings] = useState<Sighting[]>([]);
   const [groups, setGroups] = useState<GroupedSightingDisplay[]>([]);
   const [total, setTotal] = useState(0);
@@ -58,7 +64,6 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
   const [sortField, setSortField] = useState<SortField>("observed_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [groupBy, setGroupBy] = useState<string[]>([]);
-  const [lifersOnly, setLifersOnly] = useState(false);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
@@ -86,6 +91,10 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
 
       if (lifersOnly) {
         params.set("lifers_only", "true");
+      }
+
+      if (yearTickYear !== null) {
+        params.set("year_tick_year", String(yearTickYear));
       }
 
       try {
@@ -134,7 +143,7 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
         setLoading(false);
       }
     },
-    [uploadId, filter, sortField, sortDir, groupBy, lifersOnly],
+    [uploadId, filter, sortField, sortDir, groupBy, lifersOnly, yearTickYear],
   );
 
   useEffect(() => {
@@ -256,18 +265,6 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
           )}
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setLifersOnly(!lifersOnly)}
-            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
-              lifersOnly
-                ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                : "bg-muted text-muted-foreground hover:bg-muted/80"
-            }`}
-            title={lifersOnly ? "Show all sightings" : "Show lifers only"}
-          >
-            <SparklesIcon className="h-3.5 w-3.5" />
-            Lifers only
-          </button>
           <span className="text-muted-foreground text-xs">Group by:</span>
           <div className="w-[200px]">
             <MultiCombobox

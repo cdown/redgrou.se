@@ -11,6 +11,8 @@ import { TILE_ROUTE } from "@/lib/generated/api_constants";
 interface SightingsMapProps {
   uploadId: string;
   filter: FilterGroup | null;
+  lifersOnly: boolean;
+  yearTickYear: number | null;
 }
 
 function stripHtml(html: string): string {
@@ -144,7 +146,12 @@ function updatePopupWithSpeciesInfo(
   `;
 }
 
-export function SightingsMap({ uploadId, filter }: SightingsMapProps) {
+export function SightingsMap({
+  uploadId,
+  filter,
+  lifersOnly,
+  yearTickYear,
+}: SightingsMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
@@ -162,9 +169,19 @@ export function SightingsMap({ uploadId, filter }: SightingsMapProps) {
       mapRef.current = null;
     }
 
-    const filterParam = filter
-      ? `?filter=${encodeURIComponent(filterToJson(filter))}`
-      : "";
+    const params = new URLSearchParams();
+    if (filter) {
+      params.set("filter", filterToJson(filter));
+    }
+    if (lifersOnly) {
+      params.set("lifers_only", "true");
+    }
+    if (yearTickYear !== null) {
+      params.set("year_tick_year", String(yearTickYear));
+    }
+
+    const queryString = params.toString();
+    const filterParam = queryString ? `?${queryString}` : "";
 
     const tileUrl = getApiUrl(
       buildApiUrl(TILE_ROUTE, { upload_id: uploadId }) + ".pbf" + filterParam
@@ -350,7 +367,7 @@ export function SightingsMap({ uploadId, filter }: SightingsMapProps) {
       map.remove();
       mapRef.current = null;
     };
-  }, [uploadId, filter]);
+  }, [uploadId, filter, lifersOnly, yearTickYear]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }

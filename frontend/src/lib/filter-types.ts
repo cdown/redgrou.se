@@ -35,7 +35,7 @@ export function isGroup(rule: Rule): rule is FilterGroup {
 export interface FieldMetadata {
   name: string;
   label: string;
-  field_type: "string" | "number" | "date" | "boolean" | "year_tick";
+  field_type: "string" | "number" | "date" | "boolean";
 }
 
 export const OPERATORS: Record<
@@ -70,9 +70,6 @@ export function getOperatorsForType(fieldType: string): Operator[] {
   if (fieldType === "boolean") {
     return ["is_true", "is_false"];
   }
-  if (fieldType === "year_tick") {
-    return ["in"];
-  }
   return Object.entries(OPERATORS)
     .filter(([, meta]) => meta.types.includes(fieldType))
     .map(([op]) => op as Operator);
@@ -81,9 +78,6 @@ export function getOperatorsForType(fieldType: string): Operator[] {
 export function getOperatorLabel(operator: Operator, fieldType: string): string {
   if (fieldType === "number" && NUMBER_OPERATORS[operator]) {
     return NUMBER_OPERATORS[operator].label;
-  }
-  if (fieldType === "year_tick" && operator === "in") {
-    return "for years";
   }
   return OPERATORS[operator]?.label || operator;
 }
@@ -123,16 +117,6 @@ export function filterToJson(filter: FilterGroup): string {
         }
         if (rule.operator === "is_false") {
           return { field: rule.field, operator: "eq", value: 0 };
-        }
-        // Handle year_tick - expand to year_tick=1 AND year IN (...)
-        if (rule.field === "year_tick" && rule.operator === "in" && Array.isArray(rule.value)) {
-          return {
-            combinator: "and",
-            rules: [
-              { field: "year_tick", operator: "eq", value: 1 },
-              { field: "year", operator: "in", value: rule.value.map((y) => String(y)) },
-            ],
-          };
         }
         return {
           field: rule.field,

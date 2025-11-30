@@ -64,8 +64,6 @@ const ALLOWED_FIELDS: &[&str] = &[
     "count",
     "observed_at",
     "year",
-    "lifer",
-    "year_tick",
 ];
 
 fn is_allowed_field(field: &str) -> bool {
@@ -221,16 +219,6 @@ pub fn get_field_metadata() -> Vec<FieldMetadata> {
             name: "year".into(),
             label: "Year".into(),
             field_type: "number".into(),
-        },
-        FieldMetadata {
-            name: "lifer".into(),
-            label: "Is lifer".into(),
-            field_type: "boolean".into(),
-        },
-        FieldMetadata {
-            name: "year_tick".into(),
-            label: "Year tick for years".into(),
-            field_type: "year_tick".into(),
         },
     ]
 }
