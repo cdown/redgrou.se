@@ -209,7 +209,7 @@ export function SightingsMap({
       },
       center: [0, 20],
       zoom: 2,
-      transformRequest: (url: string, resourceType: string) => {
+      transformRequest: (url: string, resourceType?: maplibregl.ResourceType) => {
         // Only intercept vector tile requests for our sightings source
         if (
           resourceType === "Tile" &&
@@ -226,17 +226,16 @@ export function SightingsMap({
           const controller = new AbortController();
           controllersMap.set(url, controller);
 
-          // Return a Request object with the abort signal
-          // MapLibre will use this Request and will cancel it via the signal when the tile
+          // Return RequestParameters with the abort signal
+          // MapLibre will use this and will cancel it via the signal when the tile
           // is no longer needed (e.g., user has zoomed past it)
-          const request = new Request(url, {
+          return {
+            url,
             signal: controller.signal,
-          });
-
-          return request;
+          };
         }
-        // For non-tile requests or other sources, return null to use default handling
-        return null;
+        // For non-tile requests or other sources, return undefined to use default handling
+        return undefined;
       },
     });
 
