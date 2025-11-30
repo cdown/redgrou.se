@@ -497,7 +497,10 @@ export function SightingsMap({
       },
       center: [0, 20],
       zoom: 2,
-      pixelRatio: typeof window !== "undefined" ? window.devicePixelRatio : 1,
+      pixelRatio:
+        typeof window !== "undefined"
+          ? Math.min(window.devicePixelRatio, 2)
+          : 1,
       transformRequest: (
         url: string,
         resourceType?: maplibregl.ResourceType,
