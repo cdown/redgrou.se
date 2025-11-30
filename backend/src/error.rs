@@ -61,6 +61,14 @@ impl ApiError {
     pub fn forbidden(message: impl Into<String>) -> Self {
         Self::with_code(StatusCode::FORBIDDEN, message, "FORBIDDEN")
     }
+
+    pub fn service_unavailable(message: impl Into<String>) -> Self {
+        Self::with_code(
+            StatusCode::SERVICE_UNAVAILABLE,
+            message,
+            "SERVICE_UNAVAILABLE",
+        )
+    }
 }
 
 impl IntoResponse for ApiError {

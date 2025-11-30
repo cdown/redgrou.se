@@ -1,15 +1,21 @@
+use axum::error_handling::HandleErrorLayer;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderValue};
-use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::routing::{get, post, put};
+use axum::{BoxError, Json, Router};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::env;
 use std::net::SocketAddr;
+use std::time::Duration;
+use tower::limit::ConcurrencyLimitLayer;
+use tower::timeout::error::Elapsed;
+use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
+use tower_http::{catch_panic::CatchPanicLayer, timeout::RequestBodyTimeoutLayer};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 use ts_rs::TS;
@@ -22,6 +28,10 @@ use redgrouse::filter::{
 use redgrouse::{db, sightings, tiles, upload};
 
 const BUILD_VERSION: &str = env!("BUILD_VERSION");
+const GLOBAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const GLOBAL_CONCURRENCY_LIMIT: usize = 100;
+const UPLOAD_CONCURRENCY_LIMIT: usize = 2;
+const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -48,19 +58,22 @@ async fn main() -> anyhow::Result<()> {
         HeaderValue::from_static(BUILD_VERSION),
     );
 
+    let ingest_layer = ServiceBuilder::new()
+        .layer(RequestBodyLimitLayer::new(upload::MAX_UPLOAD_BODY_BYTES))
+        .layer(RequestBodyTimeoutLayer::new(UPLOAD_BODY_TIMEOUT))
+        .layer(ConcurrencyLimitLayer::new(UPLOAD_CONCURRENCY_LIMIT))
+        .into_inner();
+
+    let ingest_routes = Router::new()
+        .route(api_constants::UPLOAD_ROUTE, post(upload::upload_csv))
+        .route(api_constants::UPLOAD_DETAILS_ROUTE, put(upload::update_csv))
+        .route_layer(ingest_layer);
+
     let app = Router::new()
         .route(api_constants::HEALTH_ROUTE, get(health_check))
         .route(
-            api_constants::UPLOAD_ROUTE,
-            post(upload::upload_csv)
-                .layer(RequestBodyLimitLayer::new(upload::MAX_UPLOAD_BODY_BYTES)),
-        )
-        .route(
             api_constants::UPLOAD_DETAILS_ROUTE,
-            get(get_upload)
-                .put(upload::update_csv)
-                .delete(upload::delete_upload)
-                .layer(RequestBodyLimitLayer::new(upload::MAX_UPLOAD_BODY_BYTES)),
+            get(get_upload).delete(upload::delete_upload),
         )
         .route(api_constants::UPLOAD_COUNT_ROUTE, get(get_filtered_count))
         .route(
@@ -70,9 +83,18 @@ async fn main() -> anyhow::Result<()> {
         .route(api_constants::TILE_ROUTE, get(tiles::get_tile))
         .route(api_constants::FIELDS_ROUTE, get(fields_metadata))
         .route(api_constants::FIELD_VALUES_ROUTE, get(field_values))
+        .merge(ingest_routes)
         .layer(build_version_header)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
+        .layer(CatchPanicLayer::new())
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(handle_timeout_error))
+                .timeout(GLOBAL_REQUEST_TIMEOUT)
+                .into_inner(),
+        )
+        .layer(ConcurrencyLimitLayer::new(GLOBAL_CONCURRENCY_LIMIT))
         .with_state(pool);
 
     let port = env::var("PORT")
@@ -91,6 +113,14 @@ async fn main() -> anyhow::Result<()> {
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+async fn handle_timeout_error(err: BoxError) -> ApiError {
+    if err.is::<Elapsed>() {
+        ApiError::service_unavailable("Request timed out")
+    } else {
+        ApiError::internal("Request failed")
+    }
 }
 
 #[derive(Serialize, TS)]
