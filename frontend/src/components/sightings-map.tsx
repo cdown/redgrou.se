@@ -190,6 +190,82 @@ function showSpeciesPopup(
   });
 }
 
+/**
+ * Build tile URL with filter parameters
+ */
+function buildTileUrl(
+  uploadId: string,
+  filter: FilterGroup | null,
+  lifersOnly: boolean,
+  yearTickYear: number | null
+): string {
+  const params = new URLSearchParams();
+  if (filter) {
+    params.set("filter", filterToJson(filter));
+  }
+  if (lifersOnly) {
+    params.set("lifers_only", "true");
+  }
+  if (yearTickYear !== null) {
+    params.set("year_tick_year", String(yearTickYear));
+  }
+
+  const queryString = params.toString();
+  const filterParam = queryString ? `?${queryString}` : "";
+
+  return getApiUrl(
+    buildApiUrl(TILE_ROUTE, { upload_id: uploadId }) + ".pbf" + filterParam
+  );
+}
+
+/**
+ * Add sightings layer and attach event handlers
+ */
+function addSightingsLayer(map: maplibregl.Map): void {
+  if (map.getLayer("sightings-circles")) {
+    return; // Layer already exists
+  }
+
+  map.addLayer({
+    id: "sightings-circles",
+    type: "circle",
+    source: "sightings",
+    "source-layer": "sightings",
+    paint: {
+      "circle-radius": 6,
+      "circle-color": "#e63946",
+      "circle-stroke-width": 1.5,
+      "circle-stroke-color": "#fff",
+    },
+  });
+
+  map.on("click", "sightings-circles", (e) => {
+    if (!e.features?.length) return;
+    const feature = e.features[0];
+    const name = feature.properties?.name || "Unknown";
+    const scientificName = feature.properties?.scientific_name;
+    const count = feature.properties?.count || 1;
+    const lngLat = e.lngLat;
+
+    showSpeciesPopup(
+      map,
+      lngLat.lat,
+      lngLat.lng,
+      name,
+      count,
+      scientificName
+    );
+  });
+
+  map.on("mouseenter", "sightings-circles", () => {
+    map.getCanvas().style.cursor = "pointer";
+  });
+
+  map.on("mouseleave", "sightings-circles", () => {
+    map.getCanvas().style.cursor = "";
+  });
+}
+
 export function SightingsMap({
   uploadId,
   filter,
@@ -207,6 +283,7 @@ export function SightingsMap({
     onMapReadyRef.current = onMapReady;
   }, [onMapReady]);
 
+  // Initialize map (only when uploadId changes)
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -219,24 +296,6 @@ export function SightingsMap({
       mapRef.current.remove();
       mapRef.current = null;
     }
-
-    const params = new URLSearchParams();
-    if (filter) {
-      params.set("filter", filterToJson(filter));
-    }
-    if (lifersOnly) {
-      params.set("lifers_only", "true");
-    }
-    if (yearTickYear !== null) {
-      params.set("year_tick_year", String(yearTickYear));
-    }
-
-    const queryString = params.toString();
-    const filterParam = queryString ? `?${queryString}` : "";
-
-    const tileUrl = getApiUrl(
-      buildApiUrl(TILE_ROUTE, { upload_id: uploadId }) + ".pbf" + filterParam
-    );
 
     const map = new maplibregl.Map({
       container: containerRef.current,
@@ -266,6 +325,7 @@ export function SightingsMap({
           resourceType === "Tile" &&
           url.includes(TILE_ROUTE.replace("{upload_id}", uploadId))
         ) {
+          const controllersMap = abortControllersRef.current;
           // Cancel any existing request for this exact URL (same tile being re-requested)
           const existingController = controllersMap.get(url);
           if (existingController) {
@@ -398,56 +458,16 @@ export function SightingsMap({
       };
     };
 
-    // Expose navigation function immediately if map is already loaded
-    // (e.g., on re-render with new filters)
-    if (map.loaded() && onMapReadyRef.current) {
-      onMapReadyRef.current(createNavigateFunction());
-    }
-
+    // Add sightings source and layer when map loads
     map.on("load", () => {
+      const tileUrl = buildTileUrl(uploadId, filter, lifersOnly, yearTickYear);
+
       map.addSource("sightings", {
         type: "vector",
         tiles: [tileUrl],
       });
 
-      map.addLayer({
-        id: "sightings-circles",
-        type: "circle",
-        source: "sightings",
-        "source-layer": "sightings",
-        paint: {
-          "circle-radius": 6,
-          "circle-color": "#e63946",
-          "circle-stroke-width": 1.5,
-          "circle-stroke-color": "#fff",
-        },
-      });
-
-      map.on("click", "sightings-circles", (e) => {
-        if (!e.features?.length) return;
-        const feature = e.features[0];
-        const name = feature.properties?.name || "Unknown";
-        const scientificName = feature.properties?.scientific_name;
-        const count = feature.properties?.count || 1;
-        const lngLat = e.lngLat;
-
-        showSpeciesPopup(
-          map,
-          lngLat.lat,
-          lngLat.lng,
-          name,
-          count,
-          scientificName
-        );
-      });
-
-      map.on("mouseenter", "sightings-circles", () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-
-      map.on("mouseleave", "sightings-circles", () => {
-        map.getCanvas().style.cursor = "";
-      });
+      addSightingsLayer(map);
 
       // Expose navigation function to parent component when map loads
       if (onMapReadyRef.current) {
@@ -472,6 +492,56 @@ export function SightingsMap({
       map.remove();
       mapRef.current = null;
     };
+    // Filter props (filter, lifersOnly, yearTickYear) are intentionally omitted.
+    // Map initialization only runs when uploadId changes. Filter changes are
+    // handled by a separate effect that updates the tile source without
+    // recreating the map, preserving the viewport.
+  }, [uploadId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Update tile source when filters change (preserves viewport)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.loaded() || !map.getSource("sightings")) {
+      return;
+    }
+
+    const tileUrl = buildTileUrl(uploadId, filter, lifersOnly, yearTickYear);
+    const source = map.getSource("sightings") as maplibregl.VectorTileSource;
+
+    // Check if URL actually changed
+    if (source && source.tiles && source.tiles[0] === tileUrl) {
+      return;
+    }
+
+    // Preserve current viewport
+    const center = map.getCenter();
+    const zoom = map.getZoom();
+    const bearing = map.getBearing();
+    const pitch = map.getPitch();
+
+    // Remove layer first (it depends on the source)
+    // Event handlers are automatically removed when layer is removed
+    if (map.getLayer("sightings-circles")) {
+      map.removeLayer("sightings-circles");
+    }
+
+    // Remove and re-add source with new tile URL
+    map.removeSource("sightings");
+    map.addSource("sightings", {
+      type: "vector",
+      tiles: [tileUrl],
+    });
+
+    // Re-add layer and event handlers
+    addSightingsLayer(map);
+
+    // Restore viewport immediately (map will not animate)
+    map.jumpTo({
+      center: center,
+      zoom: zoom,
+      bearing: bearing,
+      pitch: pitch,
+    });
   }, [uploadId, filter, lifersOnly, yearTickYear]);
 
   return <div ref={containerRef} className="h-full w-full" />;
