@@ -41,6 +41,7 @@ pub struct SightingsQuery {
     page: Option<u32>,
     page_size: Option<u32>,
     group_by: Option<String>,
+    lifers_only: Option<bool>,
 }
 
 #[derive(Debug, Serialize, TS)]
@@ -119,7 +120,7 @@ pub async fn get_sightings(
 
     let mut params: Vec<String> = vec![upload_id.clone()];
 
-    let filter_clause = if let Some(filter_json) = &query.filter {
+    let mut filter_clause = if let Some(filter_json) = &query.filter {
         match serde_json::from_str::<FilterGroup>(filter_json) {
             Ok(filter) => filter
                 .to_sql(&mut params)
@@ -129,6 +130,15 @@ pub async fn get_sightings(
     } else {
         None
     };
+
+    // Add lifers_only filter if requested
+    if query.lifers_only == Some(true) {
+        let lifer_clause = " AND lifer = 1".to_string();
+        filter_clause = Some(match filter_clause {
+            Some(existing) => format!("{}{}", existing, lifer_clause),
+            None => lifer_clause,
+        });
+    }
 
     // Handle grouped query
     if let Some(group_by_str) = &query.group_by {

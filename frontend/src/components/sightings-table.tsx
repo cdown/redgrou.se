@@ -50,6 +50,7 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
   const [sortField, setSortField] = useState<SortField>("observed_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [groupBy, setGroupBy] = useState<string[]>([]);
+  const [lifersOnly, setLifersOnly] = useState(false);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
@@ -73,6 +74,10 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
 
       if (groupBy.length > 0) {
         params.set("group_by", groupBy.join(","));
+      }
+
+      if (lifersOnly) {
+        params.set("lifers_only", "true");
       }
 
       try {
@@ -111,7 +116,7 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
         setLoading(false);
       }
     },
-    [uploadId, filter, sortField, sortDir, groupBy],
+    [uploadId, filter, sortField, sortDir, groupBy, lifersOnly],
   );
 
   useEffect(() => {
@@ -232,7 +237,33 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
             </>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setLifersOnly(!lifersOnly)}
+            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              lifersOnly
+                ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            }`}
+            title={lifersOnly ? "Show all sightings" : "Show lifers only"}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 2L2 7l10 5 10-5-10-5z" />
+              <path d="M2 17l10 5 10-5" />
+              <path d="M2 12l10 5 10-5" />
+            </svg>
+            Lifers only
+          </button>
           <span className="text-muted-foreground text-xs">Group by:</span>
           <div className="w-[200px]">
             <MultiCombobox
