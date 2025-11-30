@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useMemo } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, buildApiUrl } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,10 @@ import {
   Operator,
 } from "@/lib/filter-types";
 import { formatCountry } from "@/lib/countries";
+import {
+  FIELDS_ROUTE,
+  FIELD_VALUES_ROUTE,
+} from "@/lib/generated/api_constants";
 
 function toComboboxOptions(
   values: string[],
@@ -64,7 +68,7 @@ export function QueryBuilder({
   const [fieldValues, setFieldValues] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
-    apiFetch("/api/fields")
+    apiFetch(FIELDS_ROUTE)
       .then((res) => res.json())
       .then(setFields)
       .catch(console.error);
@@ -74,7 +78,11 @@ export function QueryBuilder({
     async (field: string) => {
       if (fieldValues[field]) return;
       try {
-        const res = await apiFetch(`/api/fields/${uploadId}/${field}`);
+        const url = buildApiUrl(FIELD_VALUES_ROUTE, {
+          upload_id: uploadId,
+          field,
+        });
+        const res = await apiFetch(url);
         const data = await res.json();
         setFieldValues((prev) => ({ ...prev, [field]: data.values }));
       } catch (e) {
@@ -92,7 +100,7 @@ export function QueryBuilder({
             return {
               ...group,
               rules: group.rules.map((r, i) =>
-                i === path[pathIndex] ? updater(r) : r
+              i === path[pathIndex] ? updater(r) : r
               ),
             };
           }
@@ -641,7 +649,12 @@ function YearMultiSelect({ uploadId, values, onChange }: YearMultiSelectProps) {
   const [years, setYears] = useState<string[]>([]);
 
   useEffect(() => {
-    apiFetch(`/api/fields/${uploadId}/year`)
+    const url = buildApiUrl(FIELD_VALUES_ROUTE, {
+      upload_id: uploadId,
+      field: "year",
+    });
+
+    apiFetch(url)
       .then((res) => res.json())
       .then((data) => {
         const sortedYears = (data.values as string[])

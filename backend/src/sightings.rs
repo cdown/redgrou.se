@@ -4,26 +4,39 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use ts_rs::TS;
 
+use crate::api_constants;
 use crate::error::ApiError;
 use crate::filter::FilterGroup;
 
-const ALLOWED_SORT_FIELDS: &[&str] = &[
-    "common_name",
-    "scientific_name",
-    "count",
-    "country_code",
-    "observed_at",
-    "trip_name",
-];
+#[derive(Debug, Serialize, Deserialize, TS, Clone, Copy)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
+pub enum SortField {
+    CommonName,
+    ScientificName,
+    Count,
+    CountryCode,
+    ObservedAt,
+    TripName,
+}
 
-fn is_allowed_sort_field(field: &str) -> bool {
-    ALLOWED_SORT_FIELDS.contains(&field)
+impl SortField {
+    pub fn as_sql_column(&self) -> &'static str {
+        match self {
+            SortField::CommonName => "common_name",
+            SortField::ScientificName => "scientific_name",
+            SortField::Count => "count",
+            SortField::CountryCode => "country_code",
+            SortField::ObservedAt => "observed_at",
+            SortField::TripName => "trip_name",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
 pub struct SightingsQuery {
     filter: Option<String>,
-    sort_field: Option<String>,
+    sort_field: Option<SortField>,
     sort_dir: Option<String>,
     page: Option<u32>,
     page_size: Option<u32>,
@@ -60,13 +73,16 @@ pub async fn get_sightings(
     Query(query): Query<SightingsQuery>,
 ) -> Result<Json<SightingsResponse>, ApiError> {
     let page = query.page.unwrap_or(1).max(1);
-    let page_size = query.page_size.unwrap_or(100).min(500);
+    let page_size = query
+        .page_size
+        .unwrap_or(api_constants::DEFAULT_PAGE_SIZE)
+        .min(api_constants::MAX_PAGE_SIZE);
     let offset = (page - 1) * page_size;
 
     let sort_field = query
         .sort_field
-        .filter(|f| is_allowed_sort_field(f))
-        .unwrap_or_else(|| "observed_at".to_string());
+        .unwrap_or(SortField::ObservedAt)
+        .as_sql_column();
 
     let sort_dir = match query.sort_dir.as_deref() {
         Some("asc") => "ASC",

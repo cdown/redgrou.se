@@ -12,6 +12,8 @@ export type { Operator } from "./Operator";
 export type { Rule } from "./Rule";
 export type { Sighting } from "./Sighting";
 export type { SightingsResponse } from "./SightingsResponse";
+export type { SortField } from "./SortField";
 export type { UpdateResponse } from "./UpdateResponse";
 export type { UploadError } from "./UploadError";
 export type { UploadResponse } from "./UploadResponse";
+export * from "./api_constants";

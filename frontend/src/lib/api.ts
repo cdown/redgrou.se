@@ -15,3 +15,14 @@ export async function apiFetch(
 export function getApiUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
 }
+
+export function buildApiUrl(
+  template: string,
+  params: Record<string, string | number> = {}
+): string {
+  let url = template;
+  for (const [key, value] of Object.entries(params)) {
+    url = url.replace(`{${key}}`, String(value));
+  }
+  return url;
+}

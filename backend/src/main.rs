@@ -13,6 +13,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 use ts_rs::TS;
 
+use redgrouse::api_constants;
 use redgrouse::error::ApiError;
 use redgrouse::filter::{
     get_distinct_values, get_field_metadata, FieldMetadata, FieldValues, FilterGroup,
@@ -47,22 +48,25 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let app = Router::new()
-        .route("/health", get(health_check))
-        .route("/upload", post(upload::upload_csv))
+        .route(api_constants::HEALTH_ROUTE, get(health_check))
+        .route(api_constants::UPLOAD_ROUTE, post(upload::upload_csv))
         .route(
-            "/api/uploads/{upload_id}",
+            api_constants::UPLOAD_DETAILS_ROUTE,
             get(get_upload)
                 .put(upload::update_csv)
                 .delete(upload::delete_upload),
         )
-        .route("/api/uploads/{upload_id}/count", get(get_filtered_count))
         .route(
-            "/api/uploads/{upload_id}/sightings",
+            api_constants::UPLOAD_COUNT_ROUTE,
+            get(get_filtered_count),
+        )
+        .route(
+            api_constants::UPLOAD_SIGHTINGS_ROUTE,
             get(sightings::get_sightings),
         )
-        .route("/api/tiles/{upload_id}/{z}/{x}/{y}", get(tiles::get_tile))
-        .route("/api/fields", get(fields_metadata))
-        .route("/api/fields/{upload_id}/{field}", get(field_values))
+        .route(api_constants::TILE_ROUTE, get(tiles::get_tile))
+        .route(api_constants::FIELDS_ROUTE, get(fields_metadata))
+        .route(api_constants::FIELD_VALUES_ROUTE, get(field_values))
         .layer(build_version_header)
         .layer(cors)
         .layer(TraceLayer::new_for_http())

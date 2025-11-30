@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, buildApiUrl } from "@/lib/api";
 import {
   getEditToken as getStoredEditToken,
   setEditToken as setStoredEditToken,
@@ -12,6 +12,10 @@ import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
 import { QueryBuilder } from "@/components/query-builder";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
+import {
+  UPLOAD_DETAILS_ROUTE,
+  UPLOAD_COUNT_ROUTE,
+} from "@/lib/generated/api_constants";
 
 type ViewMode = "map" | "table";
 
@@ -78,7 +82,7 @@ export default function UploadPage() {
   useEffect(() => {
     if (!uploadId) return;
 
-    apiFetch(`/api/uploads/${uploadId}`)
+    apiFetch(buildApiUrl(UPLOAD_DETAILS_ROUTE, { upload_id: uploadId }))
       .then((res) => {
         if (!res.ok) throw new Error("Upload not found");
         return res.json();
@@ -93,7 +97,9 @@ export default function UploadPage() {
 
     let cancelled = false;
     const filterParam = encodeURIComponent(filterToJson(filter));
-    apiFetch(`/api/uploads/${uploadId}/count?filter=${filterParam}`)
+    const url = `${buildApiUrl(UPLOAD_COUNT_ROUTE, { upload_id: uploadId })}?filter=${filterParam}`;
+
+    apiFetch(url)
       .then((res) => res.json())
       .then((data) => {
         if (!cancelled) setFilteredCount(data.count);
@@ -128,12 +134,15 @@ export default function UploadPage() {
 
     setIsDeleting(true);
     try {
-      const res = await apiFetch(`/api/uploads/${uploadId}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${editToken}`,
-        },
-      });
+      const res = await apiFetch(
+        buildApiUrl(UPLOAD_DETAILS_ROUTE, { upload_id: uploadId }),
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${editToken}`,
+          },
+        }
+      );
 
       if (!res.ok) {
         const data = await res.json();
@@ -161,13 +170,16 @@ export default function UploadPage() {
       formData.append("file", file);
 
       try {
-        const res = await apiFetch(`/api/uploads/${uploadId}`, {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${editToken}`,
-          },
-          body: formData,
-        });
+        const res = await apiFetch(
+          buildApiUrl(UPLOAD_DETAILS_ROUTE, { upload_id: uploadId }),
+          {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${editToken}`,
+            },
+            body: formData,
+          }
+        );
 
         if (!res.ok) {
           const data = await res.json();

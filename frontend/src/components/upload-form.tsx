@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { setEditToken } from "@/lib/storage";
+import { UPLOAD_ROUTE } from "@/lib/generated/api_constants";
 
 interface UploadResult {
   upload_id: string;
@@ -34,7 +35,7 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
       formData.append("file", file);
 
       try {
-        const res = await apiFetch("/upload", {
+        const res = await apiFetch(UPLOAD_ROUTE, {
           method: "POST",
           body: formData,
         });

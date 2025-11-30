@@ -1,9 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState, useRef } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, buildApiUrl } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { formatCountry } from "@/lib/countries";
+import {
+  UPLOAD_SIGHTINGS_ROUTE,
+  DEFAULT_PAGE_SIZE,
+} from "@/lib/generated/api_constants";
+import { SortField } from "@/lib/generated/SortField";
 
 interface Sighting {
   id: number;
@@ -31,14 +36,6 @@ interface SightingsTableProps {
   filter: FilterGroup | null;
 }
 
-type SortField =
-  | "common_name"
-  | "scientific_name"
-  | "count"
-  | "country_code"
-  | "observed_at"
-  | "trip_name";
-
 type SortDir = "asc" | "desc";
 
 const COLUMNS: { field: SortField; label: string; width: string }[] = [
@@ -49,8 +46,6 @@ const COLUMNS: { field: SortField; label: string; width: string }[] = [
   { field: "observed_at", label: "Date", width: "w-[120px]" },
   { field: "trip_name", label: "Trip", width: "w-[200px]" },
 ];
-
-const PAGE_SIZE = 50;
 
 export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
   const [sightings, setSightings] = useState<Sighting[]>([]);
@@ -74,16 +69,18 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
       params.set("sort_field", sortField);
       params.set("sort_dir", sortDir);
       params.set("page", String(pageNum));
-      params.set("page_size", String(PAGE_SIZE));
+      params.set("page_size", String(DEFAULT_PAGE_SIZE));
 
       if (filter) {
         params.set("filter", filterToJson(filter));
       }
 
       try {
-        const res = await apiFetch(
-          `/api/uploads/${uploadId}/sightings?${params}`
-        );
+        const url = `${buildApiUrl(UPLOAD_SIGHTINGS_ROUTE, {
+          upload_id: uploadId,
+        })}?${params}`;
+
+        const res = await apiFetch(url);
         const json: SightingsResponse = await res.json();
 
         if (append) {
@@ -247,7 +244,9 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
                   {sighting.count ?? "—"}
                 </div>
                 <div className="w-[140px] shrink-0 px-3 py-2">
-                  {sighting.country_code ? formatCountry(sighting.country_code) : "—"}
+                  {sighting.country_code
+                    ? formatCountry(sighting.country_code)
+                    : "—"}
                 </div>
                 <div className="w-[120px] shrink-0 px-3 py-2">
                   {formatDate(sighting.observed_at)}

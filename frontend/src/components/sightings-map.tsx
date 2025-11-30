@@ -3,9 +3,10 @@
 import { useRef, useEffect } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { getApiUrl } from "@/lib/api";
+import { getApiUrl, buildApiUrl } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { fetchSpeciesInfo } from "@/lib/species-api";
+import { TILE_ROUTE } from "@/lib/generated/api_constants";
 
 interface SightingsMapProps {
   uploadId: string;
@@ -32,7 +33,7 @@ function firstParagraph(text: string): string {
     truncated.lastIndexOf(". "),
     truncated.lastIndexOf("! "),
     truncated.lastIndexOf("? "),
-    truncated.lastIndexOf("."),
+    truncated.lastIndexOf(".")
   );
 
   if (lastSentenceEnd > 0) {
@@ -45,7 +46,7 @@ function firstParagraph(text: string): string {
 function createPopupContent(
   name: string,
   count: number,
-  scientificName?: string,
+  scientificName?: string
 ): HTMLDivElement {
   const container = document.createElement("div");
   container.className = "species-popup";
@@ -83,7 +84,7 @@ function updatePopupWithSpeciesInfo(
     photoAttribution: string | null;
     inaturalistUrl: string;
     observationsCount: number | null;
-  } | null,
+  } | null
 ): void {
   if (!info) {
     container.innerHTML = `
@@ -159,6 +160,10 @@ export function SightingsMap({ uploadId, filter }: SightingsMapProps) {
       ? `?filter=${encodeURIComponent(filterToJson(filter))}`
       : "";
 
+    const tileUrl = getApiUrl(
+      buildApiUrl(TILE_ROUTE, { upload_id: uploadId }) + ".pbf" + filterParam
+    );
+
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: {
@@ -186,9 +191,7 @@ export function SightingsMap({ uploadId, filter }: SightingsMapProps) {
     map.on("load", () => {
       map.addSource("sightings", {
         type: "vector",
-        tiles: [
-          getApiUrl(`/api/tiles/${uploadId}/{z}/{x}/{y}.pbf${filterParam}`),
-        ],
+        tiles: [tileUrl],
       });
 
       map.addLayer({
