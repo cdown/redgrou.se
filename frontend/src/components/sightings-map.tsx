@@ -367,13 +367,14 @@ export function SightingsMap({
           });
         };
 
-        // Use one-time moveend listener to show popup after animation completes
-        const handleMoveEnd = () => {
-          map.off("moveend", handleMoveEnd);
-          // Small delay to ensure tiles are loaded
-          setTimeout(showPopup, 200);
+        // Use idle event to show popup when map finishes loading tiles
+        // This is more reliable than moveend because it specifically indicates
+        // that all tiles are loaded and the map is ready
+        const handleIdle = () => {
+          map.off("idle", handleIdle);
+          showPopup();
         };
-        map.once("moveend", handleMoveEnd);
+        map.once("idle", handleIdle);
 
         map.flyTo({
           center: [lng, lat],
