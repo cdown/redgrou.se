@@ -694,21 +694,8 @@ export default function UploadPage() {
         </div>
       </div>
 
-      {/* Bottom-left: Stats pill + Brand */}
+      {/* Bottom-left: Brand */}
       <div className="absolute bottom-4 left-4 flex flex-col gap-2">
-        {!filterOpen && (
-          <div className="rounded-lg bg-white/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
-            <span className="font-medium text-stone-900">
-              {showingFiltered
-                ? `${filteredCount?.toLocaleString()} of ${upload.row_count.toLocaleString()}`
-                : upload.row_count.toLocaleString()}
-            </span>
-            <span className="text-stone-500"> sightings</span>
-            {upload.filename && (
-              <span className="text-stone-400"> · {upload.filename}</span>
-            )}
-          </div>
-        )}
         <div className="flex flex-col leading-tight">
           <span className="text-sm font-semibold tracking-tight text-stone-600 drop-shadow-sm">
             redgrouse
