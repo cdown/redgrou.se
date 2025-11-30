@@ -540,6 +540,9 @@ export function SightingsMap({
     let zoomChangeTimeout: NodeJS.Timeout | null = null;
     const controllersMap = abortControllersRef.current;
 
+    // Track programmatic zooms to avoid snapping during navigation
+    let isProgrammaticZoom = false;
+
     // Cancel stale tile requests when zoom/pan changes significantly
     const cancelStaleRequests = () => {
       const newZoom = map.getZoom();
@@ -566,6 +569,61 @@ export function SightingsMap({
 
     map.on("zoom", handleMove);
     map.on("moveend", handleMove);
+
+    // Disable default scroll zoom to implement custom integer-level zooming
+    map.scrollZoom.disable();
+
+    // Custom wheel handler for integer zoom levels
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      const currentZoom = map.getZoom();
+      const roundedCurrentZoom = Math.round(currentZoom);
+      const zoomDirection = e.deltaY < 0 ? 1 : -1;
+      const targetZoom = roundedCurrentZoom + zoomDirection;
+
+      // Clamp to map's min/max zoom bounds
+      const minZoom = map.getMinZoom();
+      const maxZoom = map.getMaxZoom();
+      const clampedZoom = Math.max(minZoom, Math.min(maxZoom, targetZoom));
+
+      // Only zoom if we're moving to a different integer level
+      if (clampedZoom !== roundedCurrentZoom) {
+        isProgrammaticZoom = true;
+        map.easeTo({
+          zoom: clampedZoom,
+          duration: 200,
+        });
+      }
+    };
+
+    // Attach wheel handler to map container
+    const mapContainer = containerRef.current;
+    if (mapContainer) {
+      mapContainer.addEventListener("wheel", handleWheel, { passive: false });
+    }
+
+    // Snap to integer zoom level after touch/pinch zoom gestures for crisp raster tiles
+    const handleZoomEnd = () => {
+      // Don't snap if this was a programmatic zoom (e.g., from navigation or wheel)
+      if (isProgrammaticZoom) {
+        isProgrammaticZoom = false;
+        return;
+      }
+
+      const currentZoom = map.getZoom();
+      const roundedZoom = Math.round(currentZoom);
+
+      // Only snap if we're not already at an integer zoom level
+      if (Math.abs(currentZoom - roundedZoom) > 0.01) {
+        isProgrammaticZoom = true;
+        map.easeTo({
+          zoom: roundedZoom,
+          duration: 200,
+        });
+      }
+    };
+    map.on("zoomend", handleZoomEnd);
 
     // Clean up AbortControllers periodically to prevent memory leaks
     const cleanupInterval = setInterval(() => {
@@ -639,6 +697,7 @@ export function SightingsMap({
         };
         map.once("moveend", handleMoveEnd);
 
+        isProgrammaticZoom = true;
         map.flyTo({
           center: [lng, lat],
           zoom: 15,
@@ -677,6 +736,10 @@ export function SightingsMap({
       }
       map.off("zoom", handleMove);
       map.off("moveend", handleMove);
+      map.off("zoomend", handleZoomEnd);
+      if (containerRef.current) {
+        containerRef.current.removeEventListener("wheel", handleWheel);
+      }
       clearInterval(cleanupInterval);
       map.remove();
       mapRef.current = null;
