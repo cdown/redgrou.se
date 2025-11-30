@@ -549,7 +549,7 @@ export function SightingsMap({
   // Update tile source when filters change (preserves viewport)
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.loaded() || !map.getSource("sightings")) {
+    if (!map || !map.getSource("sightings")) {
       return;
     }
 
