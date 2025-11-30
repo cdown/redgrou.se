@@ -1,13 +1,15 @@
 use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
-use axum::extract::{Extension, Path, Query, State};
+use axum::extract::{ConnectInfo, Extension, Path, Query, State};
 use axum::http::{header, HeaderValue, Request};
 use axum::middleware::{from_fn, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{BoxError, Json, Router};
+use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -16,13 +18,12 @@ use tokio::sync::Mutex;
 use tower::limit::ConcurrencyLimitLayer;
 use tower::timeout::error::Elapsed;
 use tower::ServiceBuilder;
-use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tower_http::{catch_panic::CatchPanicLayer, timeout::RequestBodyTimeoutLayer};
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use ts_rs::TS;
 
@@ -40,6 +41,7 @@ const GLOBAL_RATE_LIMIT_PER_MINUTE: u64 = 1000;
 const UPLOAD_CONCURRENCY_LIMIT: usize = 2;
 const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(60);
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
+const CLOUDFRONT_IP_RANGES_URL: &str = "https://ip-ranges.amazonaws.com/ip-ranges.json";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -78,6 +80,19 @@ async fn main() -> anyhow::Result<()> {
         .route_layer(ingest_layer);
 
     let rate_limiter = RequestRateLimiter::new(GLOBAL_RATE_LIMIT_PER_MINUTE, RATE_LIMIT_WINDOW);
+    let trusted_proxies = match fetch_cloudfront_proxies().await {
+        Ok(networks) => {
+            info!("Loaded {} CloudFront proxy ranges", networks.len());
+            TrustedProxyList::new(networks)
+        }
+        Err(err) => {
+            warn!(
+                "Failed to load CloudFront ranges ({}); defaulting to no trusted proxies",
+                err
+            );
+            TrustedProxyList::new(Vec::new())
+        }
+    };
 
     let app = Router::new()
         .route(api_constants::HEALTH_ROUTE, get(health_check))
@@ -94,8 +109,9 @@ async fn main() -> anyhow::Result<()> {
         .route(api_constants::FIELDS_ROUTE, get(fields_metadata))
         .route(api_constants::FIELD_VALUES_ROUTE, get(field_values))
         .merge(ingest_routes)
-        .layer(AddExtensionLayer::new(rate_limiter))
         .layer(from_fn(enforce_rate_limit))
+        .layer(Extension(rate_limiter))
+        .layer(Extension(trusted_proxies.clone()))
         .layer(build_version_header)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
@@ -118,7 +134,11 @@ async fn main() -> anyhow::Result<()> {
     info!("Listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -136,10 +156,28 @@ async fn handle_layer_error(err: BoxError) -> ApiError {
 }
 
 #[derive(Clone)]
+struct TrustedProxyList {
+    networks: Arc<Vec<IpNet>>,
+}
+
+impl TrustedProxyList {
+    fn new(networks: Vec<IpNet>) -> Self {
+        Self {
+            networks: Arc::new(networks),
+        }
+    }
+
+    fn contains(&self, addr: &SocketAddr) -> bool {
+        let ip = addr.ip();
+        self.networks.iter().any(|net| net.contains(&ip))
+    }
+}
+
+#[derive(Clone)]
 struct RequestRateLimiter {
     limit: u64,
     window: Duration,
-    state: Arc<Mutex<RateWindow>>,
+    buckets: Arc<Mutex<HashMap<String, RateWindow>>>,
 }
 
 struct RateWindow {
@@ -152,15 +190,16 @@ impl RequestRateLimiter {
         Self {
             limit,
             window,
-            state: Arc::new(Mutex::new(RateWindow {
-                start: Instant::now(),
-                count: 0,
-            })),
+            buckets: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    async fn try_acquire(&self) -> bool {
-        let mut state = self.state.lock().await;
+    async fn try_acquire(&self, key: &str) -> bool {
+        let mut buckets = self.buckets.lock().await;
+        let state = buckets.entry(key.to_string()).or_insert(RateWindow {
+            start: Instant::now(),
+            count: 0,
+        });
         let now = Instant::now();
         if now.duration_since(state.start) >= self.window {
             state.start = now;
@@ -178,14 +217,127 @@ impl RequestRateLimiter {
 
 async fn enforce_rate_limit(
     Extension(limiter): Extension<RequestRateLimiter>,
+    Extension(trusted): Extension<TrustedProxyList>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     req: Request<Body>,
     next: Next,
 ) -> Response {
-    if limiter.try_acquire().await {
+    let client_key = extract_client_addr(&req, peer_addr, &trusted);
+    if limiter.try_acquire(&client_key).await {
         next.run(req).await
     } else {
         ApiError::service_unavailable("Too many requests").into_response()
     }
+}
+
+fn extract_client_addr<B>(
+    req: &Request<B>,
+    peer_addr: SocketAddr,
+    trusted: &TrustedProxyList,
+) -> String {
+    if trusted.contains(&peer_addr) {
+        if let Some(viewer) = req
+            .headers()
+            .get("cloudfront-viewer-address")
+            .and_then(|v| v.to_str().ok())
+        {
+            if let Some(ip) = viewer.split(':').next() {
+                return ip.trim().to_string();
+            }
+        }
+
+        if let Some(ip) = req
+            .headers()
+            .get("cf-connecting-ip")
+            .and_then(|v| v.to_str().ok())
+        {
+            return ip.trim().to_string();
+        }
+
+        if let Some(forwarded) = req
+            .headers()
+            .get(header::FORWARDED)
+            .and_then(|v| v.to_str().ok())
+        {
+            for part in forwarded.split(';') {
+                if let Some(value) = part
+                    .trim()
+                    .strip_prefix("for=")
+                    .map(|s| s.trim_matches('"').to_string())
+                {
+                    return value;
+                }
+            }
+            return forwarded.trim().to_string();
+        }
+
+        if let Some(xff) = req
+            .headers()
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+        {
+            if let Some(ip) = xff.split(',').next() {
+                return ip.trim().to_string();
+            }
+        }
+    }
+
+    peer_addr.ip().to_string()
+}
+
+#[derive(Deserialize)]
+struct AwsIpRanges {
+    #[serde(default)]
+    prefixes: Vec<AwsPrefix>,
+    #[serde(default)]
+    ipv6_prefixes: Vec<AwsIpv6Prefix>,
+}
+
+#[derive(Deserialize)]
+struct AwsPrefix {
+    #[serde(default)]
+    ip_prefix: Option<String>,
+    #[serde(default)]
+    service: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AwsIpv6Prefix {
+    #[serde(default)]
+    ipv6_prefix: Option<String>,
+    #[serde(default)]
+    service: Option<String>,
+}
+
+async fn fetch_cloudfront_proxies() -> anyhow::Result<Vec<IpNet>> {
+    let resp: AwsIpRanges = reqwest::get(CLOUDFRONT_IP_RANGES_URL).await?.json().await?;
+    let mut networks = Vec::new();
+
+    for entry in resp
+        .prefixes
+        .into_iter()
+        .filter(|p| matches!(p.service.as_deref(), Some("CLOUDFRONT")) && p.ip_prefix.is_some())
+    {
+        if let Some(cidr) = entry.ip_prefix {
+            if let Ok(net) = cidr.parse::<IpNet>() {
+                networks.push(net);
+            }
+        }
+    }
+
+    for entry in resp
+        .ipv6_prefixes
+        .into_iter()
+        .filter(|p| matches!(p.service.as_deref(), Some("CLOUDFRONT")) && p.ipv6_prefix.is_some())
+    {
+        if let Some(cidr) = entry.ipv6_prefix {
+            if let Ok(net) = cidr.parse::<IpNet>() {
+                networks.push(net);
+            }
+        }
+    }
+
+    Ok(networks)
 }
 
 #[derive(Serialize, TS)]
