@@ -572,7 +572,15 @@ pub async fn upload_csv(
 
         let total_rows = match ingest_csv_field(field, &pool, &upload_id).await {
             Ok(rows) => rows,
-            Err(err) => return err.into_response(),
+            Err(err) => {
+                let _ = db::query_with_timeout(
+                    sqlx::query("DELETE FROM uploads WHERE id = ?")
+                        .bind(&upload_id)
+                        .execute(&pool),
+                )
+                .await;
+                return err.into_response();
+            }
         };
 
         if let Err(e) = db::query_with_timeout(
