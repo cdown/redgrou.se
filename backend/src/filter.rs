@@ -65,12 +65,42 @@ const ALLOWED_FIELDS: &[&str] = &[
     "observed_at",
     "year",
 ];
+const MAX_FILTER_DEPTH: usize = 5;
+const MAX_FILTER_RULES: usize = 100;
+const MAX_LIST_VALUES: usize = 50;
 
 fn is_allowed_field(field: &str) -> bool {
     ALLOWED_FIELDS.contains(&field)
 }
 
+#[derive(Debug)]
+pub struct FilterValidationError {
+    message: String,
+}
+
+impl FilterValidationError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+#[derive(Default)]
+struct FilterStats {
+    rules: usize,
+}
+
 impl FilterGroup {
+    pub fn validate(&self) -> Result<(), FilterValidationError> {
+        let mut stats = FilterStats::default();
+        validate_group(self, 1, &mut stats)
+    }
+
     pub fn to_sql(&self, params: &mut Vec<String>) -> Option<String> {
         if self.rules.is_empty() {
             return None;
@@ -105,6 +135,18 @@ impl Rule {
 }
 
 impl Condition {
+    fn validate(&self) -> Result<(), FilterValidationError> {
+        match &self.value {
+            FilterValue::List(values) if values.len() > MAX_LIST_VALUES => {
+                Err(FilterValidationError::new(format!(
+                    "Lists are limited to {} values",
+                    MAX_LIST_VALUES
+                )))
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn to_sql(&self, params: &mut Vec<String>) -> Option<String> {
         if !is_allowed_field(&self.field) {
             return None;
@@ -178,6 +220,37 @@ impl Condition {
             _ => None,
         }
     }
+}
+
+fn validate_group(
+    group: &FilterGroup,
+    depth: usize,
+    stats: &mut FilterStats,
+) -> Result<(), FilterValidationError> {
+    if depth > MAX_FILTER_DEPTH {
+        return Err(FilterValidationError::new(format!(
+            "Filters exceed maximum depth of {}",
+            MAX_FILTER_DEPTH
+        )));
+    }
+
+    for rule in &group.rules {
+        match rule {
+            Rule::Condition(condition) => {
+                stats.rules += 1;
+                if stats.rules > MAX_FILTER_RULES {
+                    return Err(FilterValidationError::new(format!(
+                        "Filters exceed maximum of {} conditions",
+                        MAX_FILTER_RULES
+                    )));
+                }
+                condition.validate()?;
+            }
+            Rule::Group(child) => validate_group(child, depth + 1, stats)?,
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Serialize, TS)]

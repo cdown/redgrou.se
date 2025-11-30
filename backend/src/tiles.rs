@@ -6,6 +6,7 @@ use serde::Deserialize;
 use sqlx::{Row, SqlitePool};
 use tracing::{debug, error};
 
+use crate::error::ApiError;
 use crate::filter::FilterGroup;
 
 const TILE_EXTENT: u32 = 4096;
@@ -65,11 +66,11 @@ pub async fn get_tile(
     State(pool): State<SqlitePool>,
     Path((upload_id, z, x, y_str)): Path<(String, u32, u32, String)>,
     Query(query): Query<TileQuery>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, ApiError> {
     let y: u32 = match y_str.trim_end_matches(".pbf").parse() {
         Ok(v) => v,
         Err(_) => {
-            return (StatusCode::BAD_REQUEST, "Invalid y coordinate").into_response();
+            return Err(ApiError::bad_request("Invalid y coordinate"));
         }
     };
 
@@ -96,15 +97,16 @@ pub async fn get_tile(
     ];
 
     let mut filter_clause = if let Some(filter_json) = &query.filter {
-        match serde_json::from_str::<FilterGroup>(filter_json) {
-            Ok(filter) => filter
-                .to_sql(&mut params)
-                .map(|sql| format!(" AND {}", sql)),
-            Err(e) => {
-                error!("Invalid filter JSON: {}", e);
-                None
-            }
-        }
+        let filter: FilterGroup = serde_json::from_str(filter_json).map_err(|e| {
+            error!("Invalid filter JSON: {}", e);
+            ApiError::bad_request("Invalid filter JSON")
+        })?;
+        filter
+            .validate()
+            .map_err(|e| ApiError::bad_request(e.message()))?;
+        filter
+            .to_sql(&mut params)
+            .map(|sql| format!(" AND {}", sql))
     } else {
         None
     };
@@ -149,7 +151,7 @@ pub async fn get_tile(
         Ok(r) => r,
         Err(e) => {
             error!("Failed to query sightings: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+            return Err(ApiError::internal("Database error"));
         }
     };
 
@@ -199,23 +201,25 @@ pub async fn get_tile(
 
     if let Err(e) = tile.add_layer(layer) {
         error!("Failed to add layer to tile: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Tile encoding error").into_response();
+        return Err(ApiError::internal("Tile encoding error"));
     }
 
     let data = match tile.to_bytes() {
         Ok(bytes) => bytes,
         Err(e) => {
             error!("Failed to encode tile: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Tile encoding error").into_response();
+            return Err(ApiError::internal("Tile encoding error"));
         }
     };
 
     debug!("Generated tile with {} points", points.len());
 
-    Response::builder()
+    let response = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/x-protobuf")
         .header(header::CACHE_CONTROL, "public, max-age=3600")
         .body(axum::body::Body::from(data))
-        .unwrap()
+        .unwrap();
+
+    Ok(response)
 }
