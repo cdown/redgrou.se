@@ -147,11 +147,17 @@ function updatePopupWithSpeciesInfo(
 export function SightingsMap({ uploadId, filter }: SightingsMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
   useEffect(() => {
     if (!containerRef.current) return;
 
     if (mapRef.current) {
+      // Cancel all pending tile requests before removing the map
+      abortControllersRef.current.forEach((controller) => {
+        controller.abort();
+      });
+      abortControllersRef.current.clear();
       mapRef.current.remove();
       mapRef.current = null;
     }
@@ -186,7 +192,80 @@ export function SightingsMap({ uploadId, filter }: SightingsMapProps) {
       },
       center: [0, 20],
       zoom: 2,
+      transformRequest: (url: string, resourceType: string) => {
+        // Only intercept vector tile requests for our sightings source
+        if (
+          resourceType === "Tile" &&
+          url.includes(TILE_ROUTE.replace("{upload_id}", uploadId))
+        ) {
+          // Cancel any existing request for this exact URL (same tile being re-requested)
+          const existingController = controllersMap.get(url);
+          if (existingController) {
+            existingController.abort();
+            controllersMap.delete(url);
+          }
+
+          // Create a new AbortController for this request
+          const controller = new AbortController();
+          controllersMap.set(url, controller);
+
+          // Return a Request object with the abort signal
+          // MapLibre will use this Request and will cancel it via the signal when the tile
+          // is no longer needed (e.g., user has zoomed past it)
+          const request = new Request(url, {
+            signal: controller.signal,
+          });
+
+          return request;
+        }
+        // For non-tile requests or other sources, return null to use default handling
+        return null;
+      },
     });
+
+    // Track the current zoom level to cancel stale requests
+    let currentZoom = map.getZoom();
+    let zoomChangeTimeout: NodeJS.Timeout | null = null;
+    const controllersMap = abortControllersRef.current;
+
+    // Cancel stale tile requests when zoom/pan changes significantly
+    const cancelStaleRequests = () => {
+      const newZoom = map.getZoom();
+      const zoomDiff = Math.abs(newZoom - currentZoom);
+
+      // If zoom changed significantly (more than 2 levels), cancel all pending requests
+      // as they're likely for tiles that are no longer needed
+      if (zoomDiff > 2) {
+        controllersMap.forEach((controller) => {
+          controller.abort();
+        });
+        controllersMap.clear();
+        currentZoom = newZoom;
+      }
+    };
+
+    // Debounce cancellation to avoid cancelling during smooth zoom animations
+    const handleMove = () => {
+      if (zoomChangeTimeout) {
+        clearTimeout(zoomChangeTimeout);
+      }
+      zoomChangeTimeout = setTimeout(cancelStaleRequests, 100);
+    };
+
+    map.on("zoom", handleMove);
+    map.on("moveend", handleMove);
+
+    // Clean up AbortControllers periodically to prevent memory leaks
+    const cleanupInterval = setInterval(() => {
+      if (controllersMap.size > 100) {
+        // If we have too many controllers, clear old ones
+        const entries = Array.from(controllersMap.entries());
+        controllersMap.clear();
+        entries.slice(-50).forEach(([url, controller]) => {
+          controllersMap.set(url, controller);
+        });
+      }
+    }, 5000);
 
     map.on("load", () => {
       map.addSource("sightings", {
@@ -257,6 +336,17 @@ export function SightingsMap({ uploadId, filter }: SightingsMapProps) {
     mapRef.current = map;
 
     return () => {
+      // Cancel all pending tile requests
+      controllersMap.forEach((controller) => {
+        controller.abort();
+      });
+      controllersMap.clear();
+      if (zoomChangeTimeout) {
+        clearTimeout(zoomChangeTimeout);
+      }
+      map.off("zoom", handleMove);
+      map.off("moveend", handleMove);
+      clearInterval(cleanupInterval);
       map.remove();
       mapRef.current = null;
     };
