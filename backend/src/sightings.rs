@@ -18,7 +18,6 @@ pub enum SortField {
     SpeciesCount,
     CountryCode,
     ObservedAt,
-    TripName,
 }
 
 impl SortField {
@@ -30,7 +29,6 @@ impl SortField {
             SortField::SpeciesCount => "species_count",
             SortField::CountryCode => "country_code",
             SortField::ObservedAt => "observed_at",
-            SortField::TripName => "trip_name",
         }
     }
 }
@@ -57,8 +55,6 @@ pub struct Sighting {
     pub longitude: f64,
     pub country_code: Option<String>,
     pub observed_at: String,
-    pub notes: Option<String>,
-    pub trip_name: Option<String>,
 }
 
 #[derive(Debug, Serialize, TS)]
@@ -67,7 +63,6 @@ pub struct GroupedSighting {
     pub common_name: Option<String>,
     pub scientific_name: Option<String>,
     pub country_code: Option<String>,
-    pub trip_name: Option<String>,
     pub observed_at: Option<String>,
     pub count: i64,
     pub species_count: i64,
@@ -91,7 +86,6 @@ fn validate_group_by_fields(fields: &[String]) -> Result<Vec<String>, ApiError> 
         "common_name",
         "scientific_name",
         "country_code",
-        "trip_name",
         "observed_at",
     ];
     let mut validated = Vec::new();
@@ -255,7 +249,6 @@ pub async fn get_sightings(
                 common_name: None,
                 scientific_name: None,
                 country_code: None,
-                trip_name: None,
                 observed_at: None,
                 count: 0,
                 species_count: 0,
@@ -267,7 +260,6 @@ pub async fn get_sightings(
                     "common_name" => grouped.common_name = value,
                     "scientific_name" => grouped.scientific_name = value,
                     "country_code" => grouped.country_code = value,
-                    "trip_name" => grouped.trip_name = value,
                     "observed_at" => grouped.observed_at = value,
                     _ => {}
                 }
@@ -321,7 +313,7 @@ pub async fn get_sightings(
 
     let select_sql = format!(
         r#"SELECT id, common_name, scientific_name, count, latitude, longitude,
-           country_code, observed_at, notes, trip_name
+           country_code, observed_at
            FROM sightings
            WHERE upload_id = ?{}
            ORDER BY {} {}
@@ -345,8 +337,6 @@ pub async fn get_sightings(
             f64,
             Option<String>,
             String,
-            Option<String>,
-            Option<String>,
         ),
     >(&select_sql);
 
@@ -370,8 +360,6 @@ pub async fn get_sightings(
             longitude: row.5,
             country_code: row.6,
             observed_at: row.7,
-            notes: row.8,
-            trip_name: row.9,
         })
         .collect();
 

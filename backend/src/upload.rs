@@ -29,8 +29,6 @@ const COL_LATITUDE: &str = "latitude";
 const COL_SCIENTIFIC_NAME: &str = "scientificName";
 const COL_COMMON_NAME: &str = "commonName";
 const COL_COUNT: &str = "count";
-const COL_NOTE: &str = "note";
-const COL_SESSION_TITLE: &str = "sessionTitle";
 
 #[derive(Serialize, TS)]
 #[ts(export)]
@@ -75,8 +73,6 @@ struct SightingRow {
     country_code: String,
     observed_at: String,
     year: i32,
-    notes: Option<String>,
-    trip_name: Option<String>,
 }
 
 #[derive(Default)]
@@ -88,8 +84,6 @@ struct ColumnMap {
     scientific_name: Option<usize>,
     common_name: Option<usize>,
     count: Option<usize>,
-    note: Option<usize>,
-    session_title: Option<usize>,
 }
 
 impl ColumnMap {
@@ -104,8 +98,6 @@ impl ColumnMap {
                 COL_SCIENTIFIC_NAME => map.scientific_name = Some(idx),
                 COL_COMMON_NAME => map.common_name = Some(idx),
                 COL_COUNT => map.count = Some(idx),
-                COL_NOTE => map.note = Some(idx),
-                COL_SESSION_TITLE => map.session_title = Some(idx),
                 _ => {}
             }
         }
@@ -176,8 +168,6 @@ fn parse_row(record: &csv::ByteRecord, col_map: &ColumnMap) -> Option<SightingRo
         country_code,
         observed_at,
         year,
-        notes: get_field(record, col_map.note),
-        trip_name: get_field(record, col_map.session_title),
     })
 }
 
@@ -194,7 +184,7 @@ where
     }
 
     let mut query_builder = QueryBuilder::new(
-        "INSERT INTO sightings (upload_id, sighting_uuid, common_name, scientific_name, count, latitude, longitude, country_code, observed_at, year, notes, trip_name) "
+        "INSERT INTO sightings (upload_id, sighting_uuid, common_name, scientific_name, count, latitude, longitude, country_code, observed_at, year) "
     );
 
     query_builder.push_values(rows, |mut b, row| {
@@ -207,9 +197,7 @@ where
             .push_bind(row.longitude)
             .push_bind(&row.country_code)
             .push_bind(&row.observed_at)
-            .push_bind(row.year)
-            .push_bind(&row.notes)
-            .push_bind(&row.trip_name);
+            .push_bind(row.year);
     });
 
     query_builder.build().execute(executor).await?;

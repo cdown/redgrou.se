@@ -64,8 +64,6 @@ const ALLOWED_FIELDS: &[&str] = &[
     "count",
     "observed_at",
     "year",
-    "notes",
-    "trip_name",
     "lifer",
     "year_tick",
 ];
@@ -223,11 +221,6 @@ pub fn get_field_metadata() -> Vec<FieldMetadata> {
             name: "year".into(),
             label: "Year".into(),
             field_type: "number".into(),
-        },
-        FieldMetadata {
-            name: "trip_name".into(),
-            label: "Trip".into(),
-            field_type: "string".into(),
         },
         FieldMetadata {
             name: "lifer".into(),

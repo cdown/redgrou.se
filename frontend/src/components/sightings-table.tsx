@@ -40,14 +40,12 @@ const COLUMNS: { field: SortField; label: string; width: string }[] = [
   { field: "count", label: "Count", width: "w-[80px]" },
   { field: "country_code", label: "Country", width: "w-[140px]" },
   { field: "observed_at", label: "Date", width: "w-[120px]" },
-  { field: "trip_name", label: "Trip", width: "w-[200px]" },
 ];
 
 const GROUP_BY_OPTIONS: MultiComboboxOption[] = [
   { value: "country_code", label: "Country" },
   { value: "scientific_name", label: "Scientific Name" },
   { value: "common_name", label: "Species" },
-  { value: "trip_name", label: "Trip" },
   { value: "observed_at", label: "Date" },
 ];
 
@@ -299,9 +297,6 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
               {groupBy.includes("common_name") && (
                 <div className="w-[200px] shrink-0 px-3 py-2">Species</div>
               )}
-              {groupBy.includes("trip_name") && (
-                <div className="w-[200px] shrink-0 px-3 py-2">Trip</div>
-              )}
               {groupBy.includes("observed_at") && (
                 <div className="w-[120px] shrink-0 px-3 py-2">Date</div>
               )}
@@ -341,7 +336,7 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
                   </button>
                 </div>
               ))}
-              <div className="flex-1 px-3 py-2">Notes</div>
+              <div className="flex-1 px-3 py-2"></div>
             </>
           )}
         </div>
@@ -375,11 +370,6 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
                     {groupBy.includes("common_name") && (
                       <div className="w-[200px] shrink-0 px-3 py-2 font-medium">
                         {group.common_name || "—"}
-                      </div>
-                    )}
-                    {groupBy.includes("trip_name") && (
-                      <div className="w-[200px] shrink-0 px-3 py-2">
-                        {group.trip_name || "—"}
                       </div>
                     )}
                     {groupBy.includes("observed_at") && (
@@ -422,12 +412,7 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
                     <div className="w-[120px] shrink-0 px-3 py-2">
                       {formatDate(sighting.observed_at)}
                     </div>
-                    <div className="w-[200px] shrink-0 px-3 py-2">
-                      {sighting.trip_name || "—"}
-                    </div>
-                    <div className="flex-1 px-3 py-2 truncate">
-                      {sighting.notes || "—"}
-                    </div>
+                    <div className="flex-1 px-3 py-2"></div>
                   </div>
                 ))}
 
