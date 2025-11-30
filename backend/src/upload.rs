@@ -1,6 +1,6 @@
 use axum::body::Bytes;
 use axum::extract::{multipart::Field, Multipart, Path, State};
-use axum::http::{header, StatusCode};
+use axum::http::header;
 use axum::response::IntoResponse;
 use axum::Json;
 use country_boundaries::{CountryBoundaries, LatLon, BOUNDARIES_ODBL_360X180};
@@ -19,6 +19,8 @@ use tokio_util::io::StreamReader;
 use tracing::{error, info};
 use ts_rs::TS;
 use uuid::Uuid;
+
+use crate::error::ApiError;
 
 // Initialised once to avoid reloading the dataset on every request.
 // Uses point-in-polygon testing with OpenStreetMap boundaries data.
@@ -66,43 +68,6 @@ pub fn verify_token(token: &str, stored_hash: &str) -> bool {
         .as_bytes()
         .ct_eq(stored_hash.as_bytes())
         .into()
-}
-
-#[derive(Serialize, TS)]
-#[ts(export)]
-pub struct UploadError {
-    pub error: String,
-}
-
-#[derive(Debug)]
-struct UploadFailure {
-    status: StatusCode,
-    message: String,
-}
-
-impl UploadFailure {
-    fn bad_request(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            message: message.into(),
-        }
-    }
-
-    fn internal(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: message.into(),
-        }
-    }
-
-    fn into_response(self) -> (StatusCode, Json<UploadError>) {
-        (
-            self.status,
-            Json(UploadError {
-                error: self.message,
-            }),
-        )
-    }
 }
 
 #[derive(Debug)]
@@ -164,23 +129,23 @@ where
     }
 }
 
-fn map_csv_error(err: csv_async::Error, log_context: &str, client_message: &str) -> UploadFailure {
+fn map_csv_error(err: csv_async::Error, log_context: &str, client_message: &str) -> ApiError {
     if let Some(limit_failure) = size_limit_failure(&err) {
         return limit_failure;
     }
 
     error!("{}: {}", log_context, err);
-    UploadFailure::bad_request(client_message.to_string())
+    ApiError::bad_request(client_message)
 }
 
-fn size_limit_failure(err: &csv_async::Error) -> Option<UploadFailure> {
+fn size_limit_failure(err: &csv_async::Error) -> Option<ApiError> {
     if let csv_async::ErrorKind::Io(io_err) = err.kind() {
         if io_err
             .get_ref()
             .and_then(|inner| inner.downcast_ref::<UploadSizeExceeded>())
             .is_some()
         {
-            return Some(UploadFailure::bad_request(format!(
+            return Some(ApiError::bad_request(format!(
                 "CSV exceeds {} MB upload limit",
                 UPLOAD_LIMIT_MB
             )));
@@ -354,7 +319,7 @@ async fn flush_batch(
     upload_id: &str,
     batch: &mut Vec<SightingRow>,
     total_rows: &mut usize,
-) -> Result<(), UploadFailure> {
+) -> Result<(), ApiError> {
     if batch.is_empty() {
         return Ok(());
     }
@@ -364,12 +329,12 @@ async fn flush_batch(
     {
         let conn = tx.acquire().await.map_err(|e| {
             error!("Failed to acquire connection for batch insert: {}", e);
-            UploadFailure::internal("Database error")
+            ApiError::internal("Database error")
         })?;
 
         insert_batch(conn, upload_id, batch).await.map_err(|e| {
             error!("Batch insert failed: {}", e);
-            UploadFailure::internal("Failed to insert sightings")
+            ApiError::internal("Failed to insert sightings")
         })?;
     }
 
@@ -382,7 +347,7 @@ async fn ingest_csv_field(
     field: Field<'_>,
     pool: &SqlitePool,
     upload_id: &str,
-) -> Result<usize, UploadFailure> {
+) -> Result<usize, ApiError> {
     let stream = field
         .into_stream()
         .map(|result| result.map_err(|err| io::Error::new(io::ErrorKind::Other, err)));
@@ -391,7 +356,7 @@ async fn ingest_csv_field(
     read_csv(reader, pool, upload_id).await
 }
 
-async fn read_csv<R>(reader: R, pool: &SqlitePool, upload_id: &str) -> Result<usize, UploadFailure>
+async fn read_csv<R>(reader: R, pool: &SqlitePool, upload_id: &str) -> Result<usize, ApiError>
 where
     R: tokio::io::AsyncRead + Unpin + Send,
 {
@@ -407,14 +372,14 @@ where
     let col_map = ColumnMap::from_headers(&headers);
     if !col_map.is_valid() {
         error!("CSV missing required columns");
-        return Err(UploadFailure::bad_request(
+        return Err(ApiError::bad_request(
             "CSV missing required columns (sightingId, date, longitude, latitude, commonName)",
         ));
     }
 
     let mut tx = pool.begin().await.map_err(|e| {
         error!("Failed to begin transaction: {}", e);
-        UploadFailure::internal("Database error")
+        ApiError::internal("Database error")
     })?;
 
     let mut batch: Vec<SightingRow> = Vec::with_capacity(BATCH_SIZE);
@@ -438,7 +403,7 @@ where
 
     tx.commit().await.map_err(|e| {
         error!("Failed to commit transaction: {}", e);
-        UploadFailure::internal("Database error")
+        ApiError::internal("Database error")
     })?;
 
     Ok(total_rows)
@@ -508,18 +473,12 @@ pub async fn upload_csv(
                 .await
         {
             error!("Failed to create upload record: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(UploadError {
-                    error: "Database error".to_string(),
-                }),
-            )
-                .into_response();
+            return ApiError::internal("Database error").into_response();
         }
 
         let total_rows = match ingest_csv_field(field, &pool, &upload_id).await {
             Ok(rows) => rows,
-            Err(err) => return err.into_response().into_response(),
+            Err(err) => return err.into_response(),
         };
 
         let _ = sqlx::query("UPDATE uploads SET row_count = ? WHERE id = ?")
@@ -538,7 +497,7 @@ pub async fn upload_csv(
         );
 
         return (
-            StatusCode::OK,
+            axum::http::StatusCode::OK,
             Json(UploadResponse {
                 upload_id,
                 filename,
@@ -549,13 +508,7 @@ pub async fn upload_csv(
             .into_response();
     }
 
-    (
-        StatusCode::BAD_REQUEST,
-        Json(UploadError {
-            error: "No CSV file found in upload".to_string(),
-        }),
-    )
-        .into_response()
+    ApiError::bad_request("No CSV file found in upload").into_response()
 }
 
 fn extract_edit_token(headers: &axum::http::HeaderMap) -> Option<String> {
@@ -601,36 +554,18 @@ pub async fn update_csv(
     let token = match extract_edit_token(&headers) {
         Some(t) => t,
         None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(UploadError {
-                    error: "Missing edit token".to_string(),
-                }),
-            )
-                .into_response();
+            return ApiError::unauthorised("Missing edit token").into_response();
         }
     };
 
     match verify_upload_access(&pool, &upload_id, &token).await {
         Ok(true) => {}
         Ok(false) => {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(UploadError {
-                    error: "Invalid edit token".to_string(),
-                }),
-            )
-                .into_response();
+            return ApiError::forbidden("Invalid edit token").into_response();
         }
         Err(e) => {
             error!("Database error verifying token: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(UploadError {
-                    error: "Database error".to_string(),
-                }),
-            )
-                .into_response();
+            return ApiError::internal("Database error").into_response();
         }
     }
 
@@ -653,18 +588,12 @@ pub async fn update_csv(
             .await
         {
             error!("Failed to delete existing sightings: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(UploadError {
-                    error: "Database error".to_string(),
-                }),
-            )
-                .into_response();
+            return ApiError::internal("Database error").into_response();
         }
 
         let total_rows = match ingest_csv_field(field, &pool, &upload_id).await {
             Ok(rows) => rows,
-            Err(err) => return err.into_response().into_response(),
+            Err(err) => return err.into_response(),
         };
 
         let _ = sqlx::query("UPDATE uploads SET row_count = ?, filename = ? WHERE id = ?")
@@ -684,7 +613,7 @@ pub async fn update_csv(
         );
 
         return (
-            StatusCode::OK,
+            axum::http::StatusCode::OK,
             Json(UpdateResponse {
                 upload_id,
                 filename,
@@ -694,13 +623,7 @@ pub async fn update_csv(
             .into_response();
     }
 
-    (
-        StatusCode::BAD_REQUEST,
-        Json(UploadError {
-            error: "No CSV file found in upload".to_string(),
-        }),
-    )
-        .into_response()
+    ApiError::bad_request("No CSV file found in upload").into_response()
 }
 
 #[derive(Serialize, TS)]
@@ -717,36 +640,18 @@ pub async fn delete_upload(
     let token = match extract_edit_token(&headers) {
         Some(t) => t,
         None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(UploadError {
-                    error: "Missing edit token".to_string(),
-                }),
-            )
-                .into_response();
+            return ApiError::unauthorised("Missing edit token").into_response();
         }
     };
 
     match verify_upload_access(&pool, &upload_id, &token).await {
         Ok(true) => {}
         Ok(false) => {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(UploadError {
-                    error: "Invalid edit token".to_string(),
-                }),
-            )
-                .into_response();
+            return ApiError::forbidden("Invalid edit token").into_response();
         }
         Err(e) => {
             error!("Database error verifying token: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(UploadError {
-                    error: "Database error".to_string(),
-                }),
-            )
-                .into_response();
+            return ApiError::internal("Database error").into_response();
         }
     }
 
@@ -758,17 +663,15 @@ pub async fn delete_upload(
     {
         Ok(_) => {
             info!("Deleted upload: {}", upload_id);
-            (StatusCode::OK, Json(DeleteResponse { deleted: true })).into_response()
+            (
+                axum::http::StatusCode::OK,
+                Json(DeleteResponse { deleted: true }),
+            )
+                .into_response()
         }
         Err(e) => {
             error!("Failed to delete upload: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(UploadError {
-                    error: "Database error".to_string(),
-                }),
-            )
-                .into_response()
+            ApiError::internal("Database error").into_response()
         }
     }
 }

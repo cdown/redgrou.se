@@ -13,7 +13,7 @@ use redgrouse::filter::{
     Combinator, Condition, FieldMetadata, FilterGroup, FilterValue, Operator, Rule,
 };
 use redgrouse::sightings::{Sighting, SightingsResponse, SortField};
-use redgrouse::upload::{DeleteResponse, UpdateResponse, UploadError, UploadResponse};
+use redgrouse::upload::{DeleteResponse, UpdateResponse, UploadResponse};
 use ts_rs::TS;
 
 fn main() {
@@ -37,7 +37,6 @@ fn main() {
     SightingsResponse::export_all_to(out_dir).expect("Failed to export SightingsResponse");
     SortField::export_all_to(out_dir).expect("Failed to export SortField");
     UploadResponse::export_all_to(out_dir).expect("Failed to export UploadResponse");
-    UploadError::export_all_to(out_dir).expect("Failed to export UploadError");
     UpdateResponse::export_all_to(out_dir).expect("Failed to export UpdateResponse");
     DeleteResponse::export_all_to(out_dir).expect("Failed to export DeleteResponse");
 
