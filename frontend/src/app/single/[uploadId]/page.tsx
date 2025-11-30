@@ -101,7 +101,7 @@ export default function UploadPage() {
       buildApiUrl(FIELD_VALUES_ROUTE, {
         upload_id: uploadId,
         field: "year",
-      })
+      }),
     )
       .then((res) => {
         if (res.ok) {
@@ -170,7 +170,7 @@ export default function UploadPage() {
           headers: {
             Authorization: `Bearer ${editToken}`,
           },
-        }
+        },
       );
 
       if (!res.ok) {
@@ -207,7 +207,7 @@ export default function UploadPage() {
               Authorization: `Bearer ${editToken}`,
             },
             body: formData,
-          }
+          },
         );
 
         if (!res.ok) {
@@ -231,7 +231,7 @@ export default function UploadPage() {
         setIsUpdating(false);
       }
     },
-    [editToken, uploadId]
+    [editToken, uploadId],
   );
 
   const handleFileSelect = useCallback(
@@ -245,7 +245,7 @@ export default function UploadPage() {
         handleUpdate(file);
       }
     },
-    [handleUpdate]
+    [handleUpdate],
   );
 
   if (loading) {
@@ -411,7 +411,9 @@ export default function UploadPage() {
               <select
                 value={yearTickYear || ""}
                 onChange={(e) => {
-                  const year = e.target.value ? parseInt(e.target.value, 10) : null;
+                  const year = e.target.value
+                    ? parseInt(e.target.value, 10)
+                    : null;
                   setYearTickYear(year);
                   // When selecting a year tick, clear lifers
                   if (year !== null) {
@@ -479,7 +481,7 @@ export default function UploadPage() {
         <div className="flex overflow-hidden rounded-lg bg-white shadow-lg">
           <button
             onClick={() => setViewMode("map")}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            className={`flex flex-1 items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
               viewMode === "map"
                 ? "bg-stone-900 text-white"
                 : "text-stone-600 hover:bg-stone-50"
@@ -504,7 +506,7 @@ export default function UploadPage() {
           </button>
           <button
             onClick={() => setViewMode("table")}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            className={`flex flex-1 items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
               viewMode === "table"
                 ? "bg-stone-900 text-white"
                 : "text-stone-600 hover:bg-stone-50"
@@ -730,9 +732,9 @@ export default function UploadPage() {
               Delete this upload?
             </h3>
             <p className="mb-6 text-sm text-stone-600">
-              This will permanently delete all {upload.row_count.toLocaleString()}{" "}
-              sightings from <strong>{upload.filename}</strong>. This action
-              cannot be undone.
+              This will permanently delete all{" "}
+              {upload.row_count.toLocaleString()} sightings from{" "}
+              <strong>{upload.filename}</strong>. This action cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
               <button
