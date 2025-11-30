@@ -22,6 +22,22 @@ function stripHtml(html: string): string {
 
 const MAX_DESCRIPTION_LENGTH = 350;
 
+/**
+ * Format an ISO 8601 date string to a readable format
+ */
+function formatDate(dateString: string): string {
+  try {
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return dateString;
+  }
+}
+
 function firstParagraph(text: string): string {
   const stripped = stripHtml(text);
   const para = stripped.split(/\n\n|\r\n\r\n/)[0].trim();
@@ -87,14 +103,56 @@ function updatePopupWithSpeciesInfo(
     photoAttribution: string | null;
     inaturalistUrl: string;
     observationsCount: number | null;
-  } | null
+  } | null,
+  observedAt?: string,
+  isLifer?: boolean,
+  isYearTick?: boolean
 ): void {
   if (!info) {
+    const dateDisplay = observedAt ? formatDate(observedAt) : "";
+    const badges: string[] = [];
+    if (isLifer) badges.push("Lifer");
+    if (isYearTick) badges.push("Year Tick");
+
     container.innerHTML = `
       <div style="width: 280px; font-family: system-ui, -apple-system, sans-serif;">
         <div style="padding: 12px;">
           <div style="font-weight: 600; font-size: 15px; color: #111827; margin-bottom: 4px;">${name}</div>
-          <div style="font-size: 13px; color: #6b7280;">Count: ${count}</div>
+          <div style="font-size: 13px; color: #6b7280; margin-bottom: 8px;">Count: ${count}</div>
+          ${dateDisplay ? `
+            <div style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: #6b7280; margin-bottom: 4px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                <line x1="16" y1="2" x2="16" y2="6"/>
+                <line x1="8" y1="2" x2="8" y2="6"/>
+                <line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+              <span>${dateDisplay}</span>
+            </div>
+          ` : ""}
+          ${badges.length > 0 ? `
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
+              ${isLifer ? `
+                <div style="display: flex; align-items: center; gap: 4px; padding: 2px 8px; background: #f3f4f6; border-radius: 4px; font-size: 12px; color: #374151;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2.5">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                  <span>Lifer</span>
+                </div>
+              ` : ""}
+              ${isYearTick ? `
+                <div style="display: flex; align-items: center; gap: 4px; padding: 2px 8px; background: #f3f4f6; border-radius: 4px; font-size: 12px; color: #374151;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                  <span>Year Tick</span>
+                </div>
+              ` : ""}
+            </div>
+          ` : ""}
         </div>
       </div>
     `;
@@ -127,15 +185,53 @@ function updatePopupWithSpeciesInfo(
       }
       <div style="padding: 12px;">
         ${summary ? `<p style="font-size: 13px; line-height: 1.5; color: #374151; margin: 0 0 10px;">${summary}</p>` : ""}
-        <div style="display: flex; align-items: center; gap: 12px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
-          <div style="display: flex; align-items: center; gap: 4px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-              <circle cx="12" cy="7" r="4"/>
-            </svg>
-            <span style="font-size: 12px; color: #6b7280;">Count: ${count}</span>
+        <div style="display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
+          <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+              <span style="font-size: 12px; color: #6b7280;">Count: ${count}</span>
+            </div>
+            ${observedAt ? `
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="16" y1="2" x2="16" y2="6"/>
+                  <line x1="8" y1="2" x2="8" y2="6"/>
+                  <line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+                <span style="font-size: 12px; color: #6b7280;">${formatDate(observedAt)}</span>
+              </div>
+            ` : ""}
+            ${(isLifer || isYearTick) ? `
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                ${isLifer ? `
+                  <div style="display: flex; align-items: center; gap: 4px; padding: 2px 8px; background: #f3f4f6; border-radius: 4px; font-size: 12px; color: #374151;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2.5">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    <span>Lifer</span>
+                  </div>
+                ` : ""}
+                ${isYearTick ? `
+                  <div style="display: flex; align-items: center; gap: 4px; padding: 2px 8px; background: #f3f4f6; border-radius: 4px; font-size: 12px; color: #374151;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2">
+                      <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                      <line x1="16" y1="2" x2="16" y2="6"/>
+                      <line x1="8" y1="2" x2="8" y2="6"/>
+                      <line x1="3" y1="10" x2="21" y2="10"/>
+                    </svg>
+                    <span>Year Tick</span>
+                  </div>
+                ` : ""}
+              </div>
+            ` : ""}
           </div>
-          <a href="${info.inaturalistUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 12px; color: #2563eb; text-decoration: none; margin-left: auto;">iNaturalist →</a>
+          <div style="display: flex; align-items: center; justify-content: flex-end;">
+            <a href="${info.inaturalistUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 12px; color: #2563eb; text-decoration: none;">iNaturalist →</a>
+          </div>
         </div>
         ${
           info.photoAttribution
@@ -158,7 +254,10 @@ function showSpeciesPopup(
   lng: number,
   name: string,
   count: number,
-  scientificName?: string
+  scientificName?: string,
+  observedAt?: string,
+  isLifer?: boolean,
+  isYearTick?: boolean
 ): void {
   const popupContent = createPopupContent(name, count, scientificName);
 
@@ -178,7 +277,15 @@ function showSpeciesPopup(
       popup.remove();
       const finalContent = document.createElement("div");
       finalContent.className = "species-popup";
-      updatePopupWithSpeciesInfo(finalContent, name, count, info);
+      updatePopupWithSpeciesInfo(
+        finalContent,
+        name,
+        count,
+        info,
+        observedAt,
+        isLifer,
+        isYearTick
+      );
       popup = new maplibregl.Popup({
         maxWidth: "none",
         subpixelPositioning: false,
@@ -244,7 +351,14 @@ function addSightingsLayer(map: maplibregl.Map): void {
     const feature = e.features[0];
     const name = feature.properties?.name || "Unknown";
     const scientificName = feature.properties?.scientific_name;
-    const count = feature.properties?.count || 1;
+    const count = typeof feature.properties?.count === "number"
+      ? feature.properties.count
+      : parseInt(feature.properties?.count?.toString() || "1", 10);
+    const observedAt = feature.properties?.observed_at?.toString();
+    const lifer = feature.properties?.lifer;
+    const yearTick = feature.properties?.year_tick;
+    const isLifer = lifer === 1 || lifer === "1" || lifer === true;
+    const isYearTick = yearTick === 1 || yearTick === "1" || yearTick === true;
     const lngLat = e.lngLat;
 
     showSpeciesPopup(
@@ -253,7 +367,10 @@ function addSightingsLayer(map: maplibregl.Map): void {
       lngLat.lng,
       name,
       count,
-      scientificName
+      scientificName,
+      observedAt,
+      isLifer,
+      isYearTick
     );
   });
 
@@ -431,13 +548,18 @@ export function SightingsMap({
             console.warn("No sighting data provided for popup");
             return;
           }
+          // When navigating from table, date/lifer/yearTick may not be available
+          // so we pass undefined - the popup will simply not display those fields
           showSpeciesPopup(
             map,
             lat,
             lng,
             sightingData.name,
             sightingData.count,
-            sightingData.scientificName || undefined
+            sightingData.scientificName || undefined,
+            undefined, // observedAt - not available from table navigation
+            undefined, // isLifer - not available from table navigation
+            undefined // isYearTick - not available from table navigation
           );
         };
 

@@ -47,7 +47,11 @@ struct SightingPoint {
     latitude: f64,
     longitude: f64,
     common_name: String,
+    scientific_name: Option<String>,
     count: i32,
+    observed_at: String,
+    lifer: i32,
+    year_tick: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,7 +130,7 @@ pub async fn get_tile(
 
     let sql = format!(
         r#"
-        SELECT id, latitude, longitude, common_name, count
+        SELECT id, latitude, longitude, common_name, scientific_name, count, observed_at, lifer, year_tick
         FROM sightings
         WHERE upload_id = ?
           AND latitude >= ? AND latitude <= ?
@@ -156,7 +160,11 @@ pub async fn get_tile(
             latitude: row.get("latitude"),
             longitude: row.get("longitude"),
             common_name: row.get("common_name"),
+            scientific_name: row.get("scientific_name"),
             count: row.get("count"),
+            observed_at: row.get("observed_at"),
+            lifer: row.get("lifer"),
+            year_tick: row.get("year_tick"),
         })
         .collect();
 
@@ -179,6 +187,12 @@ pub async fn get_tile(
         feature.set_id(point.id as u64);
         feature.add_tag_string("name", &point.common_name);
         feature.add_tag_uint("count", point.count as u64);
+        if let Some(ref scientific_name) = point.scientific_name {
+            feature.add_tag_string("scientific_name", scientific_name);
+        }
+        feature.add_tag_string("observed_at", &point.observed_at);
+        feature.add_tag_uint("lifer", point.lifer as u64);
+        feature.add_tag_uint("year_tick", point.year_tick as u64);
 
         layer = feature.into_layer();
     }
