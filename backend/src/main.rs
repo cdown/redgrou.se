@@ -56,10 +56,7 @@ async fn main() -> anyhow::Result<()> {
                 .put(upload::update_csv)
                 .delete(upload::delete_upload),
         )
-        .route(
-            api_constants::UPLOAD_COUNT_ROUTE,
-            get(get_filtered_count),
-        )
+        .route(api_constants::UPLOAD_COUNT_ROUTE, get(get_filtered_count))
         .route(
             api_constants::UPLOAD_SIGHTINGS_ROUTE,
             get(sightings::get_sightings),

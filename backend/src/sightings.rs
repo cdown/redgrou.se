@@ -1,7 +1,7 @@
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 use ts_rs::TS;
 
 use crate::api_constants;
@@ -40,6 +40,7 @@ pub struct SightingsQuery {
     sort_dir: Option<String>,
     page: Option<u32>,
     page_size: Option<u32>,
+    group_by: Option<String>,
 }
 
 #[derive(Debug, Serialize, TS)]
@@ -59,12 +60,49 @@ pub struct Sighting {
 
 #[derive(Debug, Serialize, TS)]
 #[ts(export)]
+pub struct GroupedSighting {
+    pub common_name: Option<String>,
+    pub scientific_name: Option<String>,
+    pub country_code: Option<String>,
+    pub trip_name: Option<String>,
+    pub observed_at: Option<String>,
+    pub count: i64,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
 pub struct SightingsResponse {
-    pub sightings: Vec<Sighting>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sightings: Option<Vec<Sighting>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<GroupedSighting>>,
     pub total: i64,
     pub page: u32,
     pub page_size: u32,
     pub total_pages: u32,
+}
+
+fn validate_group_by_fields(fields: &[String]) -> Result<Vec<String>, ApiError> {
+    let allowed = [
+        "common_name",
+        "scientific_name",
+        "country_code",
+        "trip_name",
+        "observed_at",
+    ];
+    let mut validated = Vec::new();
+    for field in fields {
+        let trimmed = field.trim();
+        if allowed.contains(&trimmed) {
+            validated.push(trimmed.to_string());
+        } else {
+            return Err(ApiError::bad_request(&format!(
+                "Invalid group_by field: {}",
+                trimmed
+            )));
+        }
+    }
+    Ok(validated)
 }
 
 pub async fn get_sightings(
@@ -79,16 +117,6 @@ pub async fn get_sightings(
         .min(api_constants::MAX_PAGE_SIZE);
     let offset = (page - 1) * page_size;
 
-    let sort_field = query
-        .sort_field
-        .unwrap_or(SortField::ObservedAt)
-        .as_sql_column();
-
-    let sort_dir = match query.sort_dir.as_deref() {
-        Some("asc") => "ASC",
-        _ => "DESC",
-    };
-
     let mut params: Vec<String> = vec![upload_id.clone()];
 
     let filter_clause = if let Some(filter_json) = &query.filter {
@@ -100,6 +128,133 @@ pub async fn get_sightings(
         }
     } else {
         None
+    };
+
+    // Handle grouped query
+    if let Some(group_by_str) = &query.group_by {
+        let group_by_fields: Vec<String> = group_by_str.split(',').map(|s| s.to_string()).collect();
+        let validated_fields = validate_group_by_fields(&group_by_fields)?;
+
+        if validated_fields.is_empty() {
+            return Err(ApiError::bad_request(
+                "group_by must contain at least one field",
+            ));
+        }
+
+        // Build GROUP BY clause
+        let group_by_clause = validated_fields.join(", ");
+
+        // Build SELECT clause (preserve NULLs, don't use COALESCE)
+        let select_clause = validated_fields.join(", ");
+
+        // Count total groups
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM (SELECT {} FROM sightings WHERE upload_id = ?{} GROUP BY {})",
+            select_clause,
+            filter_clause.as_deref().unwrap_or(""),
+            group_by_clause
+        );
+
+        let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+        for param in &params {
+            count_query = count_query.bind(param);
+        }
+
+        let total = count_query
+            .fetch_one(&pool)
+            .await
+            .map_err(|_| ApiError::internal("Database error"))?;
+
+        // Determine sort field (must be one of the grouped fields or count)
+        let sort_field = if let Some(sf) = query.sort_field {
+            let col = sf.as_sql_column();
+            if validated_fields.contains(&col.to_string()) || col == "count" {
+                col
+            } else {
+                validated_fields.first().unwrap()
+            }
+        } else {
+            "count"
+        };
+
+        let sort_dir = match query.sort_dir.as_deref() {
+            Some("asc") => "ASC",
+            _ => "DESC",
+        };
+
+        // Build SELECT query with COUNT(*)
+        let select_sql = format!(
+            "SELECT {}, COUNT(*) as count FROM sightings WHERE upload_id = ?{} GROUP BY {} ORDER BY {} {} LIMIT ? OFFSET ?",
+            select_clause,
+            filter_clause.as_deref().unwrap_or(""),
+            group_by_clause,
+            sort_field,
+            sort_dir
+        );
+
+        // Build query with proper parameter binding
+        let mut select_query = sqlx::query(&select_sql);
+        for param in &params {
+            select_query = select_query.bind(param);
+        }
+        select_query = select_query.bind(page_size as i64);
+        select_query = select_query.bind(offset as i64);
+
+        let rows = select_query
+            .fetch_all(&pool)
+            .await
+            .map_err(|_| ApiError::internal("Database error"))?;
+
+        // Parse results into GroupedSighting
+        let mut groups = Vec::new();
+        for row in rows {
+            let mut grouped = GroupedSighting {
+                common_name: None,
+                scientific_name: None,
+                country_code: None,
+                trip_name: None,
+                observed_at: None,
+                count: 0,
+            };
+
+            for (i, field) in validated_fields.iter().enumerate() {
+                let value: Option<String> = row.try_get(i).ok();
+                match field.as_str() {
+                    "common_name" => grouped.common_name = value,
+                    "scientific_name" => grouped.scientific_name = value,
+                    "country_code" => grouped.country_code = value,
+                    "trip_name" => grouped.trip_name = value,
+                    "observed_at" => grouped.observed_at = value,
+                    _ => {}
+                }
+            }
+
+            grouped.count = row.try_get(validated_fields.len()).unwrap_or(0);
+
+            groups.push(grouped);
+        }
+
+        let total_pages = ((total as f64) / (page_size as f64)).ceil() as u32;
+
+        return Ok(Json(SightingsResponse {
+            sightings: None,
+            groups: Some(groups),
+            total,
+            page,
+            page_size,
+            total_pages,
+        }));
+    }
+
+    // Original individual sightings query
+    let sort_field = query
+        .sort_field
+        .unwrap_or(SortField::ObservedAt)
+        .as_sql_column();
+
+    let sort_dir = match query.sort_dir.as_deref() {
+        Some("asc") => "ASC",
+        _ => "DESC",
     };
 
     let count_sql = format!(
@@ -176,7 +331,8 @@ pub async fn get_sightings(
     let total_pages = ((total as f64) / (page_size as f64)).ceil() as u32;
 
     Ok(Json(SightingsResponse {
-        sightings,
+        sightings: Some(sightings),
+        groups: None,
         total,
         page,
         page_size,

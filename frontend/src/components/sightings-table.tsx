@@ -9,27 +9,13 @@ import {
   DEFAULT_PAGE_SIZE,
 } from "@/lib/generated/api_constants";
 import { SortField } from "@/lib/generated/SortField";
-
-interface Sighting {
-  id: number;
-  common_name: string;
-  scientific_name: string | null;
-  count: number | null;
-  latitude: number;
-  longitude: number;
-  country_code: string | null;
-  observed_at: string;
-  notes: string | null;
-  trip_name: string | null;
-}
-
-interface SightingsResponse {
-  sightings: Sighting[];
-  total: number;
-  page: number;
-  page_size: number;
-  total_pages: number;
-}
+import { SightingsResponse } from "@/lib/generated/SightingsResponse";
+import { GroupedSighting } from "@/lib/generated/GroupedSighting";
+import { Sighting } from "@/lib/generated/Sighting";
+import {
+  MultiCombobox,
+  MultiComboboxOption,
+} from "@/components/ui/multi-combobox";
 
 interface SightingsTableProps {
   uploadId: string;
@@ -47,13 +33,23 @@ const COLUMNS: { field: SortField; label: string; width: string }[] = [
   { field: "trip_name", label: "Trip", width: "w-[200px]" },
 ];
 
+const GROUP_BY_OPTIONS: MultiComboboxOption[] = [
+  { value: "country_code", label: "Country" },
+  { value: "scientific_name", label: "Scientific Name" },
+  { value: "common_name", label: "Species" },
+  { value: "trip_name", label: "Trip" },
+  { value: "observed_at", label: "Date" },
+];
+
 export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
   const [sightings, setSightings] = useState<Sighting[]>([]);
+  const [groups, setGroups] = useState<GroupedSighting[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [sortField, setSortField] = useState<SortField>("observed_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [groupBy, setGroupBy] = useState<string[]>([]);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
@@ -75,6 +71,10 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
         params.set("filter", filterToJson(filter));
       }
 
+      if (groupBy.length > 0) {
+        params.set("group_by", groupBy.join(","));
+      }
+
       try {
         const url = `${buildApiUrl(UPLOAD_SIGHTINGS_ROUTE, {
           upload_id: uploadId,
@@ -83,13 +83,25 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
         const res = await apiFetch(url);
         const json: SightingsResponse = await res.json();
 
-        if (append) {
-          setSightings((prev) => [...prev, ...json.sightings]);
-        } else {
-          setSightings(json.sightings);
+        if (groupBy.length > 0 && json.groups) {
+          // Handle grouped response
+          if (append) {
+            setGroups((prev) => [...prev, ...json.groups!]);
+          } else {
+            setGroups(json.groups);
+          }
+          setSightings([]);
+        } else if (json.sightings) {
+          // Handle individual sightings response
+          if (append) {
+            setSightings((prev) => [...prev, ...json.sightings!]);
+          } else {
+            setSightings(json.sightings);
+          }
+          setGroups([]);
         }
 
-        setTotal(json.total);
+        setTotal(Number(json.total));
         setHasMore(pageNum < json.total_pages);
         pageRef.current = pageNum;
       } catch (e) {
@@ -99,11 +111,12 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
         setLoading(false);
       }
     },
-    [uploadId, filter, sortField, sortDir]
+    [uploadId, filter, sortField, sortDir, groupBy],
   );
 
   useEffect(() => {
     setSightings([]);
+    setGroups([]);
     pageRef.current = 1;
     setHasMore(true);
     fetchPage(1, false);
@@ -197,68 +210,177 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
     );
   };
 
+  const isGrouped = groupBy.length > 0;
+  const displayItems = isGrouped ? groups : sightings;
+  const displayCount = isGrouped ? groups.length : sightings.length;
+
   return (
     <div className="absolute inset-0 flex flex-col">
-      <div className="shrink-0 border-b px-4 py-2 text-sm text-muted-foreground">
-        {total.toLocaleString()} sightings
-        {sightings.length < total &&
-          ` (${sightings.length.toLocaleString()} loaded)`}
+      <div className="shrink-0 border-b px-4 py-2 flex items-center justify-between text-sm">
+        <div className="text-muted-foreground">
+          {isGrouped ? (
+            <>
+              {total.toLocaleString()} group{total !== 1 ? "s" : ""}
+              {displayCount < total &&
+                ` (${displayCount.toLocaleString()} loaded)`}
+            </>
+          ) : (
+            <>
+              {total.toLocaleString()} sightings
+              {displayCount < total &&
+                ` (${displayCount.toLocaleString()} loaded)`}
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground text-xs">Group by:</span>
+          <div className="w-[200px]">
+            <MultiCombobox
+              options={GROUP_BY_OPTIONS}
+              values={groupBy}
+              onChange={setGroupBy}
+              placeholder="None"
+              searchPlaceholder="Search fields..."
+              emptyText="No fields found."
+            />
+          </div>
+        </div>
       </div>
 
       <div className="shrink-0 border-b bg-background">
         <div className="flex text-sm font-medium">
-          {COLUMNS.map((col) => (
-            <div key={col.field} className={`${col.width} shrink-0 px-3 py-2`}>
-              <button
-                className="flex items-center hover:text-foreground transition-colors"
-                onClick={() => handleSort(col.field)}
-              >
-                {col.label}
-                <SortIcon field={col.field} />
-              </button>
-            </div>
-          ))}
-          <div className="flex-1 px-3 py-2">Notes</div>
+          {isGrouped ? (
+            <>
+              {groupBy.includes("country_code") && (
+                <div className="w-[140px] shrink-0 px-3 py-2">Country</div>
+              )}
+              {groupBy.includes("scientific_name") && (
+                <div className="w-[200px] shrink-0 px-3 py-2">
+                  Scientific Name
+                </div>
+              )}
+              {groupBy.includes("common_name") && (
+                <div className="w-[200px] shrink-0 px-3 py-2">Species</div>
+              )}
+              {groupBy.includes("trip_name") && (
+                <div className="w-[200px] shrink-0 px-3 py-2">Trip</div>
+              )}
+              {groupBy.includes("observed_at") && (
+                <div className="w-[120px] shrink-0 px-3 py-2">Date</div>
+              )}
+              <div className="w-[100px] shrink-0 px-3 py-2">
+                <button
+                  className="flex items-center hover:text-foreground transition-colors"
+                  onClick={() => handleSort("count" as SortField)}
+                >
+                  Count
+                  <SortIcon field={"count" as SortField} />
+                </button>
+              </div>
+              <div className="flex-1 px-3 py-2"></div>
+            </>
+          ) : (
+            <>
+              {COLUMNS.map((col) => (
+                <div
+                  key={col.field}
+                  className={`${col.width} shrink-0 px-3 py-2`}
+                >
+                  <button
+                    className="flex items-center hover:text-foreground transition-colors"
+                    onClick={() => handleSort(col.field)}
+                  >
+                    {col.label}
+                    <SortIcon field={col.field} />
+                  </button>
+                </div>
+              ))}
+              <div className="flex-1 px-3 py-2">Notes</div>
+            </>
+          )}
         </div>
       </div>
 
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
-        {sightings.length === 0 && !loading ? (
+        {displayItems.length === 0 && !loading ? (
           <div className="flex h-32 items-center justify-center text-muted-foreground">
-            No sightings found
+            {isGrouped ? "No groups found" : "No sightings found"}
           </div>
         ) : (
           <>
-            {sightings.map((sighting) => (
-              <div
-                key={sighting.id}
-                className="flex border-b text-sm hover:bg-muted/50 transition-colors"
-              >
-                <div className="w-[200px] shrink-0 px-3 py-2 font-medium">
-                  {sighting.common_name}
-                </div>
-                <div className="w-[200px] shrink-0 px-3 py-2 italic text-muted-foreground">
-                  {sighting.scientific_name || "—"}
-                </div>
-                <div className="w-[80px] shrink-0 px-3 py-2">
-                  {sighting.count ?? "—"}
-                </div>
-                <div className="w-[140px] shrink-0 px-3 py-2">
-                  {sighting.country_code
-                    ? formatCountry(sighting.country_code)
-                    : "—"}
-                </div>
-                <div className="w-[120px] shrink-0 px-3 py-2">
-                  {formatDate(sighting.observed_at)}
-                </div>
-                <div className="w-[200px] shrink-0 px-3 py-2">
-                  {sighting.trip_name || "—"}
-                </div>
-                <div className="flex-1 px-3 py-2 truncate">
-                  {sighting.notes || "—"}
-                </div>
-              </div>
-            ))}
+            {isGrouped
+              ? groups.map((group, idx) => (
+                  <div
+                    key={idx}
+                    className="flex border-b text-sm hover:bg-muted/50 transition-colors"
+                  >
+                    {groupBy.includes("country_code") && (
+                      <div className="w-[140px] shrink-0 px-3 py-2">
+                        {group.country_code
+                          ? formatCountry(group.country_code)
+                          : "—"}
+                      </div>
+                    )}
+                    {groupBy.includes("scientific_name") && (
+                      <div className="w-[200px] shrink-0 px-3 py-2 italic text-muted-foreground">
+                        {group.scientific_name || "—"}
+                      </div>
+                    )}
+                    {groupBy.includes("common_name") && (
+                      <div className="w-[200px] shrink-0 px-3 py-2 font-medium">
+                        {group.common_name || "—"}
+                      </div>
+                    )}
+                    {groupBy.includes("trip_name") && (
+                      <div className="w-[200px] shrink-0 px-3 py-2">
+                        {group.trip_name || "—"}
+                      </div>
+                    )}
+                    {groupBy.includes("observed_at") && (
+                      <div className="w-[120px] shrink-0 px-3 py-2">
+                        {group.observed_at
+                          ? formatDate(group.observed_at)
+                          : "—"}
+                      </div>
+                    )}
+                    <div className="w-[100px] shrink-0 px-3 py-2 font-medium">
+                      {Number(group.count).toLocaleString()}
+                    </div>
+                    <div className="flex-1 px-3 py-2"></div>
+                  </div>
+                ))
+              : sightings.map((sighting) => (
+                  <div
+                    key={Number(sighting.id)}
+                    className="flex border-b text-sm hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="w-[200px] shrink-0 px-3 py-2 font-medium">
+                      {sighting.common_name}
+                    </div>
+                    <div className="w-[200px] shrink-0 px-3 py-2 italic text-muted-foreground">
+                      {sighting.scientific_name || "—"}
+                    </div>
+                    <div className="w-[80px] shrink-0 px-3 py-2">
+                      {sighting.count !== null
+                        ? Number(sighting.count).toLocaleString()
+                        : "—"}
+                    </div>
+                    <div className="w-[140px] shrink-0 px-3 py-2">
+                      {sighting.country_code
+                        ? formatCountry(sighting.country_code)
+                        : "—"}
+                    </div>
+                    <div className="w-[120px] shrink-0 px-3 py-2">
+                      {formatDate(sighting.observed_at)}
+                    </div>
+                    <div className="w-[200px] shrink-0 px-3 py-2">
+                      {sighting.trip_name || "—"}
+                    </div>
+                    <div className="flex-1 px-3 py-2 truncate">
+                      {sighting.notes || "—"}
+                    </div>
+                  </div>
+                ))}
 
             {loading && (
               <div className="flex justify-center py-4">
@@ -266,9 +388,10 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
               </div>
             )}
 
-            {!hasMore && sightings.length > 0 && (
+            {!hasMore && displayItems.length > 0 && (
               <div className="py-4 text-center text-sm text-muted-foreground">
-                All {total.toLocaleString()} sightings loaded
+                All {total.toLocaleString()}{" "}
+                {isGrouped ? "groups" : "sightings"} loaded
               </div>
             )}
           </>

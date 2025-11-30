@@ -8,6 +8,7 @@ export type { DeleteResponse } from "./DeleteResponse";
 export type { FieldMetadata } from "./FieldMetadata";
 export type { FilterGroup } from "./FilterGroup";
 export type { FilterValue } from "./FilterValue";
+export type { GroupedSighting } from "./GroupedSighting";
 export type { Operator } from "./Operator";
 export type { Rule } from "./Rule";
 export type { Sighting } from "./Sighting";

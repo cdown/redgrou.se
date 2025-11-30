@@ -94,7 +94,10 @@ fn main() {
         if name == "api_constants" {
             index_content.push_str(&format!("export * from \"./{}\";\n", name));
         } else {
-            index_content.push_str(&format!("export type {{ {} }} from \"./{}\";\n", name, name));
+            index_content.push_str(&format!(
+                "export type {{ {} }} from \"./{}\";\n",
+                name, name
+            ));
         }
     }
 
