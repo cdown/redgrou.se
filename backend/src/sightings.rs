@@ -15,6 +15,7 @@ pub enum SortField {
     CommonName,
     ScientificName,
     Count,
+    SpeciesCount,
     CountryCode,
     ObservedAt,
     TripName,
@@ -26,6 +27,7 @@ impl SortField {
             SortField::CommonName => "common_name",
             SortField::ScientificName => "scientific_name",
             SortField::Count => "count",
+            SortField::SpeciesCount => "species_count",
             SortField::CountryCode => "country_code",
             SortField::ObservedAt => "observed_at",
             SortField::TripName => "trip_name",
@@ -68,6 +70,7 @@ pub struct GroupedSighting {
     pub trip_name: Option<String>,
     pub observed_at: Option<String>,
     pub count: i64,
+    pub species_count: i64,
 }
 
 #[derive(Debug, Serialize, TS)]
@@ -195,10 +198,13 @@ pub async fn get_sightings(
             .await
             .map_err(|_| ApiError::internal("Database error"))?;
 
-        // Determine sort field (must be one of the grouped fields or count)
+        // Determine sort field (must be one of the grouped fields, count, or species_count)
         let sort_field = if let Some(sf) = query.sort_field {
             let col = sf.as_sql_column();
-            if validated_fields.contains(&col.to_string()) || col == "count" {
+            if validated_fields.contains(&col.to_string())
+                || col == "count"
+                || col == "species_count"
+            {
                 col
             } else {
                 validated_fields.first().unwrap()
@@ -221,7 +227,7 @@ pub async fn get_sightings(
         };
 
         let select_sql = format!(
-            "SELECT {}, COUNT(*) as count FROM sightings WHERE upload_id = ?{} GROUP BY {} ORDER BY {} {} LIMIT ? OFFSET ?",
+            "SELECT {}, COUNT(*) as count, COUNT(DISTINCT scientific_name) as species_count FROM sightings WHERE upload_id = ?{} GROUP BY {} ORDER BY {} {} LIMIT ? OFFSET ?",
             select_clause_str,
             filter_clause.as_deref().unwrap_or(""),
             group_by_clause_str,
@@ -252,6 +258,7 @@ pub async fn get_sightings(
                 trip_name: None,
                 observed_at: None,
                 count: 0,
+                species_count: 0,
             };
 
             for (i, field) in validated_fields.iter().enumerate() {
@@ -266,7 +273,10 @@ pub async fn get_sightings(
                 }
             }
 
-            grouped.count = row.try_get(validated_fields.len()).unwrap_or(0);
+            let count_idx = validated_fields.len();
+            let species_count_idx = validated_fields.len() + 1;
+            grouped.count = row.try_get(count_idx).unwrap_or(0);
+            grouped.species_count = row.try_get(species_count_idx).unwrap_or(0);
 
             groups.push(grouped);
         }

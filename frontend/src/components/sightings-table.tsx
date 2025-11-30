@@ -25,6 +25,15 @@ interface SightingsTableProps {
 
 type SortDir = "asc" | "desc";
 
+// Local type with number instead of bigint for display
+type GroupedSightingDisplay = Omit<
+  GroupedSighting,
+  "count" | "species_count"
+> & {
+  count: number;
+  species_count: number;
+};
+
 const COLUMNS: { field: SortField; label: string; width: string }[] = [
   { field: "common_name", label: "Species", width: "w-[200px]" },
   { field: "scientific_name", label: "Scientific Name", width: "w-[200px]" },
@@ -44,7 +53,7 @@ const GROUP_BY_OPTIONS: MultiComboboxOption[] = [
 
 export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
   const [sightings, setSightings] = useState<Sighting[]>([]);
-  const [groups, setGroups] = useState<GroupedSighting[]>([]);
+  const [groups, setGroups] = useState<GroupedSightingDisplay[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -90,11 +99,16 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
         const json: SightingsResponse = await res.json();
 
         if (groupBy.length > 0 && json.groups) {
-          // Handle grouped response
+          // Handle grouped response - convert bigint to number
+          const groupsData: GroupedSightingDisplay[] = json.groups.map((g) => ({
+            ...g,
+            count: Number(g.count),
+            species_count: Number(g.species_count),
+          }));
           if (append) {
-            setGroups((prev) => [...prev, ...json.groups!]);
+            setGroups((prev) => [...prev, ...groupsData]);
           } else {
-            setGroups(json.groups);
+            setGroups(groupsData);
           }
           setSightings([]);
         } else if (json.sightings) {
@@ -295,6 +309,15 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
                   <SortIcon field={"count" as SortField} />
                 </button>
               </div>
+              <div className="w-[100px] shrink-0 px-3 py-2">
+                <button
+                  className="flex items-center hover:text-foreground transition-colors"
+                  onClick={() => handleSort("species_count" as SortField)}
+                >
+                  Distinct species
+                  <SortIcon field={"species_count" as SortField} />
+                </button>
+              </div>
               <div className="flex-1 px-3 py-2"></div>
             </>
           ) : (
@@ -362,7 +385,10 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
                       </div>
                     )}
                     <div className="w-[100px] shrink-0 px-3 py-2 font-medium">
-                      {Number(group.count).toLocaleString()}
+                      {group.count.toLocaleString()}
+                    </div>
+                    <div className="w-[100px] shrink-0 px-3 py-2 font-medium">
+                      {group.species_count.toLocaleString()}
                     </div>
                     <div className="flex-1 px-3 py-2"></div>
                   </div>
