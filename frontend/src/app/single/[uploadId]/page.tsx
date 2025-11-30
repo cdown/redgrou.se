@@ -356,7 +356,7 @@ export default function UploadPage() {
           <>
             <button
               onClick={() => setFilterOpen(true)}
-              className="flex items-center gap-3 rounded-full bg-white px-4 py-3 shadow-lg hover:shadow-xl transition-shadow"
+              className="flex items-center gap-3 rounded-lg bg-white px-4 py-3 shadow-lg hover:shadow-xl transition-shadow"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -697,7 +697,7 @@ export default function UploadPage() {
       {/* Bottom-left: Stats pill + Brand */}
       <div className="absolute bottom-4 left-4 flex flex-col gap-2">
         {!filterOpen && (
-          <div className="rounded-full bg-white/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
+          <div className="rounded-lg bg-white/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
             <span className="font-medium text-stone-900">
               {showingFiltered
                 ? `${filteredCount?.toLocaleString()} of ${upload.row_count.toLocaleString()}`
