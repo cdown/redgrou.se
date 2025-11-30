@@ -43,6 +43,7 @@ const COL_LATITUDE: &str = "latitude";
 const COL_SCIENTIFIC_NAME: &str = "scientificName";
 const COL_COMMON_NAME: &str = "commonName";
 const COL_COUNT: &str = "count";
+const MAX_UPLOAD_ROWS: usize = 250_000;
 const MAX_CSV_COLUMNS: usize = 256;
 const MAX_RECORD_BYTES: usize = 8 * 1024; // 8 KiB per record to prevent line bombs
 
@@ -481,6 +482,12 @@ where
         enforce_record_limits(&record, row_number)?;
         if let Some(row) = parse_row(&record, &col_map, row_number)? {
             batch.push(row);
+            if total_rows + batch.len() > MAX_UPLOAD_ROWS {
+                return Err(ApiError::bad_request(format!(
+                    "CSV exceeds {} row limit",
+                    MAX_UPLOAD_ROWS
+                )));
+            }
             if batch.len() >= BATCH_SIZE {
                 flush_batch(&mut tx, upload_id, &mut batch, &mut total_rows).await?;
             }
