@@ -96,26 +96,31 @@ function showSpeciesPopup(
       // with subpixel values when its size changes.
       root.unmount();
       popup.remove();
-      const finalContainer = document.createElement("div");
-      finalContainer.className = "species-popup";
-      const finalRoot = createRoot(finalContainer);
-      updatePopupWithSpeciesInfo(
-        finalContainer,
-        finalRoot,
-        name,
-        count,
-        info,
-        observedAt,
-        isLifer,
-        isYearTick,
-      );
-      popup = new maplibregl.Popup({
-        maxWidth: "none",
-        subpixelPositioning: false,
-      })
-        .setLngLat([lng, lat])
-        .setDOMContent(finalContainer)
-        .addTo(map);
+      // Wait for React to fully clean up the old root before creating new content.
+      // This prevents interleaved rendering where old and new content appear mixed.
+      // Use requestAnimationFrame to ensure cleanup completes before next render cycle.
+      requestAnimationFrame(() => {
+        const finalContainer = document.createElement("div");
+        finalContainer.className = "species-popup";
+        const finalRoot = createRoot(finalContainer);
+        updatePopupWithSpeciesInfo(
+          finalContainer,
+          finalRoot,
+          name,
+          count,
+          info,
+          observedAt,
+          isLifer,
+          isYearTick,
+        );
+        popup = new maplibregl.Popup({
+          maxWidth: "none",
+          subpixelPositioning: false,
+        })
+          .setLngLat([lng, lat])
+          .setDOMContent(finalContainer)
+          .addTo(map);
+      });
     } else {
       root.unmount();
     }
