@@ -261,15 +261,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "csv"
-version = "1.4.0"
+name = "csv-async"
+version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52cd9d68cf7efc6ddfaaee42e7288d3a99d613d4b50f76ce9827ae0c6e14f938"
+checksum = "888dbb0f640d2c4c04e50f933885c7e9c95995d93cec90aba8735b4c610f26f1"
 dependencies = [
+ "cfg-if",
  "csv-core",
+ "futures",
  "itoa",
  "ryu",
- "serde_core",
+ "serde",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -1226,7 +1230,7 @@ dependencies = [
  "axum",
  "chrono",
  "country-boundaries",
- "csv",
+ "csv-async",
  "futures",
  "hex",
  "mvt",
@@ -1877,6 +1881,7 @@ dependencies = [
  "bytes",
  "http",
  "http-body",
+ "http-body-util",
  "pin-project-lite",
  "tower-layer",
  "tower-service",

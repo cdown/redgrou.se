@@ -1,13 +1,21 @@
-use axum::extract::{Multipart, Path, State};
+use axum::body::Bytes;
+use axum::extract::{multipart::Field, Multipart, Path, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use country_boundaries::{CountryBoundaries, LatLon, BOUNDARIES_ODBL_360X180};
+use csv_async::AsyncReaderBuilder;
+use futures::{Stream, StreamExt, TryStreamExt};
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use sqlx::{Acquire, QueryBuilder, Sqlite, SqlitePool};
+use sqlx::{Acquire, QueryBuilder, Sqlite, SqlitePool, Transaction};
+use std::fmt;
+use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use subtle::ConstantTimeEq;
+use tokio_util::io::StreamReader;
 use tracing::{error, info};
 use ts_rs::TS;
 use uuid::Uuid;
@@ -21,6 +29,9 @@ static BOUNDARIES: Lazy<CountryBoundaries> = Lazy::new(|| {
 });
 
 const BATCH_SIZE: usize = 1000;
+pub const MAX_UPLOAD_BYTES: usize = 200 * 1024 * 1024; // 200 MiB
+pub const MAX_UPLOAD_BODY_BYTES: usize = MAX_UPLOAD_BYTES + (2 * 1024 * 1024); // allow multipart overhead
+const UPLOAD_LIMIT_MB: usize = MAX_UPLOAD_BYTES / (1024 * 1024);
 
 const COL_SIGHTING_ID: &str = "sightingId";
 const COL_DATE: &str = "date";
@@ -63,6 +74,122 @@ pub struct UploadError {
     pub error: String,
 }
 
+#[derive(Debug)]
+struct UploadFailure {
+    status: StatusCode,
+    message: String,
+}
+
+impl UploadFailure {
+    fn bad_request(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: message.into(),
+        }
+    }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: message.into(),
+        }
+    }
+
+    fn into_response(self) -> (StatusCode, Json<UploadError>) {
+        (
+            self.status,
+            Json(UploadError {
+                error: self.message,
+            }),
+        )
+    }
+}
+
+#[derive(Debug)]
+struct UploadSizeExceeded;
+
+impl fmt::Display for UploadSizeExceeded {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "CSV exceeds {} MB upload limit", UPLOAD_LIMIT_MB)
+    }
+}
+
+impl std::error::Error for UploadSizeExceeded {}
+
+struct SizeLimitedStream<S> {
+    inner: S,
+    max: usize,
+    received: usize,
+    limit_hit: bool,
+}
+
+impl<S> SizeLimitedStream<S> {
+    fn new(inner: S, max: usize) -> Self {
+        Self {
+            inner,
+            max,
+            received: 0,
+            limit_hit: false,
+        }
+    }
+}
+
+impl<S> Stream for SizeLimitedStream<S>
+where
+    S: Stream<Item = Result<Bytes, io::Error>> + Unpin + Send,
+{
+    type Item = Result<Bytes, io::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.limit_hit {
+            return Poll::Ready(None);
+        }
+
+        match Pin::new(&mut self.inner).poll_next(cx) {
+            Poll::Ready(Some(Ok(chunk))) => {
+                self.received += chunk.len();
+                if self.received > self.max {
+                    self.limit_hit = true;
+                    return Poll::Ready(Some(Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        UploadSizeExceeded,
+                    ))));
+                }
+                Poll::Ready(Some(Ok(chunk)))
+            }
+            Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+fn map_csv_error(err: csv_async::Error, log_context: &str, client_message: &str) -> UploadFailure {
+    if let Some(limit_failure) = size_limit_failure(&err) {
+        return limit_failure;
+    }
+
+    error!("{}: {}", log_context, err);
+    UploadFailure::bad_request(client_message.to_string())
+}
+
+fn size_limit_failure(err: &csv_async::Error) -> Option<UploadFailure> {
+    if let csv_async::ErrorKind::Io(io_err) = err.kind() {
+        if io_err
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<UploadSizeExceeded>())
+            .is_some()
+        {
+            return Some(UploadFailure::bad_request(format!(
+                "CSV exceeds {} MB upload limit",
+                UPLOAD_LIMIT_MB
+            )));
+        }
+    }
+
+    None
+}
+
 struct SightingRow {
     sighting_uuid: String,
     common_name: String,
@@ -88,7 +215,7 @@ struct ColumnMap {
 }
 
 impl ColumnMap {
-    fn from_headers(headers: &csv::StringRecord) -> Self {
+    fn from_headers(headers: &csv_async::StringRecord) -> Self {
         let mut map = Self::default();
         for (idx, header) in headers.iter().enumerate() {
             match header {
@@ -114,7 +241,7 @@ impl ColumnMap {
     }
 }
 
-fn get_field(record: &csv::ByteRecord, idx: Option<usize>) -> Option<String> {
+fn get_field(record: &csv_async::ByteRecord, idx: Option<usize>) -> Option<String> {
     idx.and_then(|i| record.get(i))
         .and_then(|bytes| std::str::from_utf8(bytes).ok())
         .map(|s| s.trim())
@@ -157,7 +284,7 @@ fn get_region_code(lat: f64, lon: f64) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn parse_row(record: &csv::ByteRecord, col_map: &ColumnMap) -> Option<SightingRow> {
+fn parse_row(record: &csv_async::ByteRecord, col_map: &ColumnMap) -> Option<SightingRow> {
     let sighting_uuid = get_field(record, col_map.sighting_id)?;
     let common_name = get_field(record, col_map.common_name)?;
     let observed_at = get_field(record, col_map.date)?;
@@ -222,6 +349,101 @@ where
     Ok(())
 }
 
+async fn flush_batch(
+    tx: &mut Transaction<'_, Sqlite>,
+    upload_id: &str,
+    batch: &mut Vec<SightingRow>,
+    total_rows: &mut usize,
+) -> Result<(), UploadFailure> {
+    if batch.is_empty() {
+        return Ok(());
+    }
+
+    let batch_len = batch.len();
+
+    {
+        let conn = tx.acquire().await.map_err(|e| {
+            error!("Failed to acquire connection for batch insert: {}", e);
+            UploadFailure::internal("Database error")
+        })?;
+
+        insert_batch(conn, upload_id, batch).await.map_err(|e| {
+            error!("Batch insert failed: {}", e);
+            UploadFailure::internal("Failed to insert sightings")
+        })?;
+    }
+
+    *total_rows += batch_len;
+    batch.clear();
+    Ok(())
+}
+
+async fn ingest_csv_field(
+    field: Field<'_>,
+    pool: &SqlitePool,
+    upload_id: &str,
+) -> Result<usize, UploadFailure> {
+    let stream = field
+        .into_stream()
+        .map(|result| result.map_err(|err| io::Error::new(io::ErrorKind::Other, err)));
+    let limited_stream = SizeLimitedStream::new(stream, MAX_UPLOAD_BYTES);
+    let reader = StreamReader::new(limited_stream);
+    read_csv(reader, pool, upload_id).await
+}
+
+async fn read_csv<R>(reader: R, pool: &SqlitePool, upload_id: &str) -> Result<usize, UploadFailure>
+where
+    R: tokio::io::AsyncRead + Unpin + Send,
+{
+    let mut csv_reader = AsyncReaderBuilder::new()
+        .has_headers(true)
+        .create_reader(reader);
+
+    let headers = csv_reader
+        .headers()
+        .await
+        .map_err(|err| map_csv_error(err, "Failed to read CSV headers", "Invalid CSV headers"))?;
+
+    let col_map = ColumnMap::from_headers(&headers);
+    if !col_map.is_valid() {
+        error!("CSV missing required columns");
+        return Err(UploadFailure::bad_request(
+            "CSV missing required columns (sightingId, date, longitude, latitude, commonName)",
+        ));
+    }
+
+    let mut tx = pool.begin().await.map_err(|e| {
+        error!("Failed to begin transaction: {}", e);
+        UploadFailure::internal("Database error")
+    })?;
+
+    let mut batch: Vec<SightingRow> = Vec::with_capacity(BATCH_SIZE);
+    let mut total_rows = 0usize;
+    let mut record = csv_async::ByteRecord::new();
+
+    while csv_reader
+        .read_byte_record(&mut record)
+        .await
+        .map_err(|err| map_csv_error(err, "Failed to read CSV row", "Invalid CSV data"))?
+    {
+        if let Some(row) = parse_row(&record, &col_map) {
+            batch.push(row);
+            if batch.len() >= BATCH_SIZE {
+                flush_batch(&mut tx, upload_id, &mut batch, &mut total_rows).await?;
+            }
+        }
+    }
+
+    flush_batch(&mut tx, upload_id, &mut batch, &mut total_rows).await?;
+
+    tx.commit().await.map_err(|e| {
+        error!("Failed to commit transaction: {}", e);
+        UploadFailure::internal("Database error")
+    })?;
+
+    Ok(total_rows)
+}
+
 // We compute lifer and year_tick ourselves rather than trusting the CSV.
 // Birda data sometimes has these fields set incorrectly (e.g. lifers not marked as year ticks).
 async fn compute_lifer_and_year_tick(
@@ -273,20 +495,6 @@ pub async fn upload_csv(
             continue;
         }
 
-        let data = match field.bytes().await {
-            Ok(d) => d,
-            Err(e) => {
-                error!("Failed to read upload: {}", e);
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(UploadError {
-                        error: "Failed to read upload data".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-        };
-
         let upload_id = Uuid::new_v4().to_string();
         let edit_token = Uuid::new_v4().to_string();
         let edit_token_hash = hash_token(&edit_token);
@@ -309,101 +517,10 @@ pub async fn upload_csv(
                 .into_response();
         }
 
-        let mut reader = csv::ReaderBuilder::new()
-            .has_headers(true)
-            .from_reader(data.as_ref());
-
-        let headers = match reader.headers() {
-            Ok(h) => h.clone(),
-            Err(e) => {
-                error!("Failed to read CSV headers: {}", e);
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(UploadError {
-                        error: "Invalid CSV headers".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
+        let total_rows = match ingest_csv_field(field, &pool, &upload_id).await {
+            Ok(rows) => rows,
+            Err(err) => return err.into_response().into_response(),
         };
-
-        let col_map = ColumnMap::from_headers(&headers);
-        if !col_map.is_valid() {
-            error!("CSV missing required columns");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(UploadError {
-                    error: "CSV missing required columns (sightingId, date, longitude, latitude, commonName)".to_string(),
-                }),
-            )
-                .into_response();
-        }
-
-        let mut batch: Vec<SightingRow> = Vec::with_capacity(BATCH_SIZE);
-        let mut total_rows = 0usize;
-        let mut record = csv::ByteRecord::new();
-
-        let mut tx = match pool.begin().await {
-            Ok(tx) => tx,
-            Err(e) => {
-                error!("Failed to begin transaction: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(UploadError {
-                        error: "Database error".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-        };
-
-        while reader.read_byte_record(&mut record).unwrap_or(false) {
-            if let Some(row) = parse_row(&record, &col_map) {
-                batch.push(row);
-
-                if batch.len() >= BATCH_SIZE {
-                    if let Err(e) =
-                        insert_batch(tx.acquire().await.unwrap(), &upload_id, &batch).await
-                    {
-                        error!("Batch insert failed: {}", e);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(UploadError {
-                                error: "Failed to insert sightings".to_string(),
-                            }),
-                        )
-                            .into_response();
-                    }
-                    total_rows += batch.len();
-                    batch.clear();
-                }
-            }
-        }
-
-        if !batch.is_empty() {
-            if let Err(e) = insert_batch(tx.acquire().await.unwrap(), &upload_id, &batch).await {
-                error!("Final batch insert failed: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(UploadError {
-                        error: "Failed to insert sightings".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-            total_rows += batch.len();
-        }
-
-        if let Err(e) = tx.commit().await {
-            error!("Failed to commit transaction: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(UploadError {
-                    error: "Database error".to_string(),
-                }),
-            )
-                .into_response();
-        }
 
         let _ = sqlx::query("UPDATE uploads SET row_count = ? WHERE id = ?")
             .bind(total_rows as i64)
@@ -529,20 +646,6 @@ pub async fn update_csv(
             continue;
         }
 
-        let data = match field.bytes().await {
-            Ok(d) => d,
-            Err(e) => {
-                error!("Failed to read upload: {}", e);
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(UploadError {
-                        error: "Failed to read upload data".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-        };
-
         // Delete existing sightings
         if let Err(e) = sqlx::query("DELETE FROM sightings WHERE upload_id = ?")
             .bind(&upload_id)
@@ -559,101 +662,10 @@ pub async fn update_csv(
                 .into_response();
         }
 
-        let mut reader = csv::ReaderBuilder::new()
-            .has_headers(true)
-            .from_reader(data.as_ref());
-
-        let headers = match reader.headers() {
-            Ok(h) => h.clone(),
-            Err(e) => {
-                error!("Failed to read CSV headers: {}", e);
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(UploadError {
-                        error: "Invalid CSV headers".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
+        let total_rows = match ingest_csv_field(field, &pool, &upload_id).await {
+            Ok(rows) => rows,
+            Err(err) => return err.into_response().into_response(),
         };
-
-        let col_map = ColumnMap::from_headers(&headers);
-        if !col_map.is_valid() {
-            error!("CSV missing required columns");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(UploadError {
-                    error: "CSV missing required columns (sightingId, date, longitude, latitude, commonName)".to_string(),
-                }),
-            )
-                .into_response();
-        }
-
-        let mut batch: Vec<SightingRow> = Vec::with_capacity(BATCH_SIZE);
-        let mut total_rows = 0usize;
-        let mut record = csv::ByteRecord::new();
-
-        let mut tx = match pool.begin().await {
-            Ok(tx) => tx,
-            Err(e) => {
-                error!("Failed to begin transaction: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(UploadError {
-                        error: "Database error".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-        };
-
-        while reader.read_byte_record(&mut record).unwrap_or(false) {
-            if let Some(row) = parse_row(&record, &col_map) {
-                batch.push(row);
-
-                if batch.len() >= BATCH_SIZE {
-                    if let Err(e) =
-                        insert_batch(tx.acquire().await.unwrap(), &upload_id, &batch).await
-                    {
-                        error!("Batch insert failed: {}", e);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(UploadError {
-                                error: "Failed to insert sightings".to_string(),
-                            }),
-                        )
-                            .into_response();
-                    }
-                    total_rows += batch.len();
-                    batch.clear();
-                }
-            }
-        }
-
-        if !batch.is_empty() {
-            if let Err(e) = insert_batch(tx.acquire().await.unwrap(), &upload_id, &batch).await {
-                error!("Final batch insert failed: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(UploadError {
-                        error: "Failed to insert sightings".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-            total_rows += batch.len();
-        }
-
-        if let Err(e) = tx.commit().await {
-            error!("Failed to commit transaction: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(UploadError {
-                    error: "Database error".to_string(),
-                }),
-            )
-                .into_response();
-        }
 
         let _ = sqlx::query("UPDATE uploads SET row_count = ?, filename = ? WHERE id = ?")
             .bind(total_rows as i64)

@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 use std::env;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -49,12 +50,17 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route(api_constants::HEALTH_ROUTE, get(health_check))
-        .route(api_constants::UPLOAD_ROUTE, post(upload::upload_csv))
+        .route(
+            api_constants::UPLOAD_ROUTE,
+            post(upload::upload_csv)
+                .layer(RequestBodyLimitLayer::new(upload::MAX_UPLOAD_BODY_BYTES)),
+        )
         .route(
             api_constants::UPLOAD_DETAILS_ROUTE,
             get(get_upload)
                 .put(upload::update_csv)
-                .delete(upload::delete_upload),
+                .delete(upload::delete_upload)
+                .layer(RequestBodyLimitLayer::new(upload::MAX_UPLOAD_BODY_BYTES)),
         )
         .route(api_constants::UPLOAD_COUNT_ROUTE, get(get_filtered_count))
         .route(
