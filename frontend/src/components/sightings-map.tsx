@@ -7,6 +7,7 @@ import { getApiUrl, buildApiUrl } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { fetchSpeciesInfo } from "@/lib/species-api";
 import { TILE_ROUTE } from "@/lib/generated/api_constants";
+import { sanitizeText, sanitizeUrl } from "@/lib/sanitize";
 
 interface SightingsMapProps {
   uploadId: string;
@@ -67,6 +68,9 @@ function createPopupContent(
   count: number,
   scientificName?: string,
 ): HTMLDivElement {
+  const safeName = sanitizeText(name);
+  const safeScientificName = sanitizeText(scientificName);
+
   const container = document.createElement("div");
   container.className = "species-popup";
   container.innerHTML = `
@@ -80,8 +84,12 @@ function createPopupContent(
             </svg>
           </div>
           <div style="flex: 1; min-width: 0;">
-            <div style="font-weight: 600; font-size: 15px; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${name}</div>
-            ${scientificName ? `<div style="font-size: 13px; color: #6b7280; font-style: italic;">${scientificName}</div>` : ""}
+            <div style="font-weight: 600; font-size: 15px; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${safeName}</div>
+            ${
+              scientificName
+                ? `<div style="font-size: 13px; color: #6b7280; font-style: italic;">${safeScientificName}</div>`
+                : ""
+            }
           </div>
         </div>
         <div style="font-size: 13px; color: #6b7280;">Loading species info…</div>
@@ -108,17 +116,20 @@ function updatePopupWithSpeciesInfo(
   isLifer?: boolean,
   isYearTick?: boolean,
 ): void {
+  const safeName = sanitizeText(name);
+  const safeCount = sanitizeText(count);
+  const badges: string[] = [];
+  if (isLifer) badges.push("Lifer");
+  if (isYearTick) badges.push("Year Tick");
+
   if (!info) {
     const dateDisplay = observedAt ? formatDate(observedAt) : "";
-    const badges: string[] = [];
-    if (isLifer) badges.push("Lifer");
-    if (isYearTick) badges.push("Year Tick");
 
     container.innerHTML = `
       <div style="width: 280px; font-family: system-ui, -apple-system, sans-serif;">
         <div style="padding: 12px;">
-          <div style="font-weight: 600; font-size: 15px; color: #111827; margin-bottom: 4px;">${name}</div>
-          <div style="font-size: 13px; color: #6b7280; margin-bottom: 8px;">Count: ${count}</div>
+          <div style="font-weight: 600; font-size: 15px; color: #111827; margin-bottom: 4px;">${safeName}</div>
+          <div style="font-size: 13px; color: #6b7280; margin-bottom: 8px;">Count: ${safeCount}</div>
           ${
             dateDisplay
               ? `
@@ -129,7 +140,7 @@ function updatePopupWithSpeciesInfo(
                 <line x1="8" y1="2" x2="8" y2="6"/>
                 <line x1="3" y1="10" x2="21" y2="10"/>
               </svg>
-              <span>${dateDisplay}</span>
+              <span>${sanitizeText(dateDisplay)}</span>
             </div>
           `
               : ""
@@ -178,29 +189,40 @@ function updatePopupWithSpeciesInfo(
   const summary = info.wikipediaSummary
     ? firstParagraph(info.wikipediaSummary)
     : null;
+  const safeSummary = summary ? sanitizeText(summary) : null;
+  const safeCommonName = sanitizeText(info.commonName);
+  const safeScientificInfoName = sanitizeText(info.scientificName);
+  const safeAttribution = sanitizeText(info.photoAttribution);
+  const safePhotoUrl = sanitizeUrl(info.photoUrl);
+  const safeInatUrl = sanitizeUrl(info.inaturalistUrl);
+  const safeDateDisplay = observedAt ? sanitizeText(formatDate(observedAt)) : null;
 
   container.innerHTML = `
     <div style="width: 300px; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; border-radius: 8px;">
       ${
-        info.photoUrl
+        safePhotoUrl
           ? `<div style="position: relative;">
               <img
-                src="${info.photoUrl}"
-                alt="${info.commonName}"
+                src="${safePhotoUrl}"
+                alt="${safeCommonName}"
                 style="width: 100%; height: 160px; object-fit: cover; display: block;"
               />
               <div style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.7)); padding: 8px 12px;">
-                <div style="font-weight: 600; font-size: 16px; color: white;">${info.commonName}</div>
-                <div style="font-size: 13px; color: rgba(255,255,255,0.85); font-style: italic;">${info.scientificName}</div>
+                <div style="font-weight: 600; font-size: 16px; color: white;">${safeCommonName}</div>
+                <div style="font-size: 13px; color: rgba(255,255,255,0.85); font-style: italic;">${safeScientificInfoName}</div>
               </div>
             </div>`
           : `<div style="padding: 12px 12px 0;">
-              <div style="font-weight: 600; font-size: 16px; color: #111827;">${info.commonName}</div>
-              <div style="font-size: 13px; color: #6b7280; font-style: italic;">${info.scientificName}</div>
+              <div style="font-weight: 600; font-size: 16px; color: #111827;">${safeCommonName}</div>
+              <div style="font-size: 13px; color: #6b7280; font-style: italic;">${safeScientificInfoName}</div>
             </div>`
       }
       <div style="padding: 12px;">
-        ${summary ? `<p style="font-size: 13px; line-height: 1.5; color: #374151; margin: 0 0 10px;">${summary}</p>` : ""}
+        ${
+          safeSummary
+            ? `<p style="font-size: 13px; line-height: 1.5; color: #374151; margin: 0 0 10px;">${safeSummary}</p>`
+            : ""
+        }
         <div style="display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
           <div style="display: flex; gap: 12px; align-items: center; justify-content: space-between;">
             <div style="display: flex; gap: 12px; align-items: center;">
@@ -209,10 +231,10 @@ function updatePopupWithSpeciesInfo(
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                   <circle cx="12" cy="7" r="4"/>
                 </svg>
-                <span style="font-size: 12px; color: #6b7280;">Count: ${count}</span>
+                <span style="font-size: 12px; color: #6b7280;">Count: ${safeCount}</span>
               </div>
               ${
-                observedAt
+                safeDateDisplay
                   ? `
                 <div style="display: flex; align-items: center; gap: 4px;">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2">
@@ -221,13 +243,17 @@ function updatePopupWithSpeciesInfo(
                     <line x1="8" y1="2" x2="8" y2="6"/>
                     <line x1="3" y1="10" x2="21" y2="10"/>
                   </svg>
-                  <span style="font-size: 12px; color: #6b7280;">${formatDate(observedAt)}</span>
+                  <span style="font-size: 12px; color: #6b7280;">${safeDateDisplay}</span>
                 </div>
               `
                   : ""
               }
             </div>
-            <a href="${info.inaturalistUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 12px; color: #2563eb; text-decoration: none;">iNaturalist →</a>
+            ${
+              safeInatUrl
+                ? `<a href="${safeInatUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 12px; color: #2563eb; text-decoration: none;">iNaturalist →</a>`
+                : ""
+            }
           </div>
           ${
             isLifer || isYearTick
@@ -266,8 +292,8 @@ function updatePopupWithSpeciesInfo(
           }
         </div>
         ${
-          info.photoAttribution
-            ? `<div style="font-size: 10px; color: #9ca3af; margin-top: 8px;">Photo: ${info.photoAttribution}</div>`
+          safeAttribution
+            ? `<div style="font-size: 10px; color: #9ca3af; margin-top: 8px;">Photo: ${safeAttribution}</div>`
             : ""
         }
       </div>
