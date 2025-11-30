@@ -341,8 +341,10 @@ export default function UploadPage() {
 
       {/* Filter panel (slides in from left) */}
       <div
-        className={`absolute bottom-4 left-4 top-4 w-[400px] overflow-hidden rounded-2xl bg-white shadow-2xl transition-transform duration-300 ease-out ${
-          filterOpen ? "translate-x-0" : "-translate-x-[calc(100%+32px)]"
+        className={`absolute inset-0 md:bottom-4 md:left-4 md:top-4 md:w-[400px] md:rounded-2xl overflow-hidden bg-white shadow-2xl transition-transform duration-300 ease-out z-40 ${
+          filterOpen
+            ? "translate-x-0"
+            : "-translate-x-full md:-translate-x-[calc(100%+32px)]"
         }`}
       >
         <QueryBuilder
@@ -354,7 +356,11 @@ export default function UploadPage() {
       </div>
 
       {/* Top-right: View controls */}
-      <div className="absolute right-4 top-4 flex flex-col gap-2">
+      <div
+        className={`absolute right-4 top-4 flex flex-col gap-2 z-50 transition-opacity ${
+          filterOpen ? "opacity-0 pointer-events-none" : "opacity-100"
+        }`}
+      >
         {/* Lifers and Year Tick filters - mutually exclusive */}
         <div className="flex gap-2">
           <button
