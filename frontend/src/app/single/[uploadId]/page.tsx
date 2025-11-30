@@ -64,13 +64,30 @@ export default function UploadPage() {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [copiedEditLink, setCopiedEditLink] = useState(false);
   const [menuExpanded, setMenuExpanded] = useState(false);
+  const [tableTopOffset, setTableTopOffset] = useState(200);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const topRightControlsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!uploadId) return;
     setEditToken(getEditToken(uploadId));
   }, [uploadId]);
+
+  // Measure top-right controls height to position table overlay
+  useEffect(() => {
+    const updateTableTop = () => {
+      if (topRightControlsRef.current) {
+        const rect = topRightControlsRef.current.getBoundingClientRect();
+        // Add some padding (16px = top-4) + gap (8px) for spacing
+        setTableTopOffset(rect.bottom + 8);
+      }
+    };
+
+    updateTableTop();
+    window.addEventListener("resize", updateTableTop);
+    return () => window.removeEventListener("resize", updateTableTop);
+  }, [menuExpanded, availableYears.length]);
 
   // Store token from URL in localStorage, then remove from URL bar to prevent
   // accidental sharing of the edit link when user copies the URL
@@ -299,7 +316,7 @@ export default function UploadPage() {
         className={`absolute inset-x-0 bottom-0 bg-white shadow-2xl transition-transform duration-300 ease-out ${
           viewMode === "table" ? "translate-y-0" : "translate-y-full"
         }`}
-        style={{ top: "80px", borderRadius: "16px 16px 0 0" }}
+        style={{ top: `${tableTopOffset}px`, borderRadius: "16px 16px 0 0" }}
       >
         <div className="flex h-full flex-col">
           <div className="flex items-center justify-between border-b px-4 py-3">
@@ -357,6 +374,7 @@ export default function UploadPage() {
 
       {/* Top-right: View controls */}
       <div
+        ref={topRightControlsRef}
         className={`absolute right-4 top-4 flex flex-col gap-2 z-50 transition-opacity ${
           filterOpen ? "opacity-0 pointer-events-none" : "opacity-100"
         }`}
