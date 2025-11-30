@@ -153,6 +153,9 @@ elif [[ "$MODE" == "dev" ]]; then
         (cd frontend && npm install)
     fi
 
+    # Touch build.rs to force rebuild script to run and pick up current git SHA
+    touch backend/build.rs
+
     # Start backend (dev mode with cargo run)
     (cd backend && DATABASE_URL="sqlite:$DATA_DIR/redgrouse.db" \
         RUST_LOG=debug \
