@@ -71,6 +71,7 @@ struct SightingRow {
     latitude: f64,
     longitude: f64,
     country_code: String,
+    region_code: Option<String>,
     observed_at: String,
     year: i32,
 }
@@ -142,6 +143,20 @@ fn get_country_code(lat: f64, lon: f64) -> String {
         .unwrap_or_else(|| "XX".to_string())
 }
 
+fn get_region_code(lat: f64, lon: f64) -> Option<String> {
+    let latlon = match LatLon::new(lat, lon) {
+        Ok(ll) => ll,
+        Err(_) => return None,
+    };
+
+    let ids = BOUNDARIES.ids(latlon);
+    // ids returns e.g. ["US-TX", "US"] or ["SG"] - we want the code with a dash (region/subdivision)
+    // If no subdivision exists (like Singapore), return None
+    ids.iter()
+        .find(|id| id.contains('-'))
+        .map(|s| s.to_string())
+}
+
 fn parse_row(record: &csv::ByteRecord, col_map: &ColumnMap) -> Option<SightingRow> {
     let sighting_uuid = get_field(record, col_map.sighting_id)?;
     let common_name = get_field(record, col_map.common_name)?;
@@ -151,6 +166,7 @@ fn parse_row(record: &csv::ByteRecord, col_map: &ColumnMap) -> Option<SightingRo
     let longitude: f64 = get_field(record, col_map.longitude)?.parse().ok()?;
 
     let country_code = get_country_code(latitude, longitude);
+    let region_code = get_region_code(latitude, longitude);
 
     let count: i32 = get_field(record, col_map.count)
         .and_then(|s| s.parse().ok())
@@ -166,6 +182,7 @@ fn parse_row(record: &csv::ByteRecord, col_map: &ColumnMap) -> Option<SightingRo
         latitude,
         longitude,
         country_code,
+        region_code,
         observed_at,
         year,
     })
@@ -184,7 +201,7 @@ where
     }
 
     let mut query_builder = QueryBuilder::new(
-        "INSERT INTO sightings (upload_id, sighting_uuid, common_name, scientific_name, count, latitude, longitude, country_code, observed_at, year) "
+        "INSERT INTO sightings (upload_id, sighting_uuid, common_name, scientific_name, count, latitude, longitude, country_code, region_code, observed_at, year) "
     );
 
     query_builder.push_values(rows, |mut b, row| {
@@ -196,6 +213,7 @@ where
             .push_bind(row.latitude)
             .push_bind(row.longitude)
             .push_bind(&row.country_code)
+            .push_bind(&row.region_code)
             .push_bind(&row.observed_at)
             .push_bind(row.year);
     });

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useRef } from "react";
 import { apiFetch, buildApiUrl } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { formatCountry } from "@/lib/countries";
+import { formatRegion } from "@/lib/regions";
 import {
   UPLOAD_SIGHTINGS_ROUTE,
   DEFAULT_PAGE_SIZE,
@@ -330,7 +331,24 @@ export function SightingsTable({
           ) : (
             <>
               <div className="w-[60px] shrink-0 px-3 py-2"></div>
-              {COLUMNS.map((col) => (
+              {COLUMNS.slice(0, 4).map((col) => (
+                <div
+                  key={col.field}
+                  className={`${col.width} shrink-0 px-3 py-2`}
+                >
+                  <button
+                    className="flex items-center hover:text-foreground transition-colors"
+                    onClick={() => handleSort(col.field)}
+                  >
+                    {col.label}
+                    <SortIcon field={col.field} />
+                  </button>
+                </div>
+              ))}
+              <div className="w-[140px] shrink-0 px-3 py-2">
+                Region
+              </div>
+              {COLUMNS.slice(4).map((col) => (
                 <div
                   key={col.field}
                   className={`${col.width} shrink-0 px-3 py-2`}
@@ -461,6 +479,9 @@ export function SightingsTable({
                       {sighting.country_code
                         ? formatCountry(sighting.country_code)
                         : "—"}
+                    </div>
+                    <div className="w-[140px] shrink-0 px-3 py-2">
+                      {formatRegion(sighting.region_code)}
                     </div>
                     <div className="w-[120px] shrink-0 px-3 py-2">
                       {formatDate(sighting.observed_at)}

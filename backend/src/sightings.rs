@@ -55,6 +55,7 @@ pub struct Sighting {
     pub latitude: f64,
     pub longitude: f64,
     pub country_code: Option<String>,
+    pub region_code: Option<String>,
     pub observed_at: String,
 }
 
@@ -324,7 +325,7 @@ pub async fn get_sightings(
 
     let select_sql = format!(
         r#"SELECT id, common_name, scientific_name, count, latitude, longitude,
-           country_code, observed_at
+           country_code, region_code, observed_at
            FROM sightings
            WHERE upload_id = ?{}
            ORDER BY {} {}
@@ -346,6 +347,7 @@ pub async fn get_sightings(
             Option<i64>,
             f64,
             f64,
+            Option<String>,
             Option<String>,
             String,
         ),
@@ -370,7 +372,8 @@ pub async fn get_sightings(
             latitude: row.4,
             longitude: row.5,
             country_code: row.6,
-            observed_at: row.7,
+            region_code: row.7,
+            observed_at: row.8,
         })
         .collect();
 
