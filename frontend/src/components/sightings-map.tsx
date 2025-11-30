@@ -13,6 +13,7 @@ interface SightingsMapProps {
   filter: FilterGroup | null;
   lifersOnly: boolean;
   yearTickYear: number | null;
+  onMapReady?: (navigateToLocation: (lat: number, lng: number) => void) => void;
 }
 
 function stripHtml(html: string): string {
@@ -151,10 +152,17 @@ export function SightingsMap({
   filter,
   lifersOnly,
   yearTickYear,
+  onMapReady,
 }: SightingsMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const onMapReadyRef = useRef(onMapReady);
+
+  // Update ref when prop changes
+  useEffect(() => {
+    onMapReadyRef.current = onMapReady;
+  }, [onMapReady]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -283,6 +291,104 @@ export function SightingsMap({
       }
     }, 5000);
 
+    // Create navigation function that will be exposed to parent
+    const createNavigateFunction = () => {
+      return (
+        lat: number,
+        lng: number,
+        sightingData?: {
+          name: string;
+          scientificName?: string | null;
+          count: number;
+        }
+      ) => {
+        // Validate coordinates are valid numbers
+        if (
+          typeof lat !== "number" ||
+          typeof lng !== "number" ||
+          isNaN(lat) ||
+          isNaN(lng) ||
+          !isFinite(lat) ||
+          !isFinite(lng)
+        ) {
+          console.warn("Invalid coordinates for navigation:", { lat, lng });
+          return;
+        }
+
+        // Validate coordinate ranges
+        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          console.warn("Coordinates out of valid range:", { lat, lng });
+          return;
+        }
+
+        // Zoom level 15 is appropriate for a detailed view
+        // Store sighting data for the moveend handler
+        const showPopup = () => {
+          if (!sightingData) {
+            console.warn("No sighting data provided for popup");
+            return;
+          }
+          const popupContent = createPopupContent(
+            sightingData.name,
+            sightingData.count,
+            sightingData.scientificName || undefined
+          );
+
+          let popup = new maplibregl.Popup({
+            maxWidth: "none",
+            subpixelPositioning: false,
+          })
+            .setLngLat([lng, lat])
+            .setDOMContent(popupContent)
+            .addTo(map);
+
+          fetchSpeciesInfo(sightingData.name).then((info) => {
+            if (popup.isOpen()) {
+              // Don't update the existing popup's content in place — it results
+              // in blurry text, presumably because MapLibre repositions the popup
+              // with subpixel values when its size changes.
+              popup.remove();
+              const finalContent = document.createElement("div");
+              finalContent.className = "species-popup";
+              updatePopupWithSpeciesInfo(
+                finalContent,
+                sightingData.name,
+                sightingData.count,
+                info
+              );
+              popup = new maplibregl.Popup({
+                maxWidth: "none",
+                subpixelPositioning: false,
+              })
+                .setLngLat([lng, lat])
+                .setDOMContent(finalContent)
+                .addTo(map);
+            }
+          });
+        };
+
+        // Use one-time moveend listener to show popup after animation completes
+        const handleMoveEnd = () => {
+          map.off("moveend", handleMoveEnd);
+          // Small delay to ensure tiles are loaded
+          setTimeout(showPopup, 200);
+        };
+        map.once("moveend", handleMoveEnd);
+
+        map.flyTo({
+          center: [lng, lat],
+          zoom: 15,
+          duration: 1000,
+        });
+      };
+    };
+
+    // Expose navigation function immediately if map is already loaded
+    // (e.g., on re-render with new filters)
+    if (map.loaded() && onMapReadyRef.current) {
+      onMapReadyRef.current(createNavigateFunction());
+    }
+
     map.on("load", () => {
       map.addSource("sightings", {
         type: "vector",
@@ -347,6 +453,11 @@ export function SightingsMap({
       map.on("mouseleave", "sightings-circles", () => {
         map.getCanvas().style.cursor = "";
       });
+
+      // Expose navigation function to parent component when map loads
+      if (onMapReadyRef.current) {
+        onMapReadyRef.current(createNavigateFunction());
+      }
     });
 
     mapRef.current = map;

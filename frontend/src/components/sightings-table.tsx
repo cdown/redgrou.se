@@ -22,6 +22,15 @@ interface SightingsTableProps {
   filter: FilterGroup | null;
   lifersOnly: boolean;
   yearTickYear: number | null;
+  onNavigateToLocation?: (
+    lat: number,
+    lng: number,
+    sightingData?: {
+      name: string;
+      scientificName?: string | null;
+      count: number;
+    }
+  ) => void;
 }
 
 type SortDir = "asc" | "desc";
@@ -55,6 +64,7 @@ export function SightingsTable({
   filter,
   lifersOnly,
   yearTickYear,
+  onNavigateToLocation,
 }: SightingsTableProps) {
   const [sightings, setSightings] = useState<Sighting[]>([]);
   const [groups, setGroups] = useState<GroupedSightingDisplay[]>([]);
@@ -319,6 +329,7 @@ export function SightingsTable({
             </>
           ) : (
             <>
+              <div className="w-[60px] shrink-0 px-3 py-2"></div>
               {COLUMNS.map((col) => (
                 <div
                   key={col.field}
@@ -390,6 +401,51 @@ export function SightingsTable({
                     key={Number(sighting.id)}
                     className="flex border-b text-sm hover:bg-muted/50 transition-colors"
                   >
+                    <div className="w-[60px] shrink-0 px-3 py-2 flex items-center justify-center">
+                      {sighting.latitude != null &&
+                      sighting.longitude != null ? (
+                        <button
+                          onClick={() => {
+                            const lat = Number(sighting.latitude);
+                            const lng = Number(sighting.longitude);
+                            if (
+                              onNavigateToLocation &&
+                              !isNaN(lat) &&
+                              !isNaN(lng) &&
+                              isFinite(lat) &&
+                              isFinite(lng)
+                            ) {
+                              onNavigateToLocation(lat, lng, {
+                                name: sighting.common_name,
+                                scientificName: sighting.scientific_name,
+                                count:
+                                  sighting.count !== null
+                                    ? Number(sighting.count)
+                                    : 1,
+                              });
+                            }
+                          }}
+                          disabled={!onNavigateToLocation}
+                          className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Show on map"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                            <circle cx="12" cy="10" r="3" />
+                          </svg>
+                        </button>
+                      ) : null}
+                    </div>
                     <div className="w-[200px] shrink-0 px-3 py-2 font-medium">
                       {sighting.common_name}
                     </div>
