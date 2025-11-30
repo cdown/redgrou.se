@@ -96,6 +96,11 @@ export function SightingsTable({ uploadId, filter }: SightingsTableProps) {
         })}?${params}`;
 
         const res = await apiFetch(url);
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error("API error:", res.status, errorText);
+          throw new Error(`API error: ${res.status}`);
+        }
         const json: SightingsResponse = await res.json();
 
         if (groupBy.length > 0 && json.groups) {
