@@ -1,7 +1,7 @@
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use sqlx::{Row, SqlitePool};
+use sqlx::{FromRow, Row, SqlitePool};
 use ts_rs::TS;
 
 use crate::api_constants;
@@ -45,7 +45,7 @@ pub struct SightingsQuery {
     year_tick_year: Option<i32>,
 }
 
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, TS, FromRow)]
 #[ts(export)]
 pub struct Sighting {
     pub id: i64,
@@ -340,44 +340,16 @@ pub async fn get_sightings(
     params.push(page_size.to_string());
     params.push(offset.to_string());
 
-    let mut select_query = sqlx::query_as::<
-        _,
-        (
-            i64,
-            String,
-            Option<String>,
-            Option<i64>,
-            f64,
-            f64,
-            Option<String>,
-            Option<String>,
-            String,
-        ),
-    >(&select_sql);
+    let mut select_query = sqlx::query_as::<_, Sighting>(&select_sql);
 
     for param in &params {
         select_query = select_query.bind(param);
     }
 
-    let rows = select_query
+    let sightings = select_query
         .fetch_all(&pool)
         .await
         .map_err(|_| ApiError::internal("Database error"))?;
-
-    let sightings: Vec<Sighting> = rows
-        .into_iter()
-        .map(|row| Sighting {
-            id: row.0,
-            common_name: row.1,
-            scientific_name: row.2,
-            count: row.3,
-            latitude: row.4,
-            longitude: row.5,
-            country_code: row.6,
-            region_code: row.7,
-            observed_at: row.8,
-        })
-        .collect();
 
     let total_pages = ((total as f64) / (page_size as f64)).ceil() as u32;
 
