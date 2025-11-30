@@ -120,9 +120,9 @@ if [[ "$MODE" == "prod" ]]; then
     wait $BUILD_PID
     BUILD_PID=""
 
-    # Build frontend
+    # Build frontend (prod uses https://dev.chrisdown.name)
     echo "[rgrse] Building frontend..." >&2
-    (cd frontend && npm ci && NEXT_PUBLIC_API_URL="" npm run build) &
+    (cd frontend && npm ci && NEXT_PUBLIC_API_URL="https://dev.chrisdown.name" npm run build) &
     BUILD_PID=$!
     wait $BUILD_PID
     BUILD_PID=""
@@ -163,9 +163,9 @@ elif [[ "$MODE" == "dev" ]]; then
         cargo run --bin redgrouse) 2>&1 | prefix_logs "backend" &
     BACKEND_PID=$!
 
-    # Start frontend (dev mode with hot reload)
+    # Start frontend (dev mode with hot reload, uses localhost:3001)
     # Use setsid or run in a subshell to create a new process group for proper cleanup
-    (cd frontend && PORT=$FRONTEND_PORT npm run dev) 2>&1 | prefix_logs "frontend" &
+    (cd frontend && PORT=$FRONTEND_PORT NEXT_PUBLIC_API_URL="http://localhost:$BACKEND_PORT" npm run dev) 2>&1 | prefix_logs "frontend" &
     FRONTEND_PID=$!
     # Wait a moment for process to start, then get process group
     sleep 0.5
