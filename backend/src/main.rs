@@ -1,16 +1,22 @@
+use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
-use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderValue};
+use axum::extract::{Extension, Path, Query, State};
+use axum::http::{header, HeaderValue, Request};
+use axum::middleware::{from_fn, Next};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{BoxError, Json, Router};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::env;
 use std::net::SocketAddr;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 use tower::limit::ConcurrencyLimitLayer;
 use tower::timeout::error::Elapsed;
 use tower::ServiceBuilder;
+use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -30,8 +36,10 @@ use redgrouse::{db, sightings, tiles, upload};
 const BUILD_VERSION: &str = env!("BUILD_VERSION");
 const GLOBAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const GLOBAL_CONCURRENCY_LIMIT: usize = 100;
+const GLOBAL_RATE_LIMIT_PER_MINUTE: u64 = 1000;
 const UPLOAD_CONCURRENCY_LIMIT: usize = 2;
 const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(60);
+const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -69,6 +77,8 @@ async fn main() -> anyhow::Result<()> {
         .route(api_constants::UPLOAD_DETAILS_ROUTE, put(upload::update_csv))
         .route_layer(ingest_layer);
 
+    let rate_limiter = RequestRateLimiter::new(GLOBAL_RATE_LIMIT_PER_MINUTE, RATE_LIMIT_WINDOW);
+
     let app = Router::new()
         .route(api_constants::HEALTH_ROUTE, get(health_check))
         .route(
@@ -84,13 +94,15 @@ async fn main() -> anyhow::Result<()> {
         .route(api_constants::FIELDS_ROUTE, get(fields_metadata))
         .route(api_constants::FIELD_VALUES_ROUTE, get(field_values))
         .merge(ingest_routes)
+        .layer(AddExtensionLayer::new(rate_limiter))
+        .layer(from_fn(enforce_rate_limit))
         .layer(build_version_header)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .layer(CatchPanicLayer::new())
         .layer(
             ServiceBuilder::new()
-                .layer(HandleErrorLayer::new(handle_timeout_error))
+                .layer(HandleErrorLayer::new(handle_layer_error))
                 .timeout(GLOBAL_REQUEST_TIMEOUT)
                 .into_inner(),
         )
@@ -115,11 +127,64 @@ async fn health_check() -> &'static str {
     "OK"
 }
 
-async fn handle_timeout_error(err: BoxError) -> ApiError {
+async fn handle_layer_error(err: BoxError) -> ApiError {
     if err.is::<Elapsed>() {
         ApiError::service_unavailable("Request timed out")
     } else {
         ApiError::internal("Request failed")
+    }
+}
+
+#[derive(Clone)]
+struct RequestRateLimiter {
+    limit: u64,
+    window: Duration,
+    state: Arc<Mutex<RateWindow>>,
+}
+
+struct RateWindow {
+    start: Instant,
+    count: u64,
+}
+
+impl RequestRateLimiter {
+    fn new(limit: u64, window: Duration) -> Self {
+        Self {
+            limit,
+            window,
+            state: Arc::new(Mutex::new(RateWindow {
+                start: Instant::now(),
+                count: 0,
+            })),
+        }
+    }
+
+    async fn try_acquire(&self) -> bool {
+        let mut state = self.state.lock().await;
+        let now = Instant::now();
+        if now.duration_since(state.start) >= self.window {
+            state.start = now;
+            state.count = 0;
+        }
+
+        if state.count < self.limit {
+            state.count += 1;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+async fn enforce_rate_limit(
+    Extension(limiter): Extension<RequestRateLimiter>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    if limiter.try_acquire().await {
+        next.run(req).await
+    } else {
+        ApiError::service_unavailable("Too many requests").into_response()
     }
 }
 
