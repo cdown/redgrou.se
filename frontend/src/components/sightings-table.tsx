@@ -24,15 +24,7 @@ interface SightingsTableProps {
   filter: FilterGroup | null;
   lifersOnly: boolean;
   yearTickYear: number | null;
-  onNavigateToLocation?: (
-    lat: number,
-    lng: number,
-    sightingData?: {
-      name: string;
-      scientificName?: string | null;
-      count: number;
-    },
-  ) => void;
+  onNavigateToSighting?: (sightingId: number, lat: number, lng: number) => void;
 }
 
 type SortDir = "asc" | "desc";
@@ -66,7 +58,7 @@ export function SightingsTable({
   filter,
   lifersOnly,
   yearTickYear,
-  onNavigateToLocation,
+  onNavigateToSighting,
 }: SightingsTableProps) {
   const [sightings, setSightings] = useState<Sighting[]>([]);
   const [groups, setGroups] = useState<GroupedSightingDisplay[]>([]);
@@ -417,26 +409,22 @@ export function SightingsTable({
                       sighting.longitude != null ? (
                         <button
                           onClick={() => {
+                            const sightingId = Number(sighting.id);
                             const lat = Number(sighting.latitude);
                             const lng = Number(sighting.longitude);
                             if (
-                              onNavigateToLocation &&
+                              onNavigateToSighting &&
+                              !isNaN(sightingId) &&
+                              isFinite(sightingId) &&
                               !isNaN(lat) &&
                               !isNaN(lng) &&
                               isFinite(lat) &&
                               isFinite(lng)
                             ) {
-                              onNavigateToLocation(lat, lng, {
-                                name: sighting.common_name,
-                                scientificName: sighting.scientific_name,
-                                count:
-                                  sighting.count !== null
-                                    ? Number(sighting.count)
-                                    : 1,
-                              });
+                              onNavigateToSighting(sightingId, lat, lng);
                             }
                           }}
-                          disabled={!onNavigateToLocation}
+                          disabled={!onNavigateToSighting}
                           className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           title="Show on map"
                         >

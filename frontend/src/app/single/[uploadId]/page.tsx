@@ -81,15 +81,7 @@ export default function UploadPage() {
   const [menuExpanded, setMenuExpanded] = useState(false);
   const [tableTopOffset, setTableTopOffset] = useState(200);
   const navigateToLocationRef = useRef<
-    | ((
-        lat: number,
-        lng: number,
-        sightingData?: {
-          name: string;
-          scientificName?: string | null;
-          count: number;
-        },
-      ) => void)
+    | ((sightingId: number, lat: number, lng: number) => void)
     | null
   >(null);
   const [mapReady, setMapReady] = useState(false);
@@ -385,20 +377,12 @@ export default function UploadPage() {
               filter={filter}
               lifersOnly={lifersOnly}
               yearTickYear={yearTickYear}
-              onNavigateToLocation={
+              onNavigateToSighting={
                 mapReady && navigateToLocationRef.current
-                  ? (
-                      lat: number,
-                      lng: number,
-                      sightingData?: {
-                        name: string;
-                        scientificName?: string | null;
-                        count: number;
-                      },
-                    ) => {
+                  ? (sightingId: number, lat: number, lng: number) => {
                       setViewMode("map");
                       if (navigateToLocationRef.current) {
-                        navigateToLocationRef.current(lat, lng, sightingData);
+                        navigateToLocationRef.current(sightingId, lat, lng);
                       }
                     }
                   : undefined
