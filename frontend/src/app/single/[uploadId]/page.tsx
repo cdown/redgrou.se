@@ -632,21 +632,23 @@ export default function UploadPage() {
       </div>
 
       {/* Bottom-left: Brand */}
-      <div className="absolute bottom-4 left-4 flex flex-col gap-2">
-        <div className="flex flex-col leading-tight">
-          <span className="text-sm font-semibold tracking-tight text-stone-600 drop-shadow-sm">
-            redgrouse
-          </span>
-          <a
-            href="https://chrisdown.name"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[10px] tracking-[0.2em] text-stone-400 hover:text-stone-600 transition-colors"
-          >
-            by chris down
-          </a>
+      {viewMode !== "table" && (
+        <div className="absolute bottom-4 left-4 flex flex-col gap-2">
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-semibold tracking-tight text-stone-600 drop-shadow-sm">
+              redgrouse
+            </span>
+            <a
+              href="https://chrisdown.name"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] tracking-[0.2em] text-stone-400 hover:text-stone-600 transition-colors"
+            >
+              by chris down
+            </a>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Delete confirmation modal */}
       {showDeleteConfirm && (
