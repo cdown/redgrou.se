@@ -35,10 +35,47 @@ pub enum FilterValue {
     List(Vec<String>),
 }
 
+/// Type-safe representation of filterable field names.
+/// This enum ensures only valid fields can be used in filters,
+/// preventing SQL injection via field names at compile time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../frontend/src/lib/generated/")]
+pub enum FilterField {
+    CommonName,
+    ScientificName,
+    CountryCode,
+    Count,
+    ObservedAt,
+    Year,
+}
+
+impl FilterField {
+    /// Returns the SQL column name for this field.
+    pub fn as_sql_column(&self) -> &'static str {
+        match self {
+            FilterField::CommonName => "common_name",
+            FilterField::ScientificName => "scientific_name",
+            FilterField::CountryCode => "country_code",
+            FilterField::Count => "count",
+            FilterField::ObservedAt => "observed_at",
+            FilterField::Year => "year",
+        }
+    }
+
+    /// Returns the string representation used in the API.
+    pub fn as_str(&self) -> &'static str {
+        self.as_sql_column()
+    }
+}
+
+// Serialization/deserialization is handled by serde's rename attributes above
+// The enum will serialize as the snake_case string values
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Condition {
-    pub field: String,
+    pub field: FilterField,
     pub operator: Operator,
     pub value: FilterValue,
 }
@@ -58,21 +95,9 @@ pub struct FilterGroup {
     pub rules: Vec<Rule>,
 }
 
-const ALLOWED_FIELDS: &[&str] = &[
-    "common_name",
-    "scientific_name",
-    "country_code",
-    "count",
-    "observed_at",
-    "year",
-];
 const MAX_FILTER_DEPTH: usize = 5;
 const MAX_FILTER_RULES: usize = 100;
 const MAX_LIST_VALUES: usize = 50;
-
-fn is_allowed_field(field: &str) -> bool {
-    ALLOWED_FIELDS.contains(&field)
-}
 
 #[derive(Debug)]
 pub struct FilterValidationError {
@@ -149,11 +174,7 @@ impl Condition {
     }
 
     fn to_sql(&self, params: &mut Vec<String>) -> Option<String> {
-        if !is_allowed_field(&self.field) {
-            return None;
-        }
-
-        let field = &self.field;
+        let field = self.field.as_sql_column();
 
         match (&self.operator, &self.value) {
             (Operator::Eq, FilterValue::String(v)) => {
@@ -203,15 +224,9 @@ impl Condition {
             (Operator::In, FilterValue::List(vals)) if !vals.is_empty() => {
                 let placeholders: Vec<&str> = vals.iter().map(|_| "?").collect();
                 params.extend(vals.clone());
-                // Special case: year_tick means "year tick for these years"
-                if field == "year_tick" {
-                    Some(format!(
-                        "(year_tick = 1 AND year IN ({}))",
-                        placeholders.join(", ")
-                    ))
-                } else {
-                    Some(format!("{} IN ({})", field, placeholders.join(", ")))
-                }
+                // Note: year_tick is not a FilterField, so this special case
+                // is handled elsewhere (in the year_tick_year query parameter)
+                Some(format!("{} IN ({})", field, placeholders.join(", ")))
             }
             (Operator::NotIn, FilterValue::List(vals)) if !vals.is_empty() => {
                 let placeholders: Vec<&str> = vals.iter().map(|_| "?").collect();
@@ -308,13 +323,21 @@ pub async fn get_distinct_values(
     upload_id: &str,
     field: &str,
 ) -> Result<Vec<String>, DbQueryError> {
-    if !is_allowed_field(field) {
-        return Ok(vec![]);
-    }
+    // Parse and validate the field string into a FilterField enum
+    let filter_field = match field {
+        "common_name" => FilterField::CommonName,
+        "scientific_name" => FilterField::ScientificName,
+        "country_code" => FilterField::CountryCode,
+        "count" => FilterField::Count,
+        "observed_at" => FilterField::ObservedAt,
+        "year" => FilterField::Year,
+        _ => return Ok(vec![]), // Invalid field, return empty
+    };
 
+    let column = filter_field.as_sql_column();
     let query = format!(
         "SELECT DISTINCT CAST({} AS TEXT) FROM sightings WHERE upload_id = ? AND {} IS NOT NULL ORDER BY {} LIMIT 500",
-        field, field, field
+        column, column, column
     );
 
     let rows: Vec<(String,)> =
