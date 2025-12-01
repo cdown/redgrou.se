@@ -156,6 +156,45 @@ function buildTileUrl(
 }
 
 /**
+ * Process a feature and show the popup - shared logic for both click and navigation
+ */
+function handleSightingFeature(
+  map: maplibregl.Map,
+  feature: maplibregl.MapGeoJSONFeature,
+): void {
+  const name = feature.properties?.name || "Unknown";
+  const scientificName = feature.properties?.scientific_name;
+  const count =
+    typeof feature.properties?.count === "number"
+      ? feature.properties.count
+      : parseInt(feature.properties?.count?.toString() || "1", 10);
+  const observedAt = feature.properties?.observed_at?.toString();
+  const lifer = feature.properties?.lifer;
+  const yearTick = feature.properties?.year_tick;
+  const isLifer = lifer === 1 || lifer === "1" || lifer === true;
+  const isYearTick = yearTick === 1 || yearTick === "1" || yearTick === true;
+
+  // Use feature's geometry coordinates (center of icon) instead of click position
+  const geometry = feature.geometry;
+  if (geometry.type !== "Point" || !geometry.coordinates) {
+    return;
+  }
+  const [lng, lat] = geometry.coordinates;
+
+  showSpeciesPopup(
+    map,
+    lat,
+    lng,
+    name,
+    count,
+    scientificName,
+    observedAt,
+    isLifer,
+    isYearTick,
+  );
+}
+
+/**
  * Add sightings layer and attach event handlers
  */
 function addSightingsLayer(map: maplibregl.Map): void {
@@ -192,37 +231,7 @@ function addSightingsLayer(map: maplibregl.Map): void {
   // Attach click handlers to the hit detection layer
   map.on("click", "sightings-circles-hit", (e) => {
     if (!e.features?.length) return;
-    const feature = e.features[0];
-    const name = feature.properties?.name || "Unknown";
-    const scientificName = feature.properties?.scientific_name;
-    const count =
-      typeof feature.properties?.count === "number"
-        ? feature.properties.count
-        : parseInt(feature.properties?.count?.toString() || "1", 10);
-    const observedAt = feature.properties?.observed_at?.toString();
-    const lifer = feature.properties?.lifer;
-    const yearTick = feature.properties?.year_tick;
-    const isLifer = lifer === 1 || lifer === "1" || lifer === true;
-    const isYearTick = yearTick === 1 || yearTick === "1" || yearTick === true;
-
-    // Use feature's geometry coordinates (center of icon) instead of click position
-    const geometry = feature.geometry;
-    if (geometry.type !== "Point" || !geometry.coordinates) {
-      return;
-    }
-    const [lng, lat] = geometry.coordinates;
-
-    showSpeciesPopup(
-      map,
-      lat,
-      lng,
-      name,
-      count,
-      scientificName,
-      observedAt,
-      isLifer,
-      isYearTick,
-    );
+    handleSightingFeature(map, e.features[0]);
   });
 
   map.on("mouseenter", "sightings-circles-hit", () => {
@@ -386,33 +395,27 @@ export function SightingsMap({
           return;
         }
 
-        // Zoom level 15 is appropriate for a detailed view
-        // Store sighting data for the idle handler
-        const showPopup = () => {
-          if (!sightingData) {
-            console.warn("No sighting data provided for popup");
-            return;
-          }
-          // When navigating from table, date/lifer/yearTick may not be available
-          // so we pass undefined - the popup will simply not display those fields
-          showSpeciesPopup(
-            map,
-            lat,
-            lng,
-            sightingData.name,
-            sightingData.count,
-            sightingData.scientificName || undefined,
-            undefined, // observedAt - not available from table navigation
-            undefined, // isLifer - not available from table navigation
-            undefined, // isYearTick - not available from table navigation
-          );
+        // After map moves, query features and show popup using the same code path as click
+        const showPopupFromLocation = () => {
+          // Small delay to ensure tiles are loaded
+          setTimeout(() => {
+            const point = map.project([lng, lat]);
+            // Query features at the location
+            const features = map.queryRenderedFeatures(point, {
+              layers: ["sightings-circles-hit"],
+            });
+
+            if (features.length > 0) {
+              // Use the exact same handler as the click event
+              handleSightingFeature(map, features[0]);
+            }
+          }, 200);
         };
 
         // Use one-time moveend listener to show popup after animation completes
         const handleMoveEnd = () => {
           map.off("moveend", handleMoveEnd);
-          // Small delay to ensure tiles are loaded
-          setTimeout(showPopup, 200);
+          showPopupFromLocation();
         };
         map.once("moveend", handleMoveEnd);
 
