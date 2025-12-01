@@ -265,15 +265,9 @@ export function SightingsTable({
           {isGrouped ? (
             <>
               {total.toLocaleString()} group{total !== 1 ? "s" : ""}
-              {displayCount < total &&
-                ` (${displayCount.toLocaleString()} loaded)`}
             </>
           ) : (
-            <>
-              {total.toLocaleString()} sightings
-              {displayCount < total &&
-                ` (${displayCount.toLocaleString()} loaded)`}
-            </>
+            <>{total.toLocaleString()} sightings</>
           )}
         </div>
         <div className="flex items-center gap-3">
@@ -485,7 +479,7 @@ export function SightingsTable({
             {!hasMore && displayItems.length > 0 && (
               <div className="py-4 text-center text-sm text-muted-foreground">
                 All {total.toLocaleString()}{" "}
-                {isGrouped ? "groups" : "sightings"} loaded
+                {isGrouped ? "groups" : "sightings"}
               </div>
             )}
           </>
