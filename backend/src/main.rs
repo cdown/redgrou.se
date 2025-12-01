@@ -15,7 +15,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-use tower::limit::ConcurrencyLimitLayer;
 use tower::timeout::error::Elapsed;
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
@@ -50,13 +49,16 @@ const GLOBAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// use with panning = ~1000-2000 tiles/minute. 20000 provides 10-20x headroom.
 const GLOBAL_RATE_LIMIT_PER_MINUTE: u64 = 20000;
 
-/// Maximum concurrent CSV upload/update operations.
-/// Applies to: POST /upload and PUT /single/{id} routes only.
-/// Does NOT limit: Read operations (tiles, sightings, metadata).
-/// Heavy user estimate: Uploads are rare - typically 1 per session. This limit
-/// prevents a single user from monopolizing DB write capacity with parallel
-/// uploads of large CSVs.
-const UPLOAD_CONCURRENCY_LIMIT: usize = 2;
+/// Maximum concurrent uploads per IP address.
+/// Applies to: POST /upload and PUT /single/{id} routes only, per IP.
+/// Heavy user estimate: Uploads are rare - typically 1 per session. This prevents
+/// a single user from running parallel uploads that contend for DB writes.
+const UPLOAD_CONCURRENCY_PER_IP: usize = 1;
+
+/// Maximum uploads per IP address per minute.
+/// Applies to: POST /upload and PUT /single/{id} routes only, per IP.
+/// Heavy user estimate: Even rapid re-uploads during testing rarely exceed 3/min.
+const UPLOAD_RATE_PER_IP_PER_MINUTE: u64 = 3;
 
 /// Maximum time to receive the full request body for uploads.
 /// Applies to: POST /upload and PUT /single/{id} routes only.
@@ -95,8 +97,13 @@ async fn main() -> anyhow::Result<()> {
     let ingest_layer = ServiceBuilder::new()
         .layer(RequestBodyLimitLayer::new(upload::MAX_UPLOAD_BODY_BYTES))
         .layer(RequestBodyTimeoutLayer::new(UPLOAD_BODY_TIMEOUT))
-        .layer(ConcurrencyLimitLayer::new(UPLOAD_CONCURRENCY_LIMIT))
         .into_inner();
+
+    let upload_limiter = UploadLimiter::new(
+        UPLOAD_CONCURRENCY_PER_IP,
+        UPLOAD_RATE_PER_IP_PER_MINUTE,
+        RATE_LIMIT_WINDOW,
+    );
 
     let ingest_routes = Router::new()
         .route(api_constants::UPLOAD_ROUTE, post(upload::upload_csv))
@@ -133,7 +140,9 @@ async fn main() -> anyhow::Result<()> {
         .route(api_constants::FIELDS_ROUTE, get(fields_metadata))
         .route(api_constants::FIELD_VALUES_ROUTE, get(field_values))
         .merge(ingest_routes)
+        .layer(from_fn(enforce_upload_limit))
         .layer(from_fn(enforce_rate_limit))
+        .layer(Extension(upload_limiter))
         .layer(Extension(rate_limiter))
         .layer(Extension(trusted_proxies.clone()))
         .layer(build_version_header)
@@ -236,6 +245,95 @@ impl RequestRateLimiter {
             false
         }
     }
+}
+
+/// Per-IP upload limiter tracking both concurrency and rate.
+#[derive(Clone)]
+struct UploadLimiter {
+    max_concurrent: usize,
+    rate_limit: u64,
+    window: Duration,
+    state: Arc<Mutex<HashMap<String, UploadState>>>,
+}
+
+struct UploadState {
+    active: usize,
+    window_start: Instant,
+    window_count: u64,
+}
+
+impl UploadLimiter {
+    fn new(max_concurrent: usize, rate_limit: u64, window: Duration) -> Self {
+        Self {
+            max_concurrent,
+            rate_limit,
+            window,
+            state: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Try to start an upload. Returns Ok(guard) if allowed, Err(message) if denied.
+    async fn try_start(&self, key: &str) -> Result<(), &'static str> {
+        let mut state = self.state.lock().await;
+        let entry = state.entry(key.to_string()).or_insert(UploadState {
+            active: 0,
+            window_start: Instant::now(),
+            window_count: 0,
+        });
+
+        let now = Instant::now();
+        if now.duration_since(entry.window_start) >= self.window {
+            entry.window_start = now;
+            entry.window_count = 0;
+        }
+
+        if entry.active >= self.max_concurrent {
+            return Err("Upload already in progress");
+        }
+
+        if entry.window_count >= self.rate_limit {
+            return Err("Too many uploads, please wait");
+        }
+
+        entry.active += 1;
+        entry.window_count += 1;
+        Ok(())
+    }
+
+    /// Mark an upload as finished for the given IP.
+    async fn finish(&self, key: &str) {
+        let mut state = self.state.lock().await;
+        if let Some(entry) = state.get_mut(key) {
+            entry.active = entry.active.saturating_sub(1);
+        }
+    }
+}
+
+async fn enforce_upload_limit(
+    Extension(limiter): Extension<UploadLimiter>,
+    Extension(trusted): Extension<TrustedProxyList>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    // Only apply to upload routes (POST /upload, PUT /single/{id})
+    let dominated_by_upload =
+        req.method() == axum::http::Method::POST || req.method() == axum::http::Method::PUT;
+    if !dominated_by_upload {
+        return next.run(req).await;
+    }
+
+    let client_key = extract_client_addr(&req, peer_addr, &trusted);
+
+    if let Err(msg) = limiter.try_start(&client_key).await {
+        return ApiError::service_unavailable(msg).into_response();
+    }
+
+    let response = next.run(req).await;
+
+    limiter.finish(&client_key).await;
+
+    response
 }
 
 async fn enforce_rate_limit(
