@@ -68,6 +68,8 @@ const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(60);
 /// Window duration for per-IP rate limiting (used with GLOBAL_RATE_LIMIT_PER_MINUTE).
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 const CLOUDFRONT_IP_RANGES_URL: &str = "https://ip-ranges.amazonaws.com/ip-ranges.json";
+const CLOUDFLARE_IPV4_RANGES_URL: &str = "https://www.cloudflare.com/ips-v4";
+const CLOUDFLARE_IPV6_RANGES_URL: &str = "https://www.cloudflare.com/ips-v6";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -111,19 +113,42 @@ async fn main() -> anyhow::Result<()> {
         .route_layer(ingest_layer);
 
     let rate_limiter = RequestRateLimiter::new(GLOBAL_RATE_LIMIT_PER_MINUTE, RATE_LIMIT_WINDOW);
-    let trusted_proxies = match fetch_cloudfront_proxies().await {
-        Ok(networks) => {
-            info!("Loaded {} CloudFront proxy ranges", networks.len());
-            TrustedProxyList::new(networks)
+    let (cloudfront_result, cloudflare_result) =
+        tokio::join!(fetch_cloudfront_proxies(), fetch_cloudflare_proxies());
+
+    let mut proxy_networks = Vec::new();
+
+    match cloudfront_result {
+        Ok(mut ranges) => {
+            info!("Loaded {} CloudFront proxy ranges", ranges.len());
+            proxy_networks.append(&mut ranges);
         }
         Err(err) => {
             warn!(
-                "Failed to load CloudFront ranges ({}); defaulting to no trusted proxies",
+                "Failed to load CloudFront ranges ({}); continuing without them",
                 err
             );
-            TrustedProxyList::new(Vec::new())
         }
-    };
+    }
+
+    match cloudflare_result {
+        Ok(mut ranges) => {
+            info!("Loaded {} Cloudflare proxy ranges", ranges.len());
+            proxy_networks.append(&mut ranges);
+        }
+        Err(err) => {
+            warn!(
+                "Failed to load Cloudflare ranges ({}); continuing without them",
+                err
+            );
+        }
+    }
+
+    if proxy_networks.is_empty() {
+        warn!("No trusted proxy ranges loaded; falling back to peer addresses only");
+    }
+
+    let trusted_proxies = TrustedProxyList::new(proxy_networks);
 
     let app = Router::new()
         .route(api_constants::HEALTH_ROUTE, get(health_check))
@@ -142,10 +167,6 @@ async fn main() -> anyhow::Result<()> {
         .merge(ingest_routes)
         .layer(from_fn(enforce_upload_limit))
         .layer(from_fn(enforce_rate_limit))
-        .layer(from_fn(extract_and_log_ip))
-        .layer(Extension(upload_limiter))
-        .layer(Extension(rate_limiter))
-        .layer(Extension(trusted_proxies.clone()))
         .layer(build_version_header)
         .layer(cors)
         .layer(
@@ -154,6 +175,10 @@ async fn main() -> anyhow::Result<()> {
                 .on_request(on_request)
                 .on_response(on_response),
         )
+        .layer(from_fn(extract_and_log_ip))
+        .layer(Extension(upload_limiter))
+        .layer(Extension(rate_limiter))
+        .layer(Extension(trusted_proxies.clone()))
         .layer(CatchPanicLayer::new())
         .layer(
             ServiceBuilder::new()
@@ -527,6 +552,42 @@ async fn fetch_cloudfront_proxies() -> anyhow::Result<Vec<IpNet>> {
             if let Ok(net) = cidr.parse::<IpNet>() {
                 networks.push(net);
             }
+        }
+    }
+
+    Ok(networks)
+}
+
+async fn fetch_cloudflare_proxies() -> anyhow::Result<Vec<IpNet>> {
+    let mut networks = Vec::new();
+
+    let ipv4_text = reqwest::get(CLOUDFLARE_IPV4_RANGES_URL)
+        .await?
+        .text()
+        .await?;
+    for cidr in ipv4_text.lines().map(str::trim) {
+        if cidr.is_empty() || cidr.starts_with('#') {
+            continue;
+        }
+
+        match cidr.parse::<IpNet>() {
+            Ok(net) => networks.push(net),
+            Err(err) => warn!("Skipping invalid Cloudflare IPv4 CIDR {} ({})", cidr, err),
+        }
+    }
+
+    let ipv6_text = reqwest::get(CLOUDFLARE_IPV6_RANGES_URL)
+        .await?
+        .text()
+        .await?;
+    for cidr in ipv6_text.lines().map(str::trim) {
+        if cidr.is_empty() || cidr.starts_with('#') {
+            continue;
+        }
+
+        match cidr.parse::<IpNet>() {
+            Ok(net) => networks.push(net),
+            Err(err) => warn!("Skipping invalid Cloudflare IPv6 CIDR {} ({})", cidr, err),
         }
     }
 

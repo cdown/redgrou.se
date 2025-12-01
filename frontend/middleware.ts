@@ -11,6 +11,10 @@ const RATE_LIMITER_BUCKET_KEY = '__redgrouseRateLimiterBuckets';
 const TRUSTED_CIDRS_KEY = '__redgrouseTrustedCloudfrontCidrs';
 const CLOUDFRONT_IP_RANGES_URL =
   'https://ip-ranges.amazonaws.com/ip-ranges.json';
+const CLOUDFLARE_IPV4_RANGES_URL =
+  'https://www.cloudflare.com/ips-v4';
+const CLOUDFLARE_IPV6_RANGES_URL =
+  'https://www.cloudflare.com/ips-v6';
 const TRUST_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 type RateBucket = {
@@ -62,42 +66,55 @@ async function ensureTrustedCidrsLoaded(): Promise<void> {
     return;
   }
 
-  const response = await fetch(CLOUDFRONT_IP_RANGES_URL, {
-    headers: {
-      'cache-control': 'no-cache',
-    },
-  });
+  const headers = {
+    'cache-control': 'no-cache',
+  };
 
-  if (!response.ok) {
-    // If we fail to fetch, keep existing data (if any).
+  const [cloudfrontResult, cloudflareIpv4Result, cloudflareIpv6Result] =
+    await Promise.allSettled([
+      fetchCloudfrontCidrs(headers),
+      fetchCloudflareCidrs(CLOUDFLARE_IPV4_RANGES_URL, headers),
+      fetchCloudflareCidrs(CLOUDFLARE_IPV6_RANGES_URL, headers),
+    ]);
+
+  const cidrs: Cidr[] = [];
+
+  if (cloudfrontResult.status === 'fulfilled') {
+    cidrs.push(...cloudfrontResult.value);
+  } else {
+    console.warn(
+      'Failed to load CloudFront ranges',
+      cloudfrontResult.reason,
+    );
+  }
+
+  if (cloudflareIpv4Result.status === 'fulfilled') {
+    cidrs.push(...cloudflareIpv4Result.value);
+  } else {
+    console.warn(
+      'Failed to load Cloudflare IPv4 ranges',
+      cloudflareIpv4Result.reason,
+    );
+  }
+
+  if (cloudflareIpv6Result.status === 'fulfilled') {
+    cidrs.push(...cloudflareIpv6Result.value);
+  } else {
+    console.warn(
+      'Failed to load Cloudflare IPv6 ranges',
+      cloudflareIpv6Result.reason,
+    );
+  }
+
+  if (cidrs.length === 0) {
     if (trustedCidrsState.cidrs.length === 0) {
       trustedCidrsState = {
         cidrs: [],
         lastFetched: now,
       };
+      globalScope[TRUSTED_CIDRS_KEY] = trustedCidrsState;
     }
     return;
-  }
-
-  const json = (await response.json()) as AwsIpRanges;
-  const cidrs: Cidr[] = [];
-
-  for (const prefix of json.prefixes ?? []) {
-    if (prefix.service === 'CLOUDFRONT' && prefix.ip_prefix) {
-      const parsed = parseCidr(prefix.ip_prefix);
-      if (parsed) {
-        cidrs.push(parsed);
-      }
-    }
-  }
-
-  for (const prefix of json.ipv6_prefixes ?? []) {
-    if (prefix.service === 'CLOUDFRONT' && prefix.ipv6_prefix) {
-      const parsed = parseCidr(prefix.ipv6_prefix);
-      if (parsed) {
-        cidrs.push(parsed);
-      }
-    }
   }
 
   trustedCidrsState = {
@@ -258,6 +275,69 @@ type AwsIpRanges = {
   prefixes?: Array<{ ip_prefix?: string; service?: string }>;
   ipv6_prefixes?: Array<{ ipv6_prefix?: string; service?: string }>;
 };
+
+async function fetchCloudfrontCidrs(
+  headers: Record<string, string>,
+): Promise<Cidr[]> {
+  const response = await fetch(CLOUDFRONT_IP_RANGES_URL, { headers });
+  if (!response.ok) {
+    throw new Error(
+      `CloudFront CIDR fetch failed with status ${response.status}`,
+    );
+  }
+
+  const json = (await response.json()) as AwsIpRanges;
+  const cidrs: Cidr[] = [];
+
+  for (const prefix of json.prefixes ?? []) {
+    if (prefix.service === 'CLOUDFRONT' && prefix.ip_prefix) {
+      const parsed = parseCidr(prefix.ip_prefix);
+      if (parsed) {
+        cidrs.push(parsed);
+      }
+    }
+  }
+
+  for (const prefix of json.ipv6_prefixes ?? []) {
+    if (prefix.service === 'CLOUDFRONT' && prefix.ipv6_prefix) {
+      const parsed = parseCidr(prefix.ipv6_prefix);
+      if (parsed) {
+        cidrs.push(parsed);
+      }
+    }
+  }
+
+  return cidrs;
+}
+
+async function fetchCloudflareCidrs(
+  url: string,
+  headers: Record<string, string>,
+): Promise<Cidr[]> {
+  const response = await fetch(url, { headers });
+  if (!response.ok) {
+    throw new Error(
+      `Cloudflare CIDR fetch failed for ${url} with status ${response.status}`,
+    );
+  }
+
+  const text = await response.text();
+  const cidrs: Cidr[] = [];
+
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
+
+    const parsed = parseCidr(trimmed);
+    if (parsed) {
+      cidrs.push(parsed);
+    }
+  }
+
+  return cidrs;
+}
 
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
