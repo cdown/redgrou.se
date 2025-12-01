@@ -290,6 +290,9 @@ export function SightingsMap({
       },
     });
 
+    // Increase scroll zoom speed (default 1/450 feels sluggish)
+    map.scrollZoom.setZoomRate(1 / 225);
+
     // Track the current zoom level to cancel stale requests
     let currentZoom = map.getZoom();
     let zoomChangeTimeout: NodeJS.Timeout | null = null;
