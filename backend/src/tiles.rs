@@ -44,18 +44,6 @@ fn latlng_to_tile_coords(lat: f64, lng: f64, z: u32, x: u32, y: u32) -> (f64, f6
     (tile_x, tile_y)
 }
 
-struct SightingPoint {
-    id: i64,
-    latitude: f64,
-    longitude: f64,
-    common_name: String,
-    scientific_name: Option<String>,
-    count: i32,
-    observed_at: String,
-    lifer: i32,
-    year_tick: i32,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct TileQuery {
     filter: Option<String>,
@@ -89,13 +77,7 @@ pub async fn get_tile(
         z, x, y, lon_min, lat_min, lon_max, lat_max
     );
 
-    let mut params: Vec<String> = vec![
-        upload_id.clone(),
-        lat_min.to_string(),
-        lat_max.to_string(),
-        lon_min.to_string(),
-        lon_max.to_string(),
-    ];
+    let mut filter_params: Vec<String> = Vec::new();
 
     let mut filter_clause = if let Some(filter_json) = &query.filter {
         let filter: FilterGroup = serde_json::from_str(filter_json).map_err(|e| {
@@ -106,7 +88,7 @@ pub async fn get_tile(
             .validate()
             .map_err(|e| ApiError::bad_request(e.message()))?;
         filter
-            .to_sql(&mut params)
+            .to_sql(&mut filter_params)
             .map(|sql| format!(" AND {}", sql))
     } else {
         None
@@ -114,7 +96,7 @@ pub async fn get_tile(
 
     // Add lifers_only filter if requested
     if query.lifers_only == Some(true) {
-        let lifer_clause = " AND lifer = 1".to_string();
+        let lifer_clause = " AND s.lifer = 1".to_string();
         filter_clause = Some(match filter_clause {
             Some(existing) => format!("{}{}", existing, lifer_clause),
             None => lifer_clause,
@@ -123,8 +105,8 @@ pub async fn get_tile(
 
     // Add year_tick filter if requested
     if let Some(year) = query.year_tick_year {
-        params.push(year.to_string());
-        let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();
+        filter_params.push(year.to_string());
+        let year_tick_clause = " AND s.year_tick = 1 AND s.year = ?".to_string();
         filter_clause = Some(match filter_clause {
             Some(existing) => format!("{}{}", existing, year_tick_clause),
             None => year_tick_clause,
@@ -133,18 +115,33 @@ pub async fn get_tile(
 
     let sql = format!(
         r#"
-        SELECT id, latitude, longitude, common_name, scientific_name, count, observed_at, lifer, year_tick
-        FROM sightings
-        WHERE upload_id = ?
-          AND latitude >= ? AND latitude <= ?
-          AND longitude >= ? AND longitude <= ?
+        SELECT
+            s.id,
+            s.latitude,
+            s.longitude,
+            s.common_name,
+            s.scientific_name,
+            s.count,
+            s.observed_at,
+            s.lifer,
+            s.year_tick
+        FROM sightings AS s
+        JOIN sightings_geo AS sg ON sg.id = s.id
+        WHERE s.upload_id = ?
+          AND sg.max_lat >= ? AND sg.min_lat <= ?
+          AND sg.max_lon >= ? AND sg.min_lon <= ?
         {}
         "#,
         filter_clause.unwrap_or_default()
     );
 
-    let mut db_query = sqlx::query(&sql);
-    for param in &params {
+    let mut db_query = sqlx::query(&sql)
+        .bind(&upload_id)
+        .bind(lat_min)
+        .bind(lat_max)
+        .bind(lon_min)
+        .bind(lon_max);
+    for param in &filter_params {
         db_query = db_query.bind(param);
     }
 
@@ -152,26 +149,22 @@ pub async fn get_tile(
         .await
         .map_err(|e| e.into_api_error("loading tile sightings", "Database error"))?;
 
-    let points: Vec<SightingPoint> = rows
-        .iter()
-        .map(|row| SightingPoint {
-            id: row.get("id"),
-            latitude: row.get("latitude"),
-            longitude: row.get("longitude"),
-            common_name: row.get("common_name"),
-            scientific_name: row.get("scientific_name"),
-            count: row.get("count"),
-            observed_at: row.get("observed_at"),
-            lifer: row.get("lifer"),
-            year_tick: row.get("year_tick"),
-        })
-        .collect();
-
     let mut tile = Tile::new(TILE_EXTENT);
     let mut layer = tile.create_layer("sightings");
+    let mut point_count = 0usize;
 
-    for point in &points {
-        let (tile_x, tile_y) = latlng_to_tile_coords(point.latitude, point.longitude, z, x, y);
+    for row in rows {
+        let id: i64 = row.get("id");
+        let latitude: f64 = row.get("latitude");
+        let longitude: f64 = row.get("longitude");
+        let common_name: String = row.get("common_name");
+        let scientific_name: Option<String> = row.get("scientific_name");
+        let count: i32 = row.get("count");
+        let observed_at: String = row.get("observed_at");
+        let lifer: i32 = row.get("lifer");
+        let year_tick: i32 = row.get("year_tick");
+
+        let (tile_x, tile_y) = latlng_to_tile_coords(latitude, longitude, z, x, y);
 
         let encoder = GeomEncoder::new(GeomType::Point);
         let geom_data = match encoder.point(tile_x, tile_y).and_then(|e| e.encode()) {
@@ -183,17 +176,18 @@ pub async fn get_tile(
         };
 
         let mut feature = layer.into_feature(geom_data);
-        feature.set_id(point.id as u64);
-        feature.add_tag_string("name", &point.common_name);
-        feature.add_tag_uint("count", point.count as u64);
-        if let Some(ref scientific_name) = point.scientific_name {
-            feature.add_tag_string("scientific_name", scientific_name);
+        feature.set_id(id as u64);
+        feature.add_tag_string("name", &common_name);
+        feature.add_tag_uint("count", count as u64);
+        if let Some(scientific_name) = scientific_name {
+            feature.add_tag_string("scientific_name", &scientific_name);
         }
-        feature.add_tag_string("observed_at", &point.observed_at);
-        feature.add_tag_uint("lifer", point.lifer as u64);
-        feature.add_tag_uint("year_tick", point.year_tick as u64);
+        feature.add_tag_string("observed_at", &observed_at);
+        feature.add_tag_uint("lifer", lifer as u64);
+        feature.add_tag_uint("year_tick", year_tick as u64);
 
         layer = feature.into_layer();
+        point_count += 1;
     }
 
     if let Err(e) = tile.add_layer(layer) {
@@ -209,7 +203,7 @@ pub async fn get_tile(
         }
     };
 
-    debug!("Generated tile with {} points", points.len());
+    debug!("Generated tile with {} points", point_count);
 
     let response = Response::builder()
         .status(StatusCode::OK)
