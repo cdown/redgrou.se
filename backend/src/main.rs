@@ -37,7 +37,7 @@ use redgrouse::{db, sightings, tiles, upload};
 const BUILD_VERSION: &str = env!("BUILD_VERSION");
 const GLOBAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const GLOBAL_CONCURRENCY_LIMIT: usize = 100;
-const GLOBAL_RATE_LIMIT_PER_MINUTE: u64 = 1000;
+const GLOBAL_RATE_LIMIT_PER_MINUTE: u64 = 20000;
 const UPLOAD_CONCURRENCY_LIMIT: usize = 2;
 const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(60);
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
