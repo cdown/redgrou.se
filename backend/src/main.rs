@@ -41,14 +41,6 @@ const BUILD_VERSION: &str = env!("BUILD_VERSION");
 /// Heavy user estimate: N/A - this is a safety timeout, not a throughput limit.
 const GLOBAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Maximum concurrent requests being processed server-wide.
-/// Applies to: All in-flight requests across all IPs combined.
-/// Does NOT limit: Per-IP request rate (see GLOBAL_RATE_LIMIT_PER_MINUTE).
-/// Heavy user estimate: A single user doing rapid zoom/pan might have 20-50
-/// concurrent tile requests in flight. With 100 limit, ~2-5 heavy users can
-/// saturate this before requests start queueing.
-const GLOBAL_CONCURRENCY_LIMIT: usize = 100;
-
 /// Maximum requests per IP address per minute.
 /// Applies to: All requests from a single IP (identified via CloudFront headers
 /// in production, or peer address locally).
@@ -154,7 +146,6 @@ async fn main() -> anyhow::Result<()> {
                 .timeout(GLOBAL_REQUEST_TIMEOUT)
                 .into_inner(),
         )
-        .layer(ConcurrencyLimitLayer::new(GLOBAL_CONCURRENCY_LIMIT))
         .with_state(pool);
 
     let port = env::var("PORT")
