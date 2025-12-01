@@ -163,6 +163,19 @@ function addSightingsLayer(map: maplibregl.Map): void {
     return; // Layer already exists
   }
 
+  // Add invisible hit detection layer with larger radius for better tap targets
+  map.addLayer({
+    id: "sightings-circles-hit",
+    type: "circle",
+    source: "sightings",
+    "source-layer": "sightings",
+    paint: {
+      "circle-radius": 12,
+      "circle-opacity": 0,
+    },
+  });
+
+  // Add visible layer with original small radius
   map.addLayer({
     id: "sightings-circles",
     type: "circle",
@@ -176,7 +189,8 @@ function addSightingsLayer(map: maplibregl.Map): void {
     },
   });
 
-  map.on("click", "sightings-circles", (e) => {
+  // Attach click handlers to the hit detection layer
+  map.on("click", "sightings-circles-hit", (e) => {
     if (!e.features?.length) return;
     const feature = e.features[0];
     const name = feature.properties?.name || "Unknown";
@@ -190,12 +204,18 @@ function addSightingsLayer(map: maplibregl.Map): void {
     const yearTick = feature.properties?.year_tick;
     const isLifer = lifer === 1 || lifer === "1" || lifer === true;
     const isYearTick = yearTick === 1 || yearTick === "1" || yearTick === true;
-    const lngLat = e.lngLat;
+
+    // Use feature's geometry coordinates (center of icon) instead of click position
+    const geometry = feature.geometry;
+    if (geometry.type !== "Point" || !geometry.coordinates) {
+      return;
+    }
+    const [lng, lat] = geometry.coordinates;
 
     showSpeciesPopup(
       map,
-      lngLat.lat,
-      lngLat.lng,
+      lat,
+      lng,
       name,
       count,
       scientificName,
@@ -205,11 +225,11 @@ function addSightingsLayer(map: maplibregl.Map): void {
     );
   });
 
-  map.on("mouseenter", "sightings-circles", () => {
+  map.on("mouseenter", "sightings-circles-hit", () => {
     map.getCanvas().style.cursor = "pointer";
   });
 
-  map.on("mouseleave", "sightings-circles", () => {
+  map.on("mouseleave", "sightings-circles-hit", () => {
     map.getCanvas().style.cursor = "";
   });
 }
@@ -254,7 +274,6 @@ export function SightingsMap({
       style: "https://tiles.openfreemap.org/styles/liberty",
       center: [0, 20],
       zoom: 2,
-      antialias: true,
       pixelRatio,
       transformRequest: (
         url: string,
@@ -466,8 +485,11 @@ export function SightingsMap({
     const bearing = map.getBearing();
     const pitch = map.getPitch();
 
-    // Remove layer first (it depends on the source)
-    // Event handlers are automatically removed when layer is removed
+    // Remove layers first (they depend on the source)
+    // Event handlers are automatically removed when layers are removed
+    if (map.getLayer("sightings-circles-hit")) {
+      map.removeLayer("sightings-circles-hit");
+    }
     if (map.getLayer("sightings-circles")) {
       map.removeLayer("sightings-circles");
     }
