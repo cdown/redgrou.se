@@ -254,8 +254,8 @@ export function SightingsMap({
       style: "https://tiles.openfreemap.org/styles/liberty",
       center: [0, 20],
       zoom: 2,
+      antialias: true,
       pixelRatio,
-      canvasContextAttributes: { antialias: true },
       transformRequest: (
         url: string,
         resourceType?: maplibregl.ResourceType,
