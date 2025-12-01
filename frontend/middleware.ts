@@ -116,6 +116,11 @@ export async function middleware(request: NextRequest) {
     isTrustedProxy(directConnectionIp);
 
   const clientKey = extractClientIdentifier(request, allowForwarded);
+  const path = request.nextUrl.pathname;
+  const method = request.method;
+
+  // Log request with IP and path
+  console.log(`${method} ${path} from ${clientKey}`);
 
   if (allowRequest(clientKey)) {
     return NextResponse.next();

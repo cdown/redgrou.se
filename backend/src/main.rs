@@ -22,7 +22,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tower_http::{catch_panic::CatchPanicLayer, timeout::RequestBodyTimeoutLayer};
-use tracing::{info, warn};
+use tracing::{info, warn, Span};
 use tracing_subscriber::EnvFilter;
 use ts_rs::TS;
 
@@ -142,12 +142,18 @@ async fn main() -> anyhow::Result<()> {
         .merge(ingest_routes)
         .layer(from_fn(enforce_upload_limit))
         .layer(from_fn(enforce_rate_limit))
+        .layer(from_fn(extract_and_log_ip))
         .layer(Extension(upload_limiter))
         .layer(Extension(rate_limiter))
         .layer(Extension(trusted_proxies.clone()))
         .layer(build_version_header)
         .layer(cors)
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(make_request_span)
+                .on_request(on_request)
+                .on_response(on_response),
+        )
         .layer(CatchPanicLayer::new())
         .layer(
             ServiceBuilder::new()
@@ -404,6 +410,72 @@ fn extract_client_addr<B>(
     }
 
     peer_addr.ip().to_string()
+}
+
+// Store extracted client IP in request extensions for logging
+async fn extract_and_log_ip(
+    Extension(trusted): Extension<TrustedProxyList>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+    mut req: Request<Body>,
+    next: Next,
+) -> Response {
+    let client_ip = extract_client_addr(&req, peer_addr, &trusted);
+    req.extensions_mut().insert(client_ip);
+    next.run(req).await
+}
+
+// Extract client IP from request extensions (set by extract_and_log_ip middleware)
+fn extract_ip_for_logging<B>(req: &Request<B>) -> String {
+    // Get from extensions (set by middleware)
+    if let Some(ip) = req.extensions().get::<String>() {
+        return ip.clone();
+    }
+
+    // Fallback if middleware didn't run (shouldn't happen)
+    "unknown".to_string()
+}
+
+// Custom span maker for TraceLayer that includes IP and path
+fn make_request_span<B>(req: &Request<B>) -> Span {
+    let method = req.method();
+    let path = req.uri().path();
+    let query = req.uri().query();
+    let full_path = if let Some(q) = query {
+        format!("{}?{}", path, q)
+    } else {
+        path.to_string()
+    };
+
+    let client_ip = extract_ip_for_logging(req);
+
+    tracing::info_span!(
+        "http_request",
+        method = %method,
+        path = %full_path,
+        ip = %client_ip
+    )
+}
+
+// Log request details when it starts
+fn on_request<B>(req: &Request<B>, _span: &Span) {
+    let method = req.method();
+    let path = req.uri().path();
+    let query = req.uri().query();
+    let full_path = if let Some(q) = query {
+        format!("{}?{}", path, q)
+    } else {
+        path.to_string()
+    };
+
+    let client_ip = extract_ip_for_logging(req);
+    info!("{} {} from {}", method, full_path, client_ip);
+}
+
+// Log response details when it completes
+fn on_response<B>(response: &Response<B>, latency: Duration, _span: &Span) {
+    let status = response.status();
+    let latency_ms = latency.as_millis();
+    info!("Response {} in {}ms", status, latency_ms);
 }
 
 #[derive(Deserialize)]
