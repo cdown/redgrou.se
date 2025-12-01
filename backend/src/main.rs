@@ -35,11 +35,43 @@ use redgrouse::filter::{
 use redgrouse::{db, sightings, tiles, upload};
 
 const BUILD_VERSION: &str = env!("BUILD_VERSION");
+
+/// Maximum time any request can take before being terminated.
+/// Applies to: All routes (tiles, sightings, uploads, metadata).
+/// Heavy user estimate: N/A - this is a safety timeout, not a throughput limit.
 const GLOBAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Maximum concurrent requests being processed server-wide.
+/// Applies to: All in-flight requests across all IPs combined.
+/// Does NOT limit: Per-IP request rate (see GLOBAL_RATE_LIMIT_PER_MINUTE).
+/// Heavy user estimate: A single user doing rapid zoom/pan might have 20-50
+/// concurrent tile requests in flight. With 100 limit, ~2-5 heavy users can
+/// saturate this before requests start queueing.
 const GLOBAL_CONCURRENCY_LIMIT: usize = 100;
+
+/// Maximum requests per IP address per minute.
+/// Applies to: All requests from a single IP (identified via CloudFront headers
+/// in production, or peer address locally).
+/// Does NOT limit: Server-wide throughput (see GLOBAL_CONCURRENCY_LIMIT).
+/// Heavy user estimate: Rapid map zoom/pan generates ~24 tiles per zoom level.
+/// Scrollwheel zooming through 10 levels in a few seconds = 240 tiles. Heavy
+/// use with panning = ~1000-2000 tiles/minute. 20000 provides 10-20x headroom.
 const GLOBAL_RATE_LIMIT_PER_MINUTE: u64 = 20000;
+
+/// Maximum concurrent CSV upload/update operations.
+/// Applies to: POST /upload and PUT /single/{id} routes only.
+/// Does NOT limit: Read operations (tiles, sightings, metadata).
+/// Heavy user estimate: Uploads are rare - typically 1 per session. This limit
+/// prevents a single user from monopolizing DB write capacity with parallel
+/// uploads of large CSVs.
 const UPLOAD_CONCURRENCY_LIMIT: usize = 2;
+
+/// Maximum time to receive the full request body for uploads.
+/// Applies to: POST /upload and PUT /single/{id} routes only.
+/// Heavy user estimate: A 200MB CSV over a slow connection might take 30-60s.
 const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Window duration for per-IP rate limiting (used with GLOBAL_RATE_LIMIT_PER_MINUTE).
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 const CLOUDFRONT_IP_RANGES_URL: &str = "https://ip-ranges.amazonaws.com/ip-ranges.json";
 
