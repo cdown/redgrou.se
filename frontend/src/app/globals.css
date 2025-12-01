@@ -120,10 +120,3 @@
     @apply bg-background text-foreground;
   }
 }
-
-/* Ensure MapLibre canvas renders crisply on high DPI displays */
-.maplibregl-canvas {
-  transform: translateZ(0);
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-}
