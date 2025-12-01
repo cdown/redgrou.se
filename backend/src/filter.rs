@@ -40,7 +40,7 @@ pub enum FilterValue {
 /// preventing SQL injection via field names at compile time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../frontend/src/lib/generated/")]
+#[ts(export)]
 pub enum FilterField {
     CommonName,
     ScientificName,

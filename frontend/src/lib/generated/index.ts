@@ -6,6 +6,7 @@ export type { Combinator } from "./Combinator";
 export type { Condition } from "./Condition";
 export type { DeleteResponse } from "./DeleteResponse";
 export type { FieldMetadata } from "./FieldMetadata";
+export type { FilterField } from "./FilterField";
 export type { FilterGroup } from "./FilterGroup";
 export type { FilterValue } from "./FilterValue";
 export type { GroupedSighting } from "./GroupedSighting";

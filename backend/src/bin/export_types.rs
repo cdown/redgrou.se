@@ -10,7 +10,7 @@ use std::path::Path;
 use redgrouse::api_constants;
 use redgrouse::error::ApiErrorBody;
 use redgrouse::filter::{
-    Combinator, Condition, FieldMetadata, FilterGroup, FilterValue, Operator, Rule,
+    Combinator, Condition, FieldMetadata, FilterField, FilterGroup, FilterValue, Operator, Rule,
 };
 use redgrouse::sightings::{Sighting, SightingsResponse, SortField};
 use redgrouse::upload::{DeleteResponse, UpdateResponse, UploadResponse};
@@ -28,6 +28,7 @@ fn main() {
     ApiErrorBody::export_all_to(out_dir).expect("Failed to export ApiErrorBody");
     Combinator::export_all_to(out_dir).expect("Failed to export Combinator");
     Operator::export_all_to(out_dir).expect("Failed to export Operator");
+    FilterField::export_all_to(out_dir).expect("Failed to export FilterField");
     FilterValue::export_all_to(out_dir).expect("Failed to export FilterValue");
     Condition::export_all_to(out_dir).expect("Failed to export Condition");
     Rule::export_all_to(out_dir).expect("Failed to export Rule");
