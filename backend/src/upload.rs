@@ -252,11 +252,21 @@ fn get_field(
         return Ok(None);
     };
 
-    let value = std::str::from_utf8(bytes).map_err(|_| {
-        ApiError::bad_request(format!(
-            "Row {row_number} has invalid UTF-8 in column {field_name}"
-        ))
-    })?;
+    // Try UTF-8 first, fallback to Windows-1252 for Excel files
+    let value = match std::str::from_utf8(bytes) {
+        Ok(v) => v.to_string(),
+        Err(_) => {
+            // Decode as Windows-1252 (common encoding for Excel CSV files on Windows)
+            // This gracefully handles CSV files created in Excel that aren't UTF-8
+            encoding_rs::WINDOWS_1252.decode_without_bom_handling_and_without_replacement(bytes)
+                .ok_or_else(|| {
+                    ApiError::bad_request(format!(
+                        "Row {row_number} has invalid encoding in column {field_name} (neither UTF-8 nor Windows-1252)"
+                    ))
+                })?
+                .into_owned()
+        }
+    };
 
     let trimmed = value.trim();
     if trimmed.is_empty() {

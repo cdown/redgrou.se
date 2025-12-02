@@ -36,6 +36,7 @@ hex = "0.4"
 subtle = "2.6"
 country-boundaries = "1.2.0"
 ts-rs = "11"
+encoding_rs = "0.8"
 
 [profile.release]
 lto = "thin"

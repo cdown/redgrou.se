@@ -1525,6 +1525,7 @@ dependencies = [
  "chrono",
  "country-boundaries",
  "csv-async",
+ "encoding_rs",
  "futures",
  "hex",
  "ipnet",
