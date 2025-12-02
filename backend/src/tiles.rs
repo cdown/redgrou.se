@@ -11,6 +11,8 @@ use crate::error::ApiError;
 use crate::filter::FilterGroup;
 
 const TILE_EXTENT: u32 = 4096;
+// Maximum vis_rank value (0-10000). When threshold equals this, all points are included.
+const MAX_VIS_RANK: i32 = 10000;
 
 fn tile_to_bbox(z: u32, x: u32, y: u32) -> (f64, f64, f64, f64) {
     let n = 2_f64.powi(i32::try_from(z).unwrap_or(i32::MAX));
@@ -107,19 +109,19 @@ pub async fn get_tile(
     }
 
     // Use vis_rank-based sampling for efficient tile generation.
-    // vis_rank is assigned at ingest time (0-10000, where 0 = highest priority for lifers/year_ticks).
+    // vis_rank is assigned at ingest time (0-MAX_VIS_RANK, where 0 = highest priority for lifers/year_ticks).
     // This turns O(NlogN) sorting operations into O(K) B-Tree range scans.
     //
     // Zoom-based thresholds:
     // - Very low zoom (z0-z2): vis_rank < 100 (~1% of points, ensures lifers/year_ticks visible)
     // - Low zoom (z3-z4): vis_rank < 1000 (~10% of points)
     // - Mid zoom (z5-z7): vis_rank < 5000 (~50% of points)
-    // - High zoom (z8+): vis_rank < 10000 (all points)
+    // - High zoom (z8+): MAX_VIS_RANK (all points, filter skipped for performance)
     let vis_rank_threshold = match z {
-        0..=2 => 100,  // Very low zoom: ~1% of points
-        3..=4 => 1000, // Low zoom: ~10% of points
-        5..=7 => 5000, // Mid zoom: ~50% of points
-        _ => 10000,    // High zoom: all points
+        0..=2 => 100,      // Very low zoom: ~1% of points
+        3..=4 => 1000,     // Low zoom: ~10% of points
+        5..=7 => 5000,     // Mid zoom: ~50% of points
+        _ => MAX_VIS_RANK, // High zoom: all points
     };
 
     // Limit points returned to prevent memory spikes (safety cap)
@@ -133,6 +135,15 @@ pub async fn get_tile(
     // Optimize query order: filter by upload_id and vis_rank first (uses index),
     // then join to rtree for bbox filtering. This allows SQLite to use the
     // idx_sightings_vis_rank index efficiently before the spatial join.
+    // At high zoom (vis_rank_threshold = MAX_VIS_RANK), skip the vis_rank filter entirely
+    // since it would match all points anyway, avoiding unnecessary index scan overhead.
+    let include_all_points = vis_rank_threshold >= MAX_VIS_RANK;
+    let vis_rank_clause = if include_all_points {
+        String::new()
+    } else {
+        " AND s.vis_rank < ?".to_string()
+    };
+
     let sql = format!(
         r"
         SELECT
@@ -147,19 +158,21 @@ pub async fn get_tile(
             s.year_tick
         FROM sightings AS s
         JOIN sightings_geo AS sg ON sg.id = s.id
-        WHERE s.upload_id = ?
-          AND s.vis_rank < ?
+        WHERE s.upload_id = ?{}
           AND sg.max_lat >= ? AND sg.min_lat <= ?
           AND sg.max_lon >= ? AND sg.min_lon <= ?
         {}
         LIMIT ?
         ",
+        vis_rank_clause,
         filter_clause.unwrap_or_default()
     );
 
-    let mut db_query = sqlx::query(&sql)
-        .bind(&upload_id)
-        .bind(vis_rank_threshold)
+    let mut db_query = sqlx::query(&sql).bind(&upload_id);
+    if !include_all_points {
+        db_query = db_query.bind(vis_rank_threshold);
+    }
+    db_query = db_query
         .bind(lat_min)
         .bind(lat_max)
         .bind(lon_min)
