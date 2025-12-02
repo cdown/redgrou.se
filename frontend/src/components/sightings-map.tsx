@@ -15,6 +15,7 @@ interface SightingsMapProps {
   filter: FilterGroup | null;
   lifersOnly: boolean;
   yearTickYear: number | null;
+  countryTickCountry: string | null;
   onMapReady?: (navigateToSighting: (sightingId: number, lat: number, lng: number) => void) => void;
 }
 
@@ -49,6 +50,7 @@ function updatePopupWithSpeciesInfo(
   observedAt?: string,
   isLifer?: boolean,
   isYearTick?: boolean,
+  isCountryTick?: boolean,
 ): void {
   root.render(
     <SpeciesPopup
@@ -58,6 +60,7 @@ function updatePopupWithSpeciesInfo(
       observedAt={observedAt}
       isLifer={isLifer}
       isYearTick={isYearTick}
+      isCountryTick={isCountryTick}
     />,
   );
 }
@@ -77,6 +80,7 @@ function showSpeciesPopup(
   observedAt?: string,
   isLifer?: boolean,
   isYearTick?: boolean,
+  isCountryTick?: boolean,
 ): void {
   const { container, root } = createPopupContent(name, count, scientificName);
 
@@ -111,6 +115,7 @@ function showSpeciesPopup(
           observedAt,
           isLifer,
           isYearTick,
+          isCountryTick,
         );
         popup = new maplibregl.Popup({
           maxWidth: "none",
@@ -134,6 +139,7 @@ function buildTileUrl(
   filter: FilterGroup | null,
   lifersOnly: boolean,
   yearTickYear: number | null,
+  countryTickCountry: string | null,
 ): string {
   const params = new URLSearchParams();
   if (filter) {
@@ -144,6 +150,9 @@ function buildTileUrl(
   }
   if (yearTickYear !== null) {
     params.set("year_tick_year", String(yearTickYear));
+  }
+  if (countryTickCountry !== null) {
+    params.set("country_tick_country", countryTickCountry);
   }
 
   const queryString = params.toString();
@@ -170,8 +179,10 @@ function handleSightingFeature(
   const observedAt = feature.properties?.observed_at?.toString();
   const lifer = feature.properties?.lifer;
   const yearTick = feature.properties?.year_tick;
+  const countryTick = feature.properties?.country_tick;
   const isLifer = lifer === 1 || lifer === "1" || lifer === true;
   const isYearTick = yearTick === 1 || yearTick === "1" || yearTick === true;
+  const isCountryTick = countryTick === 1 || countryTick === "1" || countryTick === true;
 
   // Use feature's geometry coordinates (center of icon) instead of click position
   const geometry = feature.geometry;
@@ -190,6 +201,7 @@ function handleSightingFeature(
     observedAt,
     isLifer,
     isYearTick,
+    isCountryTick,
   );
 }
 
@@ -246,7 +258,9 @@ function addSightingsLayer(
       "circle-color": [
         "case",
         [">", ["get", "lifer"], 0],
-        "#F97316", // Orange for lifers
+        "#9333EA", // Purple for lifers
+        [">", ["get", "country_tick"], 0],
+        "#F97316", // Gold/Orange for country ticks
         [">", ["get", "year_tick"], 0],
         "#3B82F6", // Blue for year ticks
         "#e63946", // Red for normal sightings
@@ -292,6 +306,7 @@ export function SightingsMap({
   filter,
   lifersOnly,
   yearTickYear,
+  countryTickCountry,
   onMapReady,
 }: SightingsMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -464,7 +479,7 @@ export function SightingsMap({
 
     // Add sightings source and layer when map loads
     map.on("load", () => {
-      const tileUrl = buildTileUrl(uploadId, filter, lifersOnly, yearTickYear);
+      const tileUrl = buildTileUrl(uploadId, filter, lifersOnly, yearTickYear, countryTickCountry);
 
       map.addSource("sightings", {
         type: "vector",
@@ -544,7 +559,7 @@ export function SightingsMap({
       return;
     }
 
-    const tileUrl = buildTileUrl(uploadId, filter, lifersOnly, yearTickYear);
+    const tileUrl = buildTileUrl(uploadId, filter, lifersOnly, yearTickYear, countryTickCountry);
     const source = map.getSource("sightings") as maplibregl.VectorTileSource;
 
     // Check if URL actually changed
@@ -619,7 +634,7 @@ export function SightingsMap({
       bearing: bearing,
       pitch: pitch,
     });
-  }, [uploadId, filter, lifersOnly, yearTickYear]);
+  }, [uploadId, filter, lifersOnly, yearTickYear, countryTickCountry]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }

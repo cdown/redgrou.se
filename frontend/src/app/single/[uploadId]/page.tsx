@@ -33,6 +33,7 @@ import {
   UPLOAD_COUNT_ROUTE,
   FIELD_VALUES_ROUTE,
 } from "@/lib/generated/api_constants";
+import { getCountryName } from "@/lib/countries";
 
 type ViewMode = "map" | "table";
 
@@ -70,6 +71,8 @@ export default function UploadPage() {
   const [lifersOnly, setLifersOnly] = useState(false);
   const [yearTickYear, setYearTickYear] = useState<number | null>(null);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
+  const [countryTickCountry, setCountryTickCountry] = useState<string | null>(null);
+  const [availableCountries, setAvailableCountries] = useState<string[]>([]);
 
   const [editToken, setEditToken] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -107,7 +110,7 @@ export default function UploadPage() {
     updateTableTop();
     window.addEventListener("resize", updateTableTop);
     return () => window.removeEventListener("resize", updateTableTop);
-  }, [menuExpanded, availableYears.length]);
+  }, [menuExpanded, availableYears.length, availableCountries.length]);
 
   // Store token from URL in localStorage, then remove from URL bar to prevent
   // accidental sharing of the edit link when user copies the URL
@@ -157,6 +160,34 @@ export default function UploadPage() {
       .catch(() => {
         // Ignore errors, just don't show year selector
       });
+
+    // Fetch available countries for country tick filter
+    apiFetch(
+      buildApiUrl(FIELD_VALUES_ROUTE, {
+        upload_id: uploadId,
+        field: "country_code",
+      }),
+    )
+      .then((res) => {
+        if (res.ok) {
+          return res.json();
+        }
+        return { values: [] };
+      })
+      .then((data: { values: string[] }) => {
+        // Filter out null/empty values and sort by human-readable name
+        const countries = data.values
+          .filter((c) => c && c.trim() !== "")
+          .sort((a, b) => {
+            const nameA = getCountryName(a);
+            const nameB = getCountryName(b);
+            return nameA.localeCompare(nameB);
+          });
+        setAvailableCountries(countries);
+      })
+      .catch(() => {
+        // Ignore errors, just don't show country selector
+      });
   }, [uploadId]);
 
   useEffect(() => {
@@ -177,6 +208,10 @@ export default function UploadPage() {
       params.set("year_tick_year", String(yearTickYear));
     }
 
+    if (countryTickCountry !== null) {
+      params.set("country_tick_country", countryTickCountry);
+    }
+
     const url = `${buildApiUrl(UPLOAD_COUNT_ROUTE, { upload_id: uploadId })}?${params}`;
 
     apiFetch(url)
@@ -192,7 +227,7 @@ export default function UploadPage() {
       cancelled = true;
       setFilteredCount(null);
     };
-  }, [uploadId, filter, lifersOnly, yearTickYear]);
+  }, [uploadId, filter, lifersOnly, yearTickYear, countryTickCountry]);
 
   const handleCopyLink = useCallback(async () => {
     const url = window.location.origin + "/single/" + uploadId;
@@ -343,6 +378,7 @@ export default function UploadPage() {
           filter={filter}
           lifersOnly={lifersOnly}
           yearTickYear={yearTickYear}
+          countryTickCountry={countryTickCountry}
           onMapReady={(navigateFn) => {
             navigateToLocationRef.current = navigateFn;
             setMapReady(true);
@@ -377,6 +413,7 @@ export default function UploadPage() {
               filter={filter}
               lifersOnly={lifersOnly}
               yearTickYear={yearTickYear}
+              countryTickCountry={countryTickCountry}
               onNavigateToSighting={
                 mapReady && navigateToLocationRef.current
                   ? (sightingId: number, lat: number, lng: number) => {
@@ -415,15 +452,15 @@ export default function UploadPage() {
           filterOpen ? "opacity-0 pointer-events-none" : "opacity-100"
         }`}
       >
-        {/* Lifers and Year Tick filters - mutually exclusive */}
+        {/* Lifers, Year Tick, and Country Tick filters - mutually exclusive */}
         <div className="flex gap-2">
           <button
             onClick={() => {
               const newLifersOnly = !lifersOnly;
               setLifersOnly(newLifersOnly);
-              // Always clear year tick when enabling lifers to ensure mutual exclusivity
-              // (If disabling, year tick should already be null, but clear it anyway to be safe)
+              // Always clear year tick and country tick when enabling lifers to ensure mutual exclusivity
               setYearTickYear(null);
+              setCountryTickCountry(null);
             }}
             className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors shadow-lg ${
               lifersOnly
@@ -444,8 +481,9 @@ export default function UploadPage() {
                     ? parseInt(e.target.value, 10)
                     : null;
                   setYearTickYear(year);
-                  // Always clear lifers when changing year tick to ensure mutual exclusivity
+                  // Always clear lifers and country tick when changing year tick to ensure mutual exclusivity
                   setLifersOnly(false);
+                  setCountryTickCountry(null);
                 }}
                 className={`flex items-center gap-2 rounded-lg pl-9 pr-8 py-2 text-sm font-medium transition-colors shadow-lg cursor-pointer ${
                   yearTickYear
@@ -476,6 +514,51 @@ export default function UploadPage() {
                 <ChevronDown
                   className={`h-3 w-3 ${
                     yearTickYear ? "text-white" : "text-stone-400"
+                  }`}
+                />
+              </div>
+            </div>
+          )}
+          {availableCountries.length > 0 && (
+            <div className="relative">
+              <select
+                value={countryTickCountry || ""}
+                onChange={(e) => {
+                  const country = e.target.value || null;
+                  setCountryTickCountry(country);
+                  // Always clear lifers and year tick when changing country tick to ensure mutual exclusivity
+                  setLifersOnly(false);
+                  setYearTickYear(null);
+                }}
+                className={`flex items-center gap-2 rounded-lg pl-9 pr-8 py-2 text-sm font-medium transition-colors shadow-lg cursor-pointer ${
+                  countryTickCountry
+                    ? "bg-stone-900 text-white"
+                    : "bg-white text-stone-600 hover:bg-stone-50"
+                }`}
+                style={{ appearance: "none" }}
+              >
+                {countryTickCountry ? (
+                  <option value="">Clear</option>
+                ) : (
+                  <option value="">Country tick</option>
+                )}
+                {availableCountries.map((code) => (
+                  <option key={code} value={code}>
+                    {getCountryName(code)}
+                  </option>
+                ))}
+              </select>
+              <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                <Map
+                  className={`h-4 w-4 ${
+                    countryTickCountry ? "text-white" : "text-stone-600"
+                  }`}
+                />
+              </div>
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
+                <ChevronDown
+                  className={`h-3 w-3 ${
+                    countryTickCountry ? "text-white" : "text-stone-400"
                   }`}
                 />
               </div>

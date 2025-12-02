@@ -51,6 +51,7 @@ pub struct TileQuery {
     filter: Option<String>,
     lifers_only: Option<bool>,
     year_tick_year: Option<i32>,
+    country_tick_country: Option<String>,
 }
 
 pub async fn get_tile(
@@ -108,6 +109,16 @@ pub async fn get_tile(
         });
     }
 
+    // Add country_tick filter if requested
+    if let Some(country) = &query.country_tick_country {
+        filter_params.push(country.clone());
+        let country_tick_clause = " AND s.country_tick = 1 AND s.country_code = ?".to_string();
+        filter_clause = Some(match filter_clause {
+            Some(existing) => format!("{existing}{country_tick_clause}"),
+            None => country_tick_clause,
+        });
+    }
+
     // Use vis_rank-based sampling for efficient tile generation.
     // vis_rank is assigned at ingest time (0-MAX_VIS_RANK, where 0 = highest priority for lifers/year_ticks).
     // This turns O(NlogN) sorting operations into O(K) B-Tree range scans.
@@ -155,7 +166,8 @@ pub async fn get_tile(
             s.count,
             s.observed_at,
             s.lifer,
-            s.year_tick
+            s.year_tick,
+            s.country_tick
         FROM sightings AS s
         JOIN sightings_geo AS sg ON sg.id = s.id
         WHERE s.upload_id = ?{}
@@ -201,6 +213,7 @@ pub async fn get_tile(
         let observed_at: String = row.get("observed_at");
         let lifer: i32 = row.get("lifer");
         let year_tick: i32 = row.get("year_tick");
+        let country_tick: i32 = row.get("country_tick");
 
         let (tile_x, tile_y) = latlng_to_tile_coords(latitude, longitude, z, x, y);
 
@@ -226,6 +239,10 @@ pub async fn get_tile(
         feature.add_tag_string("observed_at", &observed_at);
         feature.add_tag_uint("lifer", u64::try_from(lifer.max(0)).unwrap_or(0));
         feature.add_tag_uint("year_tick", u64::try_from(year_tick.max(0)).unwrap_or(0));
+        feature.add_tag_uint(
+            "country_tick",
+            u64::try_from(country_tick.max(0)).unwrap_or(0),
+        );
 
         layer = feature.into_layer();
         point_count += 1;

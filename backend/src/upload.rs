@@ -222,7 +222,7 @@ where
     Ok(sink.total_rows())
 }
 
-// We compute lifer and year_tick ourselves rather than trusting the CSV.
+// We compute lifer, year_tick, and country_tick ourselves rather than trusting the CSV.
 // Birda data sometimes has these fields set incorrectly (e.g. lifers not marked as year ticks).
 async fn compute_lifer_and_year_tick(
     pool: &SqlitePool,
@@ -258,10 +258,26 @@ async fn compute_lifer_and_year_tick(
     )
     .await?;
 
-    // Boost visibility of lifers and year ticks (rank 0 = highest priority)
+    // A country tick is the first sighting of a species in each country
+    // Only compute for sightings that have a country_code
+    db::query_with_timeout(
+        sqlx::query(
+        "UPDATE sightings SET country_tick = 1 WHERE id IN (
+            SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY common_name, country_code ORDER BY observed_at) as rn
+                FROM sightings WHERE upload_id = ? AND country_code IS NOT NULL
+            ) WHERE rn = 1
+        )"
+        )
+        .bind(upload_id)
+        .execute(pool),
+    )
+    .await?;
+
+    // Boost visibility of lifers, year ticks, and country ticks (rank 0 = highest priority)
     // This ensures 'important' sightings are seen even at world-view zoom levels
     db::query_with_timeout(
-        sqlx::query("UPDATE sightings SET vis_rank = 0 WHERE upload_id = ? AND (lifer = 1 OR year_tick = 1)")
+        sqlx::query("UPDATE sightings SET vis_rank = 0 WHERE upload_id = ? AND (lifer = 1 OR year_tick = 1 OR country_tick = 1)")
             .bind(upload_id)
             .execute(pool),
     )

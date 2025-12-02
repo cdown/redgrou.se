@@ -1,4 +1,4 @@
-import { Calendar, Users, Check, Clock } from "lucide-react";
+import { Calendar, Users, Check, Clock, Map } from "lucide-react";
 import { sanitizeText, sanitizeUrl } from "@/lib/sanitize";
 
 const MAX_DESCRIPTION_LENGTH = 350;
@@ -60,6 +60,7 @@ interface SpeciesPopupProps {
   observedAt?: string;
   isLifer?: boolean;
   isYearTick?: boolean;
+  isCountryTick?: boolean;
 }
 
 export function SpeciesPopup({
@@ -69,6 +70,7 @@ export function SpeciesPopup({
   observedAt,
   isLifer,
   isYearTick,
+  isCountryTick,
 }: SpeciesPopupProps) {
   if (!info) {
     const dateDisplay = observedAt ? formatDate(observedAt) : "";
@@ -87,7 +89,7 @@ export function SpeciesPopup({
               <span>{sanitizeText(dateDisplay)}</span>
             </div>
           )}
-          {(isLifer || isYearTick) && (
+          {(isLifer || isYearTick || isCountryTick) && (
             <div className="mt-2 flex gap-1.5 flex-wrap">
               {isLifer && (
                 <div className="flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
@@ -99,6 +101,12 @@ export function SpeciesPopup({
                 <div className="flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
                   <Calendar className="h-3 w-3" />
                   <span>Year Tick</span>
+                </div>
+              )}
+              {isCountryTick && (
+                <div className="flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
+                  <Map className="h-3 w-3" />
+                  <span>Country Tick</span>
                 </div>
               )}
             </div>

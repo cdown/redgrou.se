@@ -44,6 +44,7 @@ pub struct SightingsQuery {
     group_by: Option<String>,
     lifers_only: Option<bool>,
     year_tick_year: Option<i32>,
+    country_tick_country: Option<String>,
 }
 
 #[derive(Debug, Serialize, TS, FromRow)]
@@ -147,6 +148,12 @@ pub async fn get_sightings(
     if let Some(year) = query.year_tick_year {
         filter_clause_parts.push("AND year_tick = 1 AND year = ?".to_string());
         filter_params.push(year.to_string());
+    }
+
+    // Add country_tick filter if requested
+    if let Some(country) = &query.country_tick_country {
+        filter_clause_parts.push("AND country_tick = 1 AND country_code = ?".to_string());
+        filter_params.push(country.clone());
     }
 
     let filter_clause_str = if filter_clause_parts.is_empty() {

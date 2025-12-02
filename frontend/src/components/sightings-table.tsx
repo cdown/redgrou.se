@@ -24,6 +24,7 @@ interface SightingsTableProps {
   filter: FilterGroup | null;
   lifersOnly: boolean;
   yearTickYear: number | null;
+  countryTickCountry: string | null;
   onNavigateToSighting?: (sightingId: number, lat: number, lng: number) => void;
 }
 
@@ -58,6 +59,7 @@ export function SightingsTable({
   filter,
   lifersOnly,
   yearTickYear,
+  countryTickCountry,
   onNavigateToSighting,
 }: SightingsTableProps) {
   const [sightings, setSightings] = useState<Sighting[]>([]);
@@ -99,6 +101,10 @@ export function SightingsTable({
 
       if (yearTickYear !== null) {
         params.set("year_tick_year", String(yearTickYear));
+      }
+
+      if (countryTickCountry !== null) {
+        params.set("country_tick_country", countryTickCountry);
       }
 
       try {
@@ -147,7 +153,7 @@ export function SightingsTable({
         setLoading(false);
       }
     },
-    [uploadId, filter, sortField, sortDir, groupBy, lifersOnly, yearTickYear],
+    [uploadId, filter, sortField, sortDir, groupBy, lifersOnly, yearTickYear, countryTickCountry],
   );
 
   useEffect(() => {
