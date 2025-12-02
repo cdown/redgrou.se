@@ -8,7 +8,7 @@ use axum::routing::{get, post, put};
 use axum::{BoxError, Json, Router};
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
@@ -157,6 +157,7 @@ async fn main() -> anyhow::Result<()> {
             get(get_upload).delete(upload::delete_upload),
         )
         .route(api_constants::UPLOAD_COUNT_ROUTE, get(get_filtered_count))
+        .route(api_constants::UPLOAD_BBOX_ROUTE, get(get_bbox))
         .route(
             api_constants::UPLOAD_SIGHTINGS_ROUTE,
             get(sightings::get_sightings),
@@ -661,6 +662,7 @@ struct CountQuery {
     filter: Option<String>,
     lifers_only: Option<bool>,
     year_tick_year: Option<i32>,
+    country_tick_country: Option<String>,
 }
 
 #[derive(Serialize, TS)]
@@ -706,6 +708,16 @@ async fn get_filtered_count(
         });
     }
 
+    // Add country_tick filter if requested
+    if let Some(country) = &query.country_tick_country {
+        params.push(country.clone());
+        let country_tick_clause = " AND country_tick = 1 AND country_code = ?".to_string();
+        filter_clause = Some(match filter_clause {
+            Some(existing) => format!("{existing}{country_tick_clause}"),
+            None => country_tick_clause,
+        });
+    }
+
     let sql = format!(
         "SELECT COUNT(*) as cnt FROM sightings WHERE upload_id = ?{}",
         filter_clause.unwrap_or_default()
@@ -721,6 +733,94 @@ async fn get_filtered_count(
         .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
     Ok(Json(CountResponse { count }))
+}
+
+#[derive(Serialize, TS)]
+#[ts(export)]
+struct BboxResponse {
+    min_lng: f64,
+    min_lat: f64,
+    max_lng: f64,
+    max_lat: f64,
+}
+
+async fn get_bbox(
+    State(pool): State<SqlitePool>,
+    Path(upload_id): Path<String>,
+    Query(query): Query<CountQuery>,
+) -> Result<Json<BboxResponse>, ApiError> {
+    let mut params: Vec<String> = vec![upload_id];
+
+    let mut filter_clause = if let Some(filter_json) = &query.filter {
+        let filter: FilterGroup = serde_json::from_str(filter_json)
+            .map_err(|_| ApiError::bad_request("Invalid filter JSON"))?;
+        filter
+            .validate()
+            .map_err(|e| ApiError::bad_request(e.message()))?;
+        filter.to_sql(&mut params).map(|sql| format!(" AND {sql}"))
+    } else {
+        None
+    };
+
+    // Add lifers_only filter if requested
+    if query.lifers_only == Some(true) {
+        let lifer_clause = " AND lifer = 1".to_string();
+        filter_clause = Some(match filter_clause {
+            Some(existing) => format!("{existing}{lifer_clause}"),
+            None => lifer_clause,
+        });
+    }
+
+    // Add year_tick filter if requested
+    if let Some(year) = query.year_tick_year {
+        params.push(year.to_string());
+        let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();
+        filter_clause = Some(match filter_clause {
+            Some(existing) => format!("{existing}{year_tick_clause}"),
+            None => year_tick_clause,
+        });
+    }
+
+    // Add country_tick filter if requested
+    if let Some(country) = &query.country_tick_country {
+        params.push(country.clone());
+        let country_tick_clause = " AND country_tick = 1 AND country_code = ?".to_string();
+        filter_clause = Some(match filter_clause {
+            Some(existing) => format!("{existing}{country_tick_clause}"),
+            None => country_tick_clause,
+        });
+    }
+
+    let sql = format!(
+        "SELECT MIN(longitude) as min_lng, MIN(latitude) as min_lat, MAX(longitude) as max_lng, MAX(latitude) as max_lat FROM sightings WHERE upload_id = ?{}",
+        filter_clause.unwrap_or_default()
+    );
+
+    let mut db_query = sqlx::query(&sql);
+    for param in &params {
+        db_query = db_query.bind(param);
+    }
+
+    let row = db::query_with_timeout(db_query.fetch_optional(&pool))
+        .await
+        .map_err(|e| e.into_api_error("getting bounding box", "Database error"))?
+        .ok_or_else(|| ApiError::not_found("No sightings found"))?;
+
+    let min_lng: Option<f64> = row.get("min_lng");
+    let min_lat: Option<f64> = row.get("min_lat");
+    let max_lng: Option<f64> = row.get("max_lng");
+    let max_lat: Option<f64> = row.get("max_lat");
+
+    if min_lng.is_none() || min_lat.is_none() || max_lng.is_none() || max_lat.is_none() {
+        return Err(ApiError::not_found("No sightings found"));
+    }
+
+    Ok(Json(BboxResponse {
+        min_lng: min_lng.unwrap(),
+        min_lat: min_lat.unwrap(),
+        max_lng: max_lng.unwrap(),
+        max_lat: max_lat.unwrap(),
+    }))
 }
 
 async fn fields_metadata() -> Json<Vec<FieldMetadata>> {

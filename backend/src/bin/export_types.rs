@@ -49,6 +49,7 @@ fn main() {
          export const UPLOAD_ROUTE = \"{}\";\n\
          export const UPLOAD_DETAILS_ROUTE = \"{}\";\n\
          export const UPLOAD_COUNT_ROUTE = \"{}\";\n\
+         export const UPLOAD_BBOX_ROUTE = \"{}\";\n\
          export const UPLOAD_SIGHTINGS_ROUTE = \"{}\";\n\
          export const TILE_ROUTE = \"{}\";\n\
          export const FIELDS_ROUTE = \"{}\";\n\
@@ -59,6 +60,7 @@ fn main() {
         api_constants::UPLOAD_ROUTE,
         api_constants::UPLOAD_DETAILS_ROUTE,
         api_constants::UPLOAD_COUNT_ROUTE,
+        api_constants::UPLOAD_BBOX_ROUTE,
         api_constants::UPLOAD_SIGHTINGS_ROUTE,
         api_constants::TILE_ROUTE,
         api_constants::FIELDS_ROUTE,

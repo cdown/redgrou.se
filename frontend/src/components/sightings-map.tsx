@@ -4,10 +4,10 @@ import { useRef, useEffect } from "react";
 import { createRoot, Root } from "react-dom/client";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { getApiUrl, buildApiUrl } from "@/lib/api";
+import { getApiUrl, buildApiUrl, apiFetch } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { fetchSpeciesInfo } from "@/lib/species-api";
-import { TILE_ROUTE } from "@/lib/generated/api_constants";
+import { TILE_ROUTE, UPLOAD_BBOX_ROUTE } from "@/lib/generated/api_constants";
 import { SpeciesPopup, SpeciesPopupLoading } from "@/components/species-popup";
 
 interface SightingsMapProps {
@@ -635,6 +635,53 @@ export function SightingsMap({
       pitch: pitch,
     });
   }, [uploadId, filter, lifersOnly, yearTickYear, countryTickCountry]);
+
+  // Zoom to bounding box when country tick is selected
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !countryTickCountry) {
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set("country_tick_country", countryTickCountry);
+    if (filter) {
+      params.set("filter", filterToJson(filter));
+    }
+    if (lifersOnly) {
+      params.set("lifers_only", "true");
+    }
+    if (yearTickYear !== null) {
+      params.set("year_tick_year", String(yearTickYear));
+    }
+
+    const url = `${buildApiUrl(UPLOAD_BBOX_ROUTE, { upload_id: uploadId })}?${params}`;
+
+    apiFetch(url)
+      .then((res) => {
+        if (!res.ok) {
+          return null;
+        }
+        return res.json();
+      })
+      .then((bbox: { min_lng: number; min_lat: number; max_lng: number; max_lat: number } | null) => {
+        if (bbox && map) {
+          map.fitBounds(
+            [
+              [bbox.min_lng, bbox.min_lat],
+              [bbox.max_lng, bbox.max_lat],
+            ],
+            {
+              padding: { top: 50, bottom: 50, left: 50, right: 50 },
+              maxZoom: 12,
+            }
+          );
+        }
+      })
+      .catch(() => {
+        // Ignore errors
+      });
+  }, [uploadId, countryTickCountry, filter, lifersOnly, yearTickYear]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
