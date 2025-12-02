@@ -248,9 +248,8 @@ fn get_field(
     field_name: &str,
     row_number: usize,
 ) -> Result<Option<String>, ApiError> {
-    let bytes = match idx.and_then(|i| record.get(i)) {
-        Some(bytes) => bytes,
-        None => return Ok(None),
+    let Some(bytes) = idx.and_then(|i| record.get(i)) else {
+        return Ok(None);
     };
 
     let value = std::str::from_utf8(bytes).map_err(|_| {
@@ -273,9 +272,8 @@ fn extract_year(date_str: &str) -> i32 {
 }
 
 fn get_country_code(lat: f64, lon: f64) -> String {
-    let latlon = match LatLon::new(lat, lon) {
-        Ok(ll) => ll,
-        Err(_) => return "XX".to_string(),
+    let Ok(latlon) = LatLon::new(lat, lon) else {
+        return "XX".to_string();
     };
 
     let ids = BOUNDARIES.ids(latlon);
@@ -288,9 +286,8 @@ fn get_country_code(lat: f64, lon: f64) -> String {
 }
 
 fn get_region_code(lat: f64, lon: f64) -> Option<String> {
-    let latlon = match LatLon::new(lat, lon) {
-        Ok(ll) => ll,
-        Err(_) => return None,
+    let Ok(latlon) = LatLon::new(lat, lon) else {
+        return None;
     };
 
     let ids = BOUNDARIES.ids(latlon);
@@ -306,17 +303,16 @@ fn parse_row(
     col_map: &ColumnMap,
     row_number: usize,
 ) -> Result<Option<SightingRow>, ApiError> {
-    let sighting_uuid = match get_field(record, col_map.sighting_id, COL_SIGHTING_ID, row_number)? {
-        Some(value) => value,
-        None => return Ok(None),
+    let Some(sighting_uuid) = get_field(record, col_map.sighting_id, COL_SIGHTING_ID, row_number)?
+    else {
+        return Ok(None);
     };
-    let common_name = match get_field(record, col_map.common_name, COL_COMMON_NAME, row_number)? {
-        Some(value) => value,
-        None => return Ok(None),
+    let Some(common_name) = get_field(record, col_map.common_name, COL_COMMON_NAME, row_number)?
+    else {
+        return Ok(None);
     };
-    let observed_at = match get_field(record, col_map.date, COL_DATE, row_number)? {
-        Some(value) => value,
-        None => return Ok(None),
+    let Some(observed_at) = get_field(record, col_map.date, COL_DATE, row_number)? else {
+        return Ok(None);
     };
 
     let latitude = match get_field(record, col_map.latitude, COL_LATITUDE, row_number)? {
@@ -660,11 +656,8 @@ pub async fn update_csv(
     headers: axum::http::HeaderMap,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
-    let token = match extract_edit_token(&headers) {
-        Some(t) => t,
-        None => {
-            return ApiError::unauthorised("Missing edit token").into_response();
-        }
+    let Some(token) = extract_edit_token(&headers) else {
+        return ApiError::unauthorised("Missing edit token").into_response();
     };
 
     match verify_upload_access(&pool, &upload_id, &token).await {
@@ -755,11 +748,8 @@ pub async fn delete_upload(
     Path(upload_id): Path<String>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-    let token = match extract_edit_token(&headers) {
-        Some(t) => t,
-        None => {
-            return ApiError::unauthorised("Missing edit token").into_response();
-        }
+    let Some(token) = extract_edit_token(&headers) else {
+        return ApiError::unauthorised("Missing edit token").into_response();
     };
 
     match verify_upload_access(&pool, &upload_id, &token).await {
