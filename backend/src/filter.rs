@@ -54,12 +54,12 @@ impl FilterField {
     /// Returns the SQL column name for this field.
     pub fn as_sql_column(&self) -> &'static str {
         match self {
-            FilterField::CommonName => "common_name",
-            FilterField::ScientificName => "scientific_name",
-            FilterField::CountryCode => "country_code",
-            FilterField::Count => "count",
-            FilterField::ObservedAt => "observed_at",
-            FilterField::Year => "year",
+            Self::CommonName => "common_name",
+            Self::ScientificName => "scientific_name",
+            Self::CountryCode => "country_code",
+            Self::Count => "count",
+            Self::ObservedAt => "observed_at",
+            Self::Year => "year",
         }
     }
 
@@ -154,8 +154,8 @@ impl FilterGroup {
 impl Rule {
     fn to_sql(&self, params: &mut Vec<String>) -> Option<String> {
         match self {
-            Rule::Condition(c) => c.to_sql(params),
-            Rule::Group(g) => g.to_sql(params),
+            Self::Condition(c) => c.to_sql(params),
+            Self::Group(g) => g.to_sql(params),
         }
     }
 }

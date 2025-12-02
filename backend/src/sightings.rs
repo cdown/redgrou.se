@@ -24,12 +24,12 @@ pub enum SortField {
 impl SortField {
     pub fn as_sql_column(&self) -> &'static str {
         match self {
-            SortField::CommonName => "common_name",
-            SortField::ScientificName => "scientific_name",
-            SortField::Count => "count",
-            SortField::SpeciesCount => "species_count",
-            SortField::CountryCode => "country_code",
-            SortField::ObservedAt => "observed_at",
+            Self::CommonName => "common_name",
+            Self::ScientificName => "scientific_name",
+            Self::Count => "count",
+            Self::SpeciesCount => "species_count",
+            Self::CountryCode => "country_code",
+            Self::ObservedAt => "observed_at",
         }
     }
 }

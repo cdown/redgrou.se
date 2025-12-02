@@ -64,11 +64,11 @@ where
 impl DbQueryError {
     pub fn into_api_error(self, context: &'static str, client_message: &'static str) -> ApiError {
         match self {
-            DbQueryError::Timeout => {
+            Self::Timeout => {
                 error!("Database timeout while {}", context);
                 ApiError::service_unavailable(DB_TIMEOUT_MESSAGE)
             }
-            DbQueryError::Sqlx(err) => {
+            Self::Sqlx(err) => {
                 error!("Database error while {}: {}", context, err);
                 ApiError::internal(client_message)
             }
