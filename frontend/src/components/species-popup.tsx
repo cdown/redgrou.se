@@ -1,5 +1,4 @@
 import { Calendar, Users, Check, Clock } from "lucide-react";
-import Image from "next/image";
 import { sanitizeText, sanitizeUrl } from "@/lib/sanitize";
 
 const MAX_DESCRIPTION_LENGTH = 350;
@@ -126,11 +125,14 @@ export function SpeciesPopup({
     <div className="w-[300px] overflow-hidden rounded-lg font-sans">
       {safePhotoUrl ? (
         <div className="relative">
-          <Image
+          {/* Using regular img tag instead of Next.js Image because:
+              - Images are already optimized by iNaturalist and served from their CDN
+              - No server-side optimization needed, avoiding server load and SSRF risks
+              - Images load directly client-side from iNaturalist's fast CDN */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
             src={safePhotoUrl}
             alt={safeCommonName}
-            width={300}
-            height={160}
             className="h-40 w-full object-cover"
           />
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2 px-3">
