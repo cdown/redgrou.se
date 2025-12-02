@@ -3,8 +3,11 @@ use crate::error::ApiError;
 use country_boundaries::{CountryBoundaries, LatLon, BOUNDARIES_ODBL_360X180};
 use csv_async::{ByteRecord, StringRecord};
 use once_cell::sync::Lazy;
+use serde::Serialize;
+use smartstring::{LazyCompact, SmartString};
 use sqlx::{Acquire, QueryBuilder, Sqlite, Transaction};
 use tracing::error;
+use uuid::Uuid;
 
 // Initialised once to avoid reloading the dataset on every request.
 // Uses point-in-polygon testing with OpenStreetMap boundaries data.
@@ -39,18 +42,24 @@ pub struct ParsedSighting {
     pub observed_at: String,
 }
 
+/// Type alias for stack-allocated strings (inline up to 23 bytes on 64-bit)
+type SString = SmartString<LazyCompact>;
+
 /// Fully processed sighting ready for database insertion
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProcessedSighting {
-    pub sighting_uuid: String,
-    pub common_name: String,
-    pub scientific_name: Option<String>,
+    // UUID: 16 bytes on stack (no heap allocation, no destructor overhead)
+    pub sighting_uuid: Uuid,
+    // Names & codes: stack-allocated if < 24 bytes ("Blue Tit", "US", "US-NY" fit inline)
+    pub common_name: SString,
+    pub scientific_name: Option<SString>,
+    pub country_code: SString,
+    pub region_code: Option<SString>,
+    // ISO dates "YYYY-MM-DD" are 10 bytes -> fit inline perfectly
+    pub observed_at: SString,
     pub count: i32,
     pub latitude: f64,
     pub longitude: f64,
-    pub country_code: String,
-    pub region_code: Option<String>,
-    pub observed_at: String,
     pub year: i32,
 }
 
@@ -190,16 +199,19 @@ impl Geocoder {
             .zip(geocode_results)
             .map(|(sighting, (country_code, region_code))| {
                 let year = extract_year(&sighting.observed_at);
+                // Parse UUID from CSV string (validated during CSV parsing)
+                let sighting_uuid = Uuid::parse_str(&sighting.sighting_uuid)
+                    .expect("Invalid UUID format (should be caught during CSV parsing)");
                 ProcessedSighting {
-                    sighting_uuid: sighting.sighting_uuid,
-                    common_name: sighting.common_name,
-                    scientific_name: sighting.scientific_name,
+                    sighting_uuid,
+                    common_name: sighting.common_name.into(),
+                    scientific_name: sighting.scientific_name.map(Into::into),
                     count: sighting.count,
                     latitude: sighting.latitude,
                     longitude: sighting.longitude,
-                    country_code,
-                    region_code,
-                    observed_at: sighting.observed_at,
+                    country_code: country_code.into(),
+                    region_code: region_code.map(Into::into),
+                    observed_at: sighting.observed_at.into(),
                     year,
                 }
             })
@@ -286,15 +298,15 @@ where
 
     query_builder.push_values(rows, |mut b, row| {
         b.push_bind(upload_id)
-            .push_bind(&row.sighting_uuid)
-            .push_bind(&row.common_name)
-            .push_bind(&row.scientific_name)
+            .push_bind(row.sighting_uuid.to_string())
+            .push_bind(row.common_name.as_str())
+            .push_bind(row.scientific_name.as_ref().map(|s| s.as_str()))
             .push_bind(row.count)
             .push_bind(row.latitude)
             .push_bind(row.longitude)
-            .push_bind(&row.country_code)
-            .push_bind(&row.region_code)
-            .push_bind(&row.observed_at)
+            .push_bind(row.country_code.as_str())
+            .push_bind(row.region_code.as_ref().map(|s| s.as_str()))
+            .push_bind(row.observed_at.as_str())
             .push_bind(row.year);
     });
 
@@ -409,9 +421,9 @@ fn extract_year(date_str: &str) -> i32 {
     date_str.get(0..4).and_then(|y| y.parse().ok()).unwrap_or(0)
 }
 
-fn get_country_code(lat: f64, lon: f64) -> String {
+fn get_country_code(lat: f64, lon: f64) -> SString {
     let Ok(latlon) = LatLon::new(lat, lon) else {
-        return "XX".to_string();
+        return "XX".into();
     };
 
     let ids = BOUNDARIES.ids(latlon);
@@ -419,10 +431,10 @@ fn get_country_code(lat: f64, lon: f64) -> String {
     ids.iter()
         .find(|id| !id.contains('-'))
         .or_else(|| ids.first())
-        .map_or_else(|| "XX".to_string(), ToString::to_string)
+        .map_or_else(|| "XX".into(), |s| (*s).into())
 }
 
-fn get_region_code(lat: f64, lon: f64) -> Option<String> {
+fn get_region_code(lat: f64, lon: f64) -> Option<SString> {
     let Ok(latlon) = LatLon::new(lat, lon) else {
         return None;
     };
@@ -430,7 +442,5 @@ fn get_region_code(lat: f64, lon: f64) -> Option<String> {
     let ids = BOUNDARIES.ids(latlon);
     // ids returns e.g. ["US-TX", "US"] or ["SG"] - we want the code with a dash (region/subdivision)
     // If no subdivision exists (like Singapore), return None
-    ids.iter()
-        .find(|id| id.contains('-'))
-        .map(ToString::to_string)
+    ids.iter().find(|id| id.contains('-')).map(|s| (*s).into())
 }
