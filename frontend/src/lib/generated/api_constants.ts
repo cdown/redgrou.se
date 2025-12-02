@@ -2,7 +2,7 @@
 // Do not edit manually
 
 export const HEALTH_ROUTE = "/health";
-export const UPLOAD_ROUTE = "/upload";
+export const UPLOAD_ROUTE = "/api/uploads";
 export const UPLOAD_DETAILS_ROUTE = "/api/uploads/{upload_id}";
 export const UPLOAD_COUNT_ROUTE = "/api/uploads/{upload_id}/count";
 export const UPLOAD_SIGHTINGS_ROUTE = "/api/uploads/{upload_id}/sightings";
