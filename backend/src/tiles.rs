@@ -114,7 +114,7 @@ pub async fn get_tile(
     }
 
     let sql = format!(
-        r#"
+        r"
         SELECT
             s.id,
             s.latitude,
@@ -131,7 +131,7 @@ pub async fn get_tile(
           AND sg.max_lat >= ? AND sg.min_lat <= ?
           AND sg.max_lon >= ? AND sg.min_lon <= ?
         {}
-        "#,
+        ",
         filter_clause.unwrap_or_default()
     );
 

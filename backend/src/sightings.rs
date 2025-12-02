@@ -322,12 +322,12 @@ pub async fn get_sightings(
         .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
     let select_sql = format!(
-        r#"SELECT id, common_name, scientific_name, count, latitude, longitude,
-           country_code, region_code, observed_at
-           FROM sightings
-           WHERE upload_id = ?{}
-           ORDER BY {} {}
-           LIMIT ? OFFSET ?"#,
+        r"SELECT id, common_name, scientific_name, count, latitude, longitude,
+            country_code, region_code, observed_at
+            FROM sightings
+            WHERE upload_id = ?{}
+            ORDER BY {} {}
+            LIMIT ? OFFSET ?",
         filter_clause.as_deref().unwrap_or(""),
         sort_field,
         sort_dir
