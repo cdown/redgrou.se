@@ -297,11 +297,11 @@ fn get_region_code(lat: f64, lon: f64) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn parse_row(
+fn parse_row_without_geocode(
     record: &csv_async::ByteRecord,
     col_map: &ColumnMap,
     row_number: usize,
-) -> Result<Option<SightingRow>, ApiError> {
+) -> Result<Option<(String, String, String, f64, f64, i32, Option<String>)>, ApiError> {
     let Some(sighting_uuid) = get_field(record, col_map.sighting_id, COL_SIGHTING_ID, row_number)?
     else {
         return Ok(None);
@@ -329,32 +329,45 @@ fn parse_row(
         None => return Ok(None),
     };
 
-    let country_code = get_country_code(latitude, longitude);
-    let region_code = get_region_code(latitude, longitude);
-
     let count: i32 = get_field(record, col_map.count, COL_COUNT, row_number)?
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
 
-    let year = extract_year(&observed_at);
+    let scientific_name = get_field(
+        record,
+        col_map.scientific_name,
+        COL_SCIENTIFIC_NAME,
+        row_number,
+    )?;
 
-    Ok(Some(SightingRow {
+    Ok(Some((
         sighting_uuid,
         common_name,
-        scientific_name: get_field(
-            record,
-            col_map.scientific_name,
-            COL_SCIENTIFIC_NAME,
-            row_number,
-        )?,
-        count,
+        observed_at,
         latitude,
         longitude,
-        country_code,
-        region_code,
-        observed_at,
-        year,
-    }))
+        count,
+        scientific_name,
+    )))
+}
+
+async fn geocode_batch(coords: Vec<(f64, f64)>) -> Result<Vec<(String, Option<String>)>, ApiError> {
+    let results = tokio::task::spawn_blocking(move || {
+        coords
+            .into_iter()
+            .map(|(lat, lon)| {
+                let country_code = get_country_code(lat, lon);
+                let region_code = get_region_code(lat, lon);
+                (country_code, region_code)
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| {
+        error!("Geocoding task join error: {}", e);
+        ApiError::internal("Geocoding error")
+    })?;
+    Ok(results)
 }
 
 async fn insert_batch<'e, E>(
@@ -463,6 +476,7 @@ where
     let mut total_rows = 0usize;
     let mut record = csv_async::ByteRecord::new();
     let mut row_number = 1usize;
+    let mut pending_rows: Vec<(String, String, String, f64, f64, i32, Option<String>)> = Vec::new();
 
     while csv_reader
         .read_byte_record(&mut record)
@@ -470,18 +484,108 @@ where
         .map_err(|err| map_csv_error(err, "Failed to read CSV row", "Invalid CSV data"))?
     {
         enforce_record_limits(&record, row_number)?;
-        if let Some(row) = parse_row(&record, &col_map, row_number)? {
-            batch.push(row);
+        if let Some((
+            sighting_uuid,
+            common_name,
+            observed_at,
+            latitude,
+            longitude,
+            count,
+            scientific_name,
+        )) = parse_row_without_geocode(&record, &col_map, row_number)?
+        {
+            pending_rows.push((
+                sighting_uuid,
+                common_name,
+                observed_at,
+                latitude,
+                longitude,
+                count,
+                scientific_name,
+            ));
+
+            // Geocode in batches to avoid blocking the async runtime
+            if pending_rows.len() >= BATCH_SIZE {
+                let coords: Vec<(f64, f64)> = pending_rows
+                    .iter()
+                    .map(|(_, _, _, lat, lon, _, _)| (*lat, *lon))
+                    .collect();
+                let geocode_results = geocode_batch(coords).await?;
+
+                for (
+                    (
+                        sighting_uuid,
+                        common_name,
+                        observed_at,
+                        latitude,
+                        longitude,
+                        count,
+                        scientific_name,
+                    ),
+                    (country_code, region_code),
+                ) in pending_rows.drain(..).zip(geocode_results)
+                {
+                    let year = extract_year(&observed_at);
+                    batch.push(SightingRow {
+                        sighting_uuid,
+                        common_name,
+                        scientific_name,
+                        count,
+                        latitude,
+                        longitude,
+                        country_code,
+                        region_code,
+                        observed_at,
+                        year,
+                    });
+
+                    if total_rows + batch.len() > MAX_UPLOAD_ROWS {
+                        return Err(ApiError::bad_request(format!(
+                            "CSV exceeds {MAX_UPLOAD_ROWS} row limit"
+                        )));
+                    }
+                    if batch.len() >= BATCH_SIZE {
+                        flush_batch(&mut tx, upload_id, &mut batch, &mut total_rows).await?;
+                    }
+                }
+            }
+        }
+        row_number += 1;
+    }
+
+    // Process remaining pending rows
+    if !pending_rows.is_empty() {
+        let coords: Vec<(f64, f64)> = pending_rows
+            .iter()
+            .map(|(_, _, _, lat, lon, _, _)| (*lat, *lon))
+            .collect();
+        let geocode_results = geocode_batch(coords).await?;
+
+        for (
+            (sighting_uuid, common_name, observed_at, latitude, longitude, count, scientific_name),
+            (country_code, region_code),
+        ) in pending_rows.into_iter().zip(geocode_results)
+        {
+            let year = extract_year(&observed_at);
+            batch.push(SightingRow {
+                sighting_uuid,
+                common_name,
+                scientific_name,
+                count,
+                latitude,
+                longitude,
+                country_code,
+                region_code,
+                observed_at,
+                year,
+            });
+
             if total_rows + batch.len() > MAX_UPLOAD_ROWS {
                 return Err(ApiError::bad_request(format!(
                     "CSV exceeds {MAX_UPLOAD_ROWS} row limit"
                 )));
             }
-            if batch.len() >= BATCH_SIZE {
-                flush_batch(&mut tx, upload_id, &mut batch, &mut total_rows).await?;
-            }
         }
-        row_number += 1;
     }
 
     flush_batch(&mut tx, upload_id, &mut batch, &mut total_rows).await?;
