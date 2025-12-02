@@ -5,7 +5,7 @@ use csv_async::{ByteRecord, StringRecord};
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use smartstring::{LazyCompact, SmartString};
-use sqlx::{Acquire, QueryBuilder, Sqlite, Transaction};
+use sqlx::{Acquire, Executor, Sqlite, Transaction};
 use tracing::error;
 use uuid::Uuid;
 
@@ -286,31 +286,47 @@ async fn insert_batch<'e, E>(
     rows: &[ProcessedSighting],
 ) -> Result<(), DbQueryError>
 where
-    E: sqlx::Executor<'e, Database = Sqlite>,
+    E: Executor<'e, Database = Sqlite>,
 {
     if rows.is_empty() {
         return Ok(());
     }
 
-    let mut query_builder = QueryBuilder::new(
-        "INSERT INTO sightings (upload_id, sighting_uuid, common_name, scientific_name, count, latitude, longitude, country_code, region_code, observed_at, year) "
-    );
+    // Instead of calling SQLite binding functions 10,000 times (1k rows * 10 cols), we serialize
+    // the whole batch to RAM once. This removes a bottleneck on push_bind/push_values...
+    let json_batch = serde_json::to_string(rows)
+        .map_err(|e| sqlx::Error::Protocol(format!("Batch serialization error: {}", e).into()))?;
 
-    query_builder.push_values(rows, |mut b, row| {
-        b.push_bind(upload_id)
-            .push_bind(row.sighting_uuid.to_string())
-            .push_bind(row.common_name.as_str())
-            .push_bind(row.scientific_name.as_ref().map(|s| s.as_str()))
-            .push_bind(row.count)
-            .push_bind(row.latitude)
-            .push_bind(row.longitude)
-            .push_bind(row.country_code.as_str())
-            .push_bind(row.region_code.as_ref().map(|s| s.as_str()))
-            .push_bind(row.observed_at.as_str())
-            .push_bind(row.year);
-    });
+    // ...and we pass the upload_id once (?1) and the huge JSON string once (?2).
+    let sql = r#"
+    INSERT INTO sightings (
+        upload_id, sighting_uuid, common_name, scientific_name,
+        count, latitude, longitude, country_code,
+        region_code, observed_at, year, lifer, year_tick
+    )
+    SELECT
+        ?1,
+        value->>'sighting_uuid',
+        value->>'common_name',
+        value->>'scientific_name',
+        CAST(value->>'count' AS INTEGER),
+        CAST(value->>'latitude' AS REAL),
+        CAST(value->>'longitude' AS REAL),
+        value->>'country_code',
+        value->>'region_code',
+        value->>'observed_at',
+        CAST(value->>'year' AS INTEGER),
+        0, 0
+    FROM json_each(?2)
+    "#;
 
-    db::query_with_timeout(query_builder.build().execute(executor)).await?;
+    db::query_with_timeout(
+        sqlx::query(sql)
+            .bind(upload_id)
+            .bind(json_batch)
+            .execute(executor),
+    )
+    .await?;
     Ok(())
 }
 
