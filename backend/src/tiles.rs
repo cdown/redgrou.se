@@ -65,6 +65,10 @@ pub async fn get_tile(
 
     let (lon_min, lat_min, lon_max, lat_max) = tile_to_bbox(z, x, y);
 
+    // Calculate tile center for distance-based ordering
+    let center_lon = (lon_min + lon_max) / 2.0;
+    let center_lat = (lat_min + lat_max) / 2.0;
+
     // TODO: Currently we query every point for every tile request, regardless of zoom level.
     // For small datasets (~1.5k points), this means we re-send the same points as the user zooms in,
     // which is bandwidth-wasteful but functionally correct.
@@ -114,8 +118,17 @@ pub async fn get_tile(
     }
 
     // Limit points returned at low zoom levels to prevent memory spikes.
-    // At z=0-4, a single tile can contain 100k+ points. Limiting to 10k
-    // prevents excessive memory usage and slow serialization.
+    // At z=0-4, a single tile can contain 100k+ points. Limiting prevents
+    // excessive memory usage and slow serialization.
+    //
+    // Use grid-based spatial sampling at low zoom levels to ensure coverage
+    // across the entire tile. Divide tile into grid cells and sample one point
+    // per cell. This prevents missing isolated points at tile edges while still
+    // limiting total points. Order by ID within each cell for deterministic results.
+    //
+    // At higher zoom levels, order by distance from center for better performance
+    // (fewer points, simpler query).
+    let use_grid_sampling = z <= 7;
     let max_points = match z {
         0..=2 => 5000,  // Very low zoom: 5k points max
         3..=4 => 10000, // Low zoom: 10k points max
@@ -123,39 +136,127 @@ pub async fn get_tile(
         _ => 100000,    // Higher zoom: 100k points max (effectively unlimited)
     };
 
-    let sql = format!(
-        r"
-        SELECT
-            s.id,
-            s.latitude,
-            s.longitude,
-            s.common_name,
-            s.scientific_name,
-            s.count,
-            s.observed_at,
-            s.lifer,
-            s.year_tick
-        FROM sightings AS s
-        JOIN sightings_geo AS sg ON sg.id = s.id
-        WHERE s.upload_id = ?
-          AND sg.max_lat >= ? AND sg.min_lat <= ?
-          AND sg.max_lon >= ? AND sg.min_lon <= ?
-        {}
-        LIMIT ?
-        ",
-        filter_clause.unwrap_or_default()
-    );
+    // Grid resolution: divide tile into roughly sqrt(max_points) cells per dimension
+    // This ensures we get approximately one point per grid cell
+    let grid_size = if use_grid_sampling {
+        (max_points as f64).sqrt().ceil() as u32
+    } else {
+        0
+    };
 
-    let mut db_query = sqlx::query(&sql)
-        .bind(&upload_id)
-        .bind(lat_min)
-        .bind(lat_max)
-        .bind(lon_min)
-        .bind(lon_max);
-    for param in &filter_params {
-        db_query = db_query.bind(param);
+    let lat_step = if grid_size > 0 {
+        (lat_max - lat_min) / f64::from(grid_size)
+    } else {
+        0.0
+    };
+    let lon_step = if grid_size > 0 {
+        (lon_max - lon_min) / f64::from(grid_size)
+    } else {
+        0.0
+    };
+
+    let sql = if use_grid_sampling {
+        // Grid-based sampling: assign points to grid cells, take one per cell
+        // Order by ID within each cell for deterministic results (not RANDOM())
+        format!(
+            r"
+            SELECT
+                s.id,
+                s.latitude,
+                s.longitude,
+                s.common_name,
+                s.scientific_name,
+                s.count,
+                s.observed_at,
+                s.lifer,
+                s.year_tick
+            FROM (
+                SELECT
+                    s.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY
+                            CAST((s.latitude - ?) / ? AS INTEGER),
+                            CAST((s.longitude - ?) / ? AS INTEGER)
+                        ORDER BY s.id
+                    ) AS rn
+                FROM sightings AS s
+                JOIN sightings_geo AS sg ON sg.id = s.id
+                WHERE s.upload_id = ?
+                  AND sg.max_lat >= ? AND sg.min_lat <= ?
+                  AND sg.max_lon >= ? AND sg.min_lon <= ?
+                {}
+            ) AS s
+            WHERE rn = 1
+            LIMIT ?
+            ",
+            filter_clause.unwrap_or_default()
+        )
+    } else {
+        // High zoom: order by distance from center for spatial distribution
+        format!(
+            r"
+            SELECT
+                s.id,
+                s.latitude,
+                s.longitude,
+                s.common_name,
+                s.scientific_name,
+                s.count,
+                s.observed_at,
+                s.lifer,
+                s.year_tick
+            FROM sightings AS s
+            JOIN sightings_geo AS sg ON sg.id = s.id
+            WHERE s.upload_id = ?
+              AND sg.max_lat >= ? AND sg.min_lat <= ?
+              AND sg.max_lon >= ? AND sg.min_lon <= ?
+            {}
+            ORDER BY
+                ((s.latitude - ?) * (s.latitude - ?)) +
+                ((s.longitude - ?) * (s.longitude - ?))
+            LIMIT ?
+            ",
+            filter_clause.unwrap_or_default()
+        )
+    };
+
+    let mut db_query = sqlx::query(&sql);
+
+    if use_grid_sampling {
+        // Grid sampling: bind grid parameters (lat_min, lat_step, lon_min, lon_step for grid calc)
+        db_query = db_query
+            .bind(lat_min) // for grid cell calculation
+            .bind(lat_step)
+            .bind(lon_min)
+            .bind(lon_step)
+            .bind(&upload_id)
+            .bind(lat_min) // for bbox filter
+            .bind(lat_max)
+            .bind(lon_min)
+            .bind(lon_max);
+        for param in &filter_params {
+            db_query = db_query.bind(param);
+        }
+        db_query = db_query.bind(i64::from(max_points));
+    } else {
+        // Distance ordering: bind bbox and center
+        db_query = db_query
+            .bind(&upload_id)
+            .bind(lat_min)
+            .bind(lat_max)
+            .bind(lon_min)
+            .bind(lon_max);
+        for param in &filter_params {
+            db_query = db_query.bind(param);
+        }
+        // Bind tile center coordinates for distance ordering (lat, lat, lon, lon)
+        db_query = db_query
+            .bind(center_lat)
+            .bind(center_lat)
+            .bind(center_lon)
+            .bind(center_lon);
+        db_query = db_query.bind(i64::from(max_points));
     }
-    db_query = db_query.bind(i64::from(max_points));
 
     let rows = db::query_with_timeout(db_query.fetch_all(&pool))
         .await
