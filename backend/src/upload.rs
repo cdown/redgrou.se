@@ -583,7 +583,7 @@ pub async fn upload_csv(
 
         if let Err(e) = db::query_with_timeout(
             sqlx::query("UPDATE uploads SET row_count = ? WHERE id = ?")
-                .bind(total_rows as i64)
+                .bind(i64::try_from(total_rows).unwrap_or(i64::MAX))
                 .bind(&upload_id)
                 .execute(&pool),
         )
@@ -706,7 +706,7 @@ pub async fn update_csv(
 
         if let Err(e) = db::query_with_timeout(
             sqlx::query("UPDATE uploads SET row_count = ?, filename = ? WHERE id = ?")
-                .bind(total_rows as i64)
+                .bind(i64::try_from(total_rows).unwrap_or(i64::MAX))
                 .bind(&filename)
                 .bind(&upload_id)
                 .execute(&pool),

@@ -13,16 +13,16 @@ use crate::filter::FilterGroup;
 const TILE_EXTENT: u32 = 4096;
 
 fn tile_to_bbox(z: u32, x: u32, y: u32) -> (f64, f64, f64, f64) {
-    let n = 2_f64.powi(z as i32);
+    let n = 2_f64.powi(i32::try_from(z).unwrap_or(i32::MAX));
 
-    let lon_min = (x as f64 / n) * 360.0 - 180.0;
-    let lon_max = ((x + 1) as f64 / n) * 360.0 - 180.0;
+    let lon_min = (f64::from(x) / n) * 360.0 - 180.0;
+    let lon_max = (f64::from(x + 1) / n) * 360.0 - 180.0;
 
-    let lat_max = (std::f64::consts::PI * (1.0 - 2.0 * y as f64 / n))
+    let lat_max = (std::f64::consts::PI * (1.0 - 2.0 * f64::from(y) / n))
         .sinh()
         .atan()
         .to_degrees();
-    let lat_min = (std::f64::consts::PI * (1.0 - 2.0 * (y + 1) as f64 / n))
+    let lat_min = (std::f64::consts::PI * (1.0 - 2.0 * f64::from(y + 1) / n))
         .sinh()
         .atan()
         .to_degrees();
@@ -31,15 +31,15 @@ fn tile_to_bbox(z: u32, x: u32, y: u32) -> (f64, f64, f64, f64) {
 }
 
 fn latlng_to_tile_coords(lat: f64, lng: f64, z: u32, x: u32, y: u32) -> (f64, f64) {
-    let n = 2_f64.powi(z as i32);
+    let n = 2_f64.powi(i32::try_from(z).unwrap_or(i32::MAX));
 
     let world_x = (lng + 180.0) / 360.0 * n;
     let lat_rad = lat.to_radians();
     let world_y =
         (1.0 - (lat_rad.tan() + 1.0 / lat_rad.cos()).ln() / std::f64::consts::PI) / 2.0 * n;
 
-    let tile_x = (world_x - x as f64) * TILE_EXTENT as f64;
-    let tile_y = (world_y - y as f64) * TILE_EXTENT as f64;
+    let tile_x = (world_x - f64::from(x)) * f64::from(TILE_EXTENT);
+    let tile_y = (world_y - f64::from(y)) * f64::from(TILE_EXTENT);
 
     (tile_x, tile_y)
 }
@@ -179,15 +179,15 @@ pub async fn get_tile(
         };
 
         let mut feature = layer.into_feature(geom_data);
-        feature.set_id(id as u64);
+        feature.set_id(u64::try_from(id).unwrap_or(0));
         feature.add_tag_string("name", &common_name);
-        feature.add_tag_uint("count", count as u64);
+        feature.add_tag_uint("count", u64::try_from(count.max(0)).unwrap_or(0));
         if let Some(scientific_name) = scientific_name {
             feature.add_tag_string("scientific_name", &scientific_name);
         }
         feature.add_tag_string("observed_at", &observed_at);
-        feature.add_tag_uint("lifer", lifer as u64);
-        feature.add_tag_uint("year_tick", year_tick as u64);
+        feature.add_tag_uint("lifer", u64::try_from(lifer.max(0)).unwrap_or(0));
+        feature.add_tag_uint("year_tick", u64::try_from(year_tick.max(0)).unwrap_or(0));
 
         layer = feature.into_layer();
         point_count += 1;

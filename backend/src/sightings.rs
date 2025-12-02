@@ -115,8 +115,9 @@ pub async fn get_sightings(
         .page_size
         .unwrap_or(api_constants::DEFAULT_PAGE_SIZE)
         .min(api_constants::MAX_PAGE_SIZE);
-    let offset = ((page as u64 - 1) * page_size as u64).min(i64::MAX as u64);
-    let offset_i64 = offset as i64;
+    let offset = ((u64::from(page) - 1) * u64::from(page_size))
+        .min(u64::try_from(i64::MAX).unwrap_or(u64::MAX));
+    let offset_i64 = i64::try_from(offset).unwrap_or(i64::MAX);
 
     let mut params: Vec<String> = vec![upload_id.clone()];
 
@@ -247,7 +248,7 @@ pub async fn get_sightings(
         for param in &params {
             select_query = select_query.bind(param);
         }
-        select_query = select_query.bind(page_size as i64);
+        select_query = select_query.bind(i64::from(page_size));
         select_query = select_query.bind(offset_i64);
 
         let rows = db::query_with_timeout(select_query.fetch_all(&pool))
@@ -285,7 +286,7 @@ pub async fn get_sightings(
             groups.push(grouped);
         }
 
-        let total_pages = ((total as f64) / (page_size as f64)).ceil() as u32;
+        let total_pages = ((total as f64) / (f64::from(page_size))).ceil() as u32;
 
         return Ok(Json(SightingsResponse {
             sightings: None,
