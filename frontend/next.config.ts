@@ -13,6 +13,14 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_BUILD_VERSION: getGitSha(),
   },
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "inaturalist-open-data.s3.amazonaws.com",
+      },
+    ],
+  },
 };
 
 export default nextConfig;
