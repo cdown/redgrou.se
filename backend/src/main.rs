@@ -361,24 +361,33 @@ async fn enforce_upload_limit(
     req: Request<Body>,
     next: Next,
 ) -> Response {
-    // Only apply to upload routes (POST /upload, PUT /single/{id})
-    let dominated_by_upload =
-        req.method() == axum::http::Method::POST || req.method() == axum::http::Method::PUT;
-    if !dominated_by_upload {
+    // Skip rate limiting if disable-rate-limits feature is enabled (for benchmarks)
+    #[cfg(feature = "disable-rate-limits")]
+    {
         return next.run(req).await;
     }
 
-    let client_key = extract_client_addr(&req, peer_addr, &trusted);
+    #[cfg(not(feature = "disable-rate-limits"))]
+    {
+        // Only apply to upload routes (POST /upload, PUT /single/{id})
+        let dominated_by_upload =
+            req.method() == axum::http::Method::POST || req.method() == axum::http::Method::PUT;
+        if !dominated_by_upload {
+            return next.run(req).await;
+        }
 
-    if let Err(msg) = limiter.try_start(&client_key).await {
-        return ApiError::service_unavailable(msg).into_response();
+        let client_key = extract_client_addr(&req, peer_addr, &trusted);
+
+        if let Err(msg) = limiter.try_start(&client_key).await {
+            return ApiError::service_unavailable(msg).into_response();
+        }
+
+        let response = next.run(req).await;
+
+        limiter.finish(&client_key).await;
+
+        response
     }
-
-    let response = next.run(req).await;
-
-    limiter.finish(&client_key).await;
-
-    response
 }
 
 async fn enforce_rate_limit(
@@ -388,11 +397,20 @@ async fn enforce_rate_limit(
     req: Request<Body>,
     next: Next,
 ) -> Response {
-    let client_key = extract_client_addr(&req, peer_addr, &trusted);
-    if limiter.try_acquire(&client_key).await {
-        next.run(req).await
-    } else {
-        ApiError::service_unavailable("Too many requests").into_response()
+    // Skip rate limiting if disable-rate-limits feature is enabled (for benchmarks)
+    #[cfg(feature = "disable-rate-limits")]
+    {
+        return next.run(req).await;
+    }
+
+    #[cfg(not(feature = "disable-rate-limits"))]
+    {
+        let client_key = extract_client_addr(&req, peer_addr, &trusted);
+        if limiter.try_acquire(&client_key).await {
+            next.run(req).await
+        } else {
+            ApiError::service_unavailable("Too many requests").into_response()
+        }
     }
 }
 

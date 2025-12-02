@@ -37,9 +37,23 @@ subtle = "2.6"
 country-boundaries = "1.2.0"
 ts-rs = "11"
 encoding_rs = "0.8"
+urlencoding = "2"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+tempfile = "3"
 
 [profile.release]
 lto = "thin"
 codegen-units = 1
 strip = true
 panic = "abort"
+
+[features]
+default = []
+disable-rate-limits = []
+
+[[bench]]
+name = "api_benchmarks"
+harness = false
+required-features = ["disable-rate-limits"]
