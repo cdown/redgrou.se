@@ -482,6 +482,11 @@ where
         .await
         .map_err(|e| e.into_api_error("starting upload transaction", "Database error"))?;
 
+    // Process rows in batches for geocoding (CPU-bound operation offloaded to blocking threads)
+    // Manual loop is used instead of iterator chunks because:
+    // 1. Async stream processing (read_byte_record is async)
+    // 2. Per-row validation and error handling
+    // 3. Geocoding batching requires collecting coordinates before async operation
     let mut batch: Vec<SightingRow> = Vec::with_capacity(BATCH_SIZE);
     let mut total_rows = 0usize;
     let mut record = csv_async::ByteRecord::new();
