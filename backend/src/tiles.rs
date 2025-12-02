@@ -113,6 +113,16 @@ pub async fn get_tile(
         });
     }
 
+    // Limit points returned at low zoom levels to prevent memory spikes.
+    // At z=0-4, a single tile can contain 100k+ points. Limiting to 10k
+    // prevents excessive memory usage and slow serialization.
+    let max_points = match z {
+        0..=2 => 5000,  // Very low zoom: 5k points max
+        3..=4 => 10000, // Low zoom: 10k points max
+        5..=7 => 25000, // Medium-low zoom: 25k points max
+        _ => 100000,    // Higher zoom: 100k points max (effectively unlimited)
+    };
+
     let sql = format!(
         r"
         SELECT
@@ -131,6 +141,7 @@ pub async fn get_tile(
           AND sg.max_lat >= ? AND sg.min_lat <= ?
           AND sg.max_lon >= ? AND sg.min_lon <= ?
         {}
+        LIMIT ?
         ",
         filter_clause.unwrap_or_default()
     );
@@ -144,6 +155,7 @@ pub async fn get_tile(
     for param in &filter_params {
         db_query = db_query.bind(param);
     }
+    db_query = db_query.bind(i64::from(max_points));
 
     let rows = db::query_with_timeout(db_query.fetch_all(&pool))
         .await
