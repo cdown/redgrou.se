@@ -3,13 +3,11 @@ use axum::extract::{multipart::Field, Multipart, Path, State};
 use axum::http::header;
 use axum::response::IntoResponse;
 use axum::Json;
-use country_boundaries::{CountryBoundaries, LatLon, BOUNDARIES_ODBL_360X180};
 use csv_async::AsyncReaderBuilder;
 use futures::{Stream, StreamExt, TryStreamExt};
-use once_cell::sync::Lazy;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use sqlx::{Acquire, QueryBuilder, Sqlite, SqlitePool, Transaction};
+use sqlx::SqlitePool;
 use std::fmt;
 use std::io;
 use std::pin::Pin;
@@ -22,30 +20,11 @@ use uuid::Uuid;
 
 use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
+use crate::pipeline::{CsvParser, DbSink, Geocoder, BATCH_SIZE};
 
-// Initialised once to avoid reloading the dataset on every request.
-// Uses point-in-polygon testing with OpenStreetMap boundaries data.
-static BOUNDARIES: Lazy<CountryBoundaries> = Lazy::new(|| {
-    info!("Initialising country boundaries");
-    CountryBoundaries::from_reader(BOUNDARIES_ODBL_360X180)
-        .expect("Failed to load country boundaries data")
-});
-
-const BATCH_SIZE: usize = 1000;
 pub const MAX_UPLOAD_BYTES: usize = 200 * 1024 * 1024; // 200 MiB
 pub const MAX_UPLOAD_BODY_BYTES: usize = MAX_UPLOAD_BYTES + (2 * 1024 * 1024); // allow multipart overhead
 const UPLOAD_LIMIT_MB: usize = MAX_UPLOAD_BYTES / (1024 * 1024);
-
-const COL_SIGHTING_ID: &str = "sightingId";
-const COL_DATE: &str = "date";
-const COL_LONGITUDE: &str = "longitude";
-const COL_LATITUDE: &str = "latitude";
-const COL_SCIENTIFIC_NAME: &str = "scientificName";
-const COL_COMMON_NAME: &str = "commonName";
-const COL_COUNT: &str = "count";
-const MAX_UPLOAD_ROWS: usize = 250_000;
-const MAX_CSV_COLUMNS: usize = 256;
-const MAX_RECORD_BYTES: usize = 8 * 1024; // 8 KiB per record to prevent line bombs
 
 #[derive(Serialize, TS)]
 #[ts(export)]
@@ -158,290 +137,6 @@ fn size_limit_failure(err: &csv_async::Error) -> Option<ApiError> {
     None
 }
 
-fn validate_header_limits(headers: &csv_async::StringRecord) -> Result<(), ApiError> {
-    let column_count = headers.len();
-    if column_count > MAX_CSV_COLUMNS {
-        return Err(ApiError::bad_request(format!(
-            "CSV has {column_count} columns; maximum supported is {MAX_CSV_COLUMNS}"
-        )));
-    }
-    Ok(())
-}
-
-fn enforce_record_limits(
-    record: &csv_async::ByteRecord,
-    row_number: usize,
-) -> Result<(), ApiError> {
-    if record.len() > MAX_CSV_COLUMNS {
-        return Err(ApiError::bad_request(format!(
-            "Row {} has {} columns; maximum supported is {}",
-            row_number,
-            record.len(),
-            MAX_CSV_COLUMNS
-        )));
-    }
-
-    let byte_len = record.as_slice().len();
-    if byte_len > MAX_RECORD_BYTES {
-        return Err(ApiError::bad_request(format!(
-            "Row {row_number} exceeds {MAX_RECORD_BYTES} byte limit (row is {byte_len} bytes)"
-        )));
-    }
-
-    Ok(())
-}
-
-struct SightingRow {
-    sighting_uuid: String,
-    common_name: String,
-    scientific_name: Option<String>,
-    count: i32,
-    latitude: f64,
-    longitude: f64,
-    country_code: String,
-    region_code: Option<String>,
-    observed_at: String,
-    year: i32,
-}
-
-#[derive(Default)]
-struct ColumnMap {
-    sighting_id: Option<usize>,
-    date: Option<usize>,
-    longitude: Option<usize>,
-    latitude: Option<usize>,
-    scientific_name: Option<usize>,
-    common_name: Option<usize>,
-    count: Option<usize>,
-}
-
-impl ColumnMap {
-    fn from_headers(headers: &csv_async::StringRecord) -> Self {
-        let mut map = Self::default();
-        for (idx, header) in headers.iter().enumerate() {
-            match header {
-                COL_SIGHTING_ID => map.sighting_id = Some(idx),
-                COL_DATE => map.date = Some(idx),
-                COL_LONGITUDE => map.longitude = Some(idx),
-                COL_LATITUDE => map.latitude = Some(idx),
-                COL_SCIENTIFIC_NAME => map.scientific_name = Some(idx),
-                COL_COMMON_NAME => map.common_name = Some(idx),
-                COL_COUNT => map.count = Some(idx),
-                _ => {}
-            }
-        }
-        map
-    }
-
-    const fn is_valid(&self) -> bool {
-        self.sighting_id.is_some()
-            && self.date.is_some()
-            && self.longitude.is_some()
-            && self.latitude.is_some()
-            && self.common_name.is_some()
-    }
-}
-
-fn get_field(
-    record: &csv_async::ByteRecord,
-    idx: Option<usize>,
-    field_name: &str,
-    row_number: usize,
-) -> Result<Option<String>, ApiError> {
-    let Some(bytes) = idx.and_then(|i| record.get(i)) else {
-        return Ok(None);
-    };
-
-    // Try UTF-8 first, fallback to Windows-1252 for Excel files
-    let value = match std::str::from_utf8(bytes) {
-        Ok(v) => v.to_string(),
-        Err(_) => {
-            // Decode as Windows-1252 (common encoding for Excel CSV files on Windows)
-            // This gracefully handles CSV files created in Excel that aren't UTF-8
-            encoding_rs::WINDOWS_1252.decode_without_bom_handling_and_without_replacement(bytes)
-                .ok_or_else(|| {
-                    ApiError::bad_request(format!(
-                        "Row {row_number} has invalid encoding in column {field_name} (neither UTF-8 nor Windows-1252)"
-                    ))
-                })?
-                .into_owned()
-        }
-    };
-
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(trimmed.to_string()))
-}
-
-fn extract_year(date_str: &str) -> i32 {
-    // ISO 8601 format: 2020-02-14T09:34:18.584Z
-    date_str.get(0..4).and_then(|y| y.parse().ok()).unwrap_or(0)
-}
-
-fn get_country_code(lat: f64, lon: f64) -> String {
-    let Ok(latlon) = LatLon::new(lat, lon) else {
-        return "XX".to_string();
-    };
-
-    let ids = BOUNDARIES.ids(latlon);
-    // ids returns e.g. ["US-TX", "US"] or ["SG"] - we want the shortest (country) code
-    ids.iter()
-        .find(|id| !id.contains('-'))
-        .or_else(|| ids.first())
-        .map_or_else(|| "XX".to_string(), ToString::to_string)
-}
-
-fn get_region_code(lat: f64, lon: f64) -> Option<String> {
-    let Ok(latlon) = LatLon::new(lat, lon) else {
-        return None;
-    };
-
-    let ids = BOUNDARIES.ids(latlon);
-    // ids returns e.g. ["US-TX", "US"] or ["SG"] - we want the code with a dash (region/subdivision)
-    // If no subdivision exists (like Singapore), return None
-    ids.iter()
-        .find(|id| id.contains('-'))
-        .map(ToString::to_string)
-}
-
-fn parse_row_without_geocode(
-    record: &csv_async::ByteRecord,
-    col_map: &ColumnMap,
-    row_number: usize,
-) -> Result<Option<(String, String, String, f64, f64, i32, Option<String>)>, ApiError> {
-    let Some(sighting_uuid) = get_field(record, col_map.sighting_id, COL_SIGHTING_ID, row_number)?
-    else {
-        return Ok(None);
-    };
-    let Some(common_name) = get_field(record, col_map.common_name, COL_COMMON_NAME, row_number)?
-    else {
-        return Ok(None);
-    };
-    let Some(observed_at) = get_field(record, col_map.date, COL_DATE, row_number)? else {
-        return Ok(None);
-    };
-
-    let latitude = match get_field(record, col_map.latitude, COL_LATITUDE, row_number)? {
-        Some(value) => match value.parse::<f64>() {
-            Ok(parsed) => parsed,
-            Err(_) => return Ok(None),
-        },
-        None => return Ok(None),
-    };
-    let longitude = match get_field(record, col_map.longitude, COL_LONGITUDE, row_number)? {
-        Some(value) => match value.parse::<f64>() {
-            Ok(parsed) => parsed,
-            Err(_) => return Ok(None),
-        },
-        None => return Ok(None),
-    };
-
-    let count: i32 = get_field(record, col_map.count, COL_COUNT, row_number)?
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1);
-
-    let scientific_name = get_field(
-        record,
-        col_map.scientific_name,
-        COL_SCIENTIFIC_NAME,
-        row_number,
-    )?;
-
-    Ok(Some((
-        sighting_uuid,
-        common_name,
-        observed_at,
-        latitude,
-        longitude,
-        count,
-        scientific_name,
-    )))
-}
-
-async fn geocode_batch(coords: Vec<(f64, f64)>) -> Result<Vec<(String, Option<String>)>, ApiError> {
-    let results = tokio::task::spawn_blocking(move || {
-        coords
-            .into_iter()
-            .map(|(lat, lon)| {
-                let country_code = get_country_code(lat, lon);
-                let region_code = get_region_code(lat, lon);
-                (country_code, region_code)
-            })
-            .collect()
-    })
-    .await
-    .map_err(|e| {
-        error!("Geocoding task join error: {}", e);
-        ApiError::internal("Geocoding error")
-    })?;
-    Ok(results)
-}
-
-async fn insert_batch<'e, E>(
-    executor: E,
-    upload_id: &str,
-    rows: &[SightingRow],
-) -> Result<(), DbQueryError>
-where
-    E: sqlx::Executor<'e, Database = Sqlite>,
-{
-    if rows.is_empty() {
-        return Ok(());
-    }
-
-    let mut query_builder = QueryBuilder::new(
-        "INSERT INTO sightings (upload_id, sighting_uuid, common_name, scientific_name, count, latitude, longitude, country_code, region_code, observed_at, year) "
-    );
-
-    query_builder.push_values(rows, |mut b, row| {
-        b.push_bind(upload_id)
-            .push_bind(&row.sighting_uuid)
-            .push_bind(&row.common_name)
-            .push_bind(&row.scientific_name)
-            .push_bind(row.count)
-            .push_bind(row.latitude)
-            .push_bind(row.longitude)
-            .push_bind(&row.country_code)
-            .push_bind(&row.region_code)
-            .push_bind(&row.observed_at)
-            .push_bind(row.year);
-    });
-
-    db::query_with_timeout(query_builder.build().execute(executor)).await?;
-    Ok(())
-}
-
-async fn flush_batch(
-    tx: &mut Transaction<'_, Sqlite>,
-    upload_id: &str,
-    batch: &mut Vec<SightingRow>,
-    total_rows: &mut usize,
-) -> Result<(), ApiError> {
-    if batch.is_empty() {
-        return Ok(());
-    }
-
-    let batch_len = batch.len();
-
-    {
-        let conn = tx.acquire().await.map_err(|e| {
-            error!("Failed to acquire connection for batch insert: {}", e);
-            ApiError::internal("Database error")
-        })?;
-
-        insert_batch(conn, upload_id, batch).await.map_err(|e| {
-            e.into_api_error("inserting sightings batch", "Failed to insert sightings")
-        })?;
-    }
-
-    *total_rows += batch_len;
-    batch.clear();
-    Ok(())
-}
-
 async fn ingest_csv_field(
     field: Field<'_>,
     pool: &SqlitePool,
@@ -468,15 +163,10 @@ where
         .await
         .map_err(|err| map_csv_error(err, "Failed to read CSV headers", "Invalid CSV headers"))?;
 
-    validate_header_limits(headers)?;
-
-    let col_map = ColumnMap::from_headers(headers);
-    if !col_map.is_valid() {
-        error!("CSV missing required columns");
-        return Err(ApiError::bad_request(
-            "CSV missing required columns (sightingId, date, longitude, latitude, commonName)",
-        ));
-    }
+    // Initialize pipeline stages
+    let mut parser = CsvParser::new(&headers)?;
+    let geocoder = Geocoder::new();
+    let mut sink = DbSink::new(upload_id.to_string());
 
     let mut tx = db::query_with_timeout(pool.begin())
         .await
@@ -487,129 +177,49 @@ where
     // 1. Async stream processing (read_byte_record is async)
     // 2. Per-row validation and error handling
     // 3. Geocoding batching requires collecting coordinates before async operation
-    let mut batch: Vec<SightingRow> = Vec::with_capacity(BATCH_SIZE);
-    let mut total_rows = 0usize;
+    let mut pending_rows: Vec<crate::pipeline::ParsedSighting> = Vec::new();
     let mut record = csv_async::ByteRecord::new();
-    let mut row_number = 1usize;
-    let mut pending_rows: Vec<(String, String, String, f64, f64, i32, Option<String>)> = Vec::new();
 
     while csv_reader
         .read_byte_record(&mut record)
         .await
         .map_err(|err| map_csv_error(err, "Failed to read CSV row", "Invalid CSV data"))?
     {
-        enforce_record_limits(&record, row_number)?;
-        if let Some((
-            sighting_uuid,
-            common_name,
-            observed_at,
-            latitude,
-            longitude,
-            count,
-            scientific_name,
-        )) = parse_row_without_geocode(&record, &col_map, row_number)?
-        {
-            pending_rows.push((
-                sighting_uuid,
-                common_name,
-                observed_at,
-                latitude,
-                longitude,
-                count,
-                scientific_name,
-            ));
+        if let Some(parsed) = parser.parse_row(&record)? {
+            pending_rows.push(parsed);
 
             // Geocode in batches to avoid blocking the async runtime
             if pending_rows.len() >= BATCH_SIZE {
-                let coords: Vec<(f64, f64)> = pending_rows
-                    .iter()
-                    .map(|(_, _, _, lat, lon, _, _)| (*lat, *lon))
-                    .collect();
-                let geocode_results = geocode_batch(coords).await?;
+                let processed = geocoder.geocode_batch(pending_rows).await?;
+                pending_rows = Vec::new();
 
-                for (
-                    (
-                        sighting_uuid,
-                        common_name,
-                        observed_at,
-                        latitude,
-                        longitude,
-                        count,
-                        scientific_name,
-                    ),
-                    (country_code, region_code),
-                ) in pending_rows.drain(..).zip(geocode_results)
-                {
-                    let year = extract_year(&observed_at);
-                    batch.push(SightingRow {
-                        sighting_uuid,
-                        common_name,
-                        scientific_name,
-                        count,
-                        latitude,
-                        longitude,
-                        country_code,
-                        region_code,
-                        observed_at,
-                        year,
-                    });
-
-                    if total_rows + batch.len() > MAX_UPLOAD_ROWS {
-                        return Err(ApiError::bad_request(format!(
-                            "CSV exceeds {MAX_UPLOAD_ROWS} row limit"
-                        )));
+                for sighting in processed {
+                    // Check if we need to flush before adding
+                    if sink.needs_flush() {
+                        sink.flush(&mut tx).await?;
                     }
-                    if batch.len() >= BATCH_SIZE {
-                        flush_batch(&mut tx, upload_id, &mut batch, &mut total_rows).await?;
-                    }
+                    sink.add(sighting)?;
                 }
             }
         }
-        row_number += 1;
     }
 
     // Process remaining pending rows
     if !pending_rows.is_empty() {
-        let coords: Vec<(f64, f64)> = pending_rows
-            .iter()
-            .map(|(_, _, _, lat, lon, _, _)| (*lat, *lon))
-            .collect();
-        let geocode_results = geocode_batch(coords).await?;
-
-        for (
-            (sighting_uuid, common_name, observed_at, latitude, longitude, count, scientific_name),
-            (country_code, region_code),
-        ) in pending_rows.into_iter().zip(geocode_results)
-        {
-            let year = extract_year(&observed_at);
-            batch.push(SightingRow {
-                sighting_uuid,
-                common_name,
-                scientific_name,
-                count,
-                latitude,
-                longitude,
-                country_code,
-                region_code,
-                observed_at,
-                year,
-            });
-
-            if total_rows + batch.len() > MAX_UPLOAD_ROWS {
-                return Err(ApiError::bad_request(format!(
-                    "CSV exceeds {MAX_UPLOAD_ROWS} row limit"
-                )));
-            }
+        let processed = geocoder.geocode_batch(pending_rows).await?;
+        for sighting in processed {
+            sink.add(sighting)?;
         }
     }
 
-    flush_batch(&mut tx, upload_id, &mut batch, &mut total_rows).await?;
+    // Flush any remaining rows
+    sink.flush(&mut tx).await?;
 
     db::query_with_timeout(tx.commit())
         .await
         .map_err(|e| e.into_api_error("committing upload transaction", "Database error"))?;
 
-    Ok(total_rows)
+    Ok(sink.total_rows())
 }
 
 // We compute lifer and year_tick ourselves rather than trusting the CSV.
@@ -655,8 +265,6 @@ pub async fn upload_csv(
     State(pool): State<SqlitePool>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
-    let _ = &*BOUNDARIES;
-
     while let Ok(Some(field)) = multipart.next_field().await {
         let filename = field
             .file_name()
@@ -790,8 +398,6 @@ pub async fn update_csv(
                 .into_response();
         }
     }
-
-    let _ = &*BOUNDARIES;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let filename = field
