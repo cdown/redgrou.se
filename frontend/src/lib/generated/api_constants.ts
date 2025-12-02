@@ -8,6 +8,6 @@ export const UPLOAD_COUNT_ROUTE = "/api/uploads/{upload_id}/count";
 export const UPLOAD_SIGHTINGS_ROUTE = "/api/uploads/{upload_id}/sightings";
 export const TILE_ROUTE = "/api/tiles/{upload_id}/{z}/{x}/{y}";
 export const FIELDS_ROUTE = "/api/fields";
-export const FIELD_VALUES_ROUTE = "/api/fields/{upload_id}/{field}";
+export const FIELD_VALUES_ROUTE = "/api/uploads/{upload_id}/fields/{field}";
 export const DEFAULT_PAGE_SIZE = 100;
 export const MAX_PAGE_SIZE = 500;
