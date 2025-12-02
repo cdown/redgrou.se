@@ -281,7 +281,7 @@ fn get_country_code(lat: f64, lon: f64) -> String {
     ids.iter()
         .find(|id| !id.contains('-'))
         .or_else(|| ids.first())
-        .map(|s| s.to_string())
+        .map(ToString::to_string)
         .unwrap_or_else(|| "XX".to_string())
 }
 
@@ -295,7 +295,7 @@ fn get_region_code(lat: f64, lon: f64) -> Option<String> {
     // If no subdivision exists (like Singapore), return None
     ids.iter()
         .find(|id| id.contains('-'))
-        .map(|s| s.to_string())
+        .map(ToString::to_string)
 }
 
 fn parse_row(
@@ -542,7 +542,7 @@ pub async fn upload_csv(
     while let Ok(Some(field)) = multipart.next_field().await {
         let filename = field
             .file_name()
-            .map(|s| s.to_string())
+            .map(ToString::to_string)
             .unwrap_or_else(|| "unknown.csv".to_string());
 
         if !filename.ends_with(".csv") {
@@ -620,7 +620,7 @@ fn extract_edit_token(headers: &axum::http::HeaderMap) -> Option<String> {
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "))
-        .map(|s| s.to_string())
+        .map(ToString::to_string)
 }
 
 async fn verify_upload_access(
@@ -677,7 +677,7 @@ pub async fn update_csv(
     while let Ok(Some(field)) = multipart.next_field().await {
         let filename = field
             .file_name()
-            .map(|s| s.to_string())
+            .map(ToString::to_string)
             .unwrap_or_else(|| "unknown.csv".to_string());
 
         if !filename.ends_with(".csv") {

@@ -167,7 +167,10 @@ pub async fn get_tile(
         let (tile_x, tile_y) = latlng_to_tile_coords(latitude, longitude, z, x, y);
 
         let encoder = GeomEncoder::new(GeomType::Point);
-        let geom_data = match encoder.point(tile_x, tile_y).and_then(|e| e.encode()) {
+        let geom_data = match encoder
+            .point(tile_x, tile_y)
+            .and_then(mvt::GeomEncoder::encode)
+        {
             Ok(data) => data,
             Err(e) => {
                 error!("Failed to encode geometry: {}", e);

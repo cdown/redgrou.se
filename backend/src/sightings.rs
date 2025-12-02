@@ -152,7 +152,8 @@ pub async fn get_sightings(
 
     // Handle grouped query
     if let Some(group_by_str) = &query.group_by {
-        let group_by_fields: Vec<String> = group_by_str.split(',').map(|s| s.to_string()).collect();
+        let group_by_fields: Vec<String> =
+            group_by_str.split(',').map(ToString::to_string).collect();
         let validated_fields = validate_group_by_fields(&group_by_fields)?;
 
         if validated_fields.is_empty() {
