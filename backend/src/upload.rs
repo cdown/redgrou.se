@@ -638,8 +638,7 @@ async fn verify_upload_access(
 
     match hash {
         Some(Some(stored_hash)) => Ok(verify_token(token, &stored_hash)),
-        Some(None) => Ok(false), // Upload exists but has no token (legacy)
-        None => Ok(false),       // Upload doesn't exist
+        Some(None) | None => Ok(false), // Upload exists but has no token (legacy) or doesn't exist
     }
 }
 
