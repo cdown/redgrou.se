@@ -543,7 +543,10 @@ pub async fn upload_csv(
             .file_name()
             .map_or_else(|| "unknown.csv".to_string(), ToString::to_string);
 
-        if !filename.ends_with(".csv") {
+        if !std::path::Path::new(&filename)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("csv"))
+        {
             continue;
         }
 
@@ -677,7 +680,10 @@ pub async fn update_csv(
             .file_name()
             .map_or_else(|| "unknown.csv".to_string(), ToString::to_string);
 
-        if !filename.ends_with(".csv") {
+        if !std::path::Path::new(&filename)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("csv"))
+        {
             continue;
         }
 
