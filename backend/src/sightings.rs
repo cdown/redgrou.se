@@ -180,11 +180,15 @@ pub async fn get_sightings(
             .collect();
         let group_by_clause_str = group_by_clause.join(", ");
 
-        // Build SELECT clause - use DATE() for observed_at, preserve NULLs for others
+        // Build SELECT clause - use DATE() for observed_at to group by date only.
+        // DATE() returns YYYY-MM-DD format. We format it as ISO 8601 date string
+        // (YYYY-MM-DD) explicitly to ensure consistent parsing in the frontend.
+        // Note: This is intentionally date-only (not datetime) for grouped results.
         let select_clause: Vec<String> = validated_fields
             .iter()
             .map(|f| {
                 if f == "observed_at" {
+                    // DATE() returns YYYY-MM-DD, which is a valid ISO 8601 date string
                     "DATE(observed_at) as observed_at".to_string()
                 } else {
                     f.clone()
