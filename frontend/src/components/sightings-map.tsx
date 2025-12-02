@@ -244,7 +244,14 @@ function addSightingsLayer(
     "source-layer": "sightings",
     paint: {
       "circle-radius": 6,
-      "circle-color": "#e63946",
+      "circle-color": [
+        "case",
+        [">", ["get", "lifer"], 0],
+        "#FFD700", // Gold for lifers
+        [">", ["get", "year_tick"], 0],
+        "#C0C0C0", // Silver for year ticks
+        "#e63946", // Red for normal sightings
+      ],
       "circle-stroke-width": 1.5,
       "circle-stroke-color": "#fff",
     },
