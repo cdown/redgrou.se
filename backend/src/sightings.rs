@@ -22,7 +22,7 @@ pub enum SortField {
 }
 
 impl SortField {
-    pub fn as_sql_column(&self) -> &'static str {
+    pub const fn as_sql_column(&self) -> &'static str {
         match self {
             Self::CommonName => "common_name",
             Self::ScientificName => "scientific_name",

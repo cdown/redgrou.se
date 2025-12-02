@@ -93,7 +93,7 @@ struct SizeLimitedStream<S> {
 }
 
 impl<S> SizeLimitedStream<S> {
-    fn new(inner: S, max: usize) -> Self {
+    const fn new(inner: S, max: usize) -> Self {
         Self {
             inner,
             max,
@@ -233,7 +233,7 @@ impl ColumnMap {
         map
     }
 
-    fn is_valid(&self) -> bool {
+    const fn is_valid(&self) -> bool {
         self.sighting_id.is_some()
             && self.date.is_some()
             && self.longitude.is_some()

@@ -52,7 +52,7 @@ pub enum FilterField {
 
 impl FilterField {
     /// Returns the SQL column name for this field.
-    pub fn as_sql_column(&self) -> &'static str {
+    pub const fn as_sql_column(&self) -> &'static str {
         match self {
             Self::CommonName => "common_name",
             Self::ScientificName => "scientific_name",
