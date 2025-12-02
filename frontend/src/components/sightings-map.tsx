@@ -247,9 +247,9 @@ function addSightingsLayer(
       "circle-color": [
         "case",
         [">", ["get", "lifer"], 0],
-        "#FFD700", // Gold for lifers
+        "#F97316", // Orange for lifers
         [">", ["get", "year_tick"], 0],
-        "#C0C0C0", // Silver for year ticks
+        "#3B82F6", // Blue for year ticks
         "#e63946", // Red for normal sightings
       ],
       "circle-stroke-width": 1.5,
