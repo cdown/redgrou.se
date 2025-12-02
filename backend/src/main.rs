@@ -188,11 +188,16 @@ async fn main() -> anyhow::Result<()> {
         )
         .with_state(pool);
 
-    let port = env::var("PORT")
+    let port_str = env::var("PORT")
         .or_else(|_| env::var("REDGROUSE_BACKEND_PORT"))
-        .unwrap_or_else(|_| "3001".to_string())
-        .parse::<u16>()
-        .map_err(|e| anyhow::anyhow!("Invalid port: {}", e))?;
+        .unwrap_or_else(|_| "3001".to_string());
+    let port = port_str.parse::<u16>().map_err(|e| {
+        anyhow::anyhow!(
+            "Invalid port value '{}': {}. Port must be a number between 1 and 65535",
+            port_str,
+            e
+        )
+    })?;
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("Listening on {}", addr);
 
