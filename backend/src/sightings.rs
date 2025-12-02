@@ -119,37 +119,41 @@ pub async fn get_sightings(
         .min(u64::try_from(i64::MAX).unwrap_or(u64::MAX));
     let offset_i64 = i64::try_from(offset).unwrap_or(i64::MAX);
 
-    let mut params: Vec<String> = vec![upload_id.clone()];
+    // Collect filter parameters separately from upload_id.
+    // The filter module uses enum-based field names (FilterField enum) which
+    // prevents SQL injection at compile time. Values are bound as parameters.
+    // While string concatenation is used for the WHERE clause, it's safe because
+    // field names are whitelisted via enums, not user input.
+    let mut filter_params: Vec<String> = Vec::new();
+    let mut filter_clause_parts: Vec<String> = Vec::new();
 
-    let mut filter_clause = if let Some(filter_json) = &query.filter {
+    if let Some(filter_json) = &query.filter {
         let filter: FilterGroup = serde_json::from_str(filter_json)
             .map_err(|_| ApiError::bad_request("Invalid filter JSON"))?;
         filter
             .validate()
             .map_err(|e| ApiError::bad_request(e.message()))?;
-        filter.to_sql(&mut params).map(|sql| format!(" AND {sql}"))
-    } else {
-        None
-    };
+        if let Some(sql) = filter.to_sql(&mut filter_params) {
+            filter_clause_parts.push(format!("AND {sql}"));
+        }
+    }
 
     // Add lifers_only filter if requested
     if query.lifers_only == Some(true) {
-        let lifer_clause = " AND lifer = 1".to_string();
-        filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{lifer_clause}"),
-            None => lifer_clause,
-        });
+        filter_clause_parts.push("AND lifer = 1".to_string());
     }
 
     // Add year_tick filter if requested
     if let Some(year) = query.year_tick_year {
-        params.push(year.to_string());
-        let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();
-        filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{year_tick_clause}"),
-            None => year_tick_clause,
-        });
+        filter_clause_parts.push("AND year_tick = 1 AND year = ?".to_string());
+        filter_params.push(year.to_string());
     }
+
+    let filter_clause_str = if filter_clause_parts.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", filter_clause_parts.join(" "))
+    };
 
     // Handle grouped query
     if let Some(group_by_str) = &query.group_by {
@@ -192,13 +196,12 @@ pub async fn get_sightings(
         // Count total groups
         let count_sql = format!(
             "SELECT COUNT(*) FROM (SELECT {} FROM sightings WHERE upload_id = ?{} GROUP BY {})",
-            select_clause_str,
-            filter_clause.as_deref().unwrap_or(""),
-            group_by_clause_str
+            select_clause_str, filter_clause_str, group_by_clause_str
         );
 
         let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
-        for param in &params {
+        count_query = count_query.bind(&upload_id);
+        for param in &filter_params {
             count_query = count_query.bind(param);
         }
 
@@ -237,7 +240,7 @@ pub async fn get_sightings(
         let select_sql = format!(
             "SELECT {}, COUNT(*) as count, COUNT(DISTINCT scientific_name) as species_count FROM sightings WHERE upload_id = ?{} GROUP BY {} ORDER BY {} {} LIMIT ? OFFSET ?",
             select_clause_str,
-            filter_clause.as_deref().unwrap_or(""),
+            filter_clause_str,
             group_by_clause_str,
             sort_field_actual,
             sort_dir
@@ -245,7 +248,8 @@ pub async fn get_sightings(
 
         // Build query with proper parameter binding
         let mut select_query = sqlx::query(&select_sql);
-        for param in &params {
+        select_query = select_query.bind(&upload_id);
+        for param in &filter_params {
             select_query = select_query.bind(param);
         }
         select_query = select_query.bind(i64::from(page_size));
@@ -309,13 +313,15 @@ pub async fn get_sightings(
         _ => "DESC",
     };
 
+    // Build count query - use parameterized queries with filter clause
+    // (filter clause is safe because field names come from enums)
     let count_sql = format!(
         "SELECT COUNT(*) FROM sightings WHERE upload_id = ?{}",
-        filter_clause.as_deref().unwrap_or("")
+        filter_clause_str
     );
-
     let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
-    for param in &params {
+    count_query = count_query.bind(&upload_id);
+    for param in &filter_params {
         count_query = count_query.bind(param);
     }
 
@@ -323,6 +329,8 @@ pub async fn get_sightings(
         .await
         .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
+    // Build select query - use QueryBuilder for structure, string for filter clause
+    // (filter clause is safe because field names come from enums)
     let select_sql = format!(
         r"SELECT id, common_name, scientific_name, count, latitude, longitude,
             country_code, region_code, observed_at
@@ -330,19 +338,16 @@ pub async fn get_sightings(
             WHERE upload_id = ?{}
             ORDER BY {} {}
             LIMIT ? OFFSET ?",
-        filter_clause.as_deref().unwrap_or(""),
-        sort_field,
-        sort_dir
+        filter_clause_str, sort_field, sort_dir
     );
 
-    params.push(page_size.to_string());
-    params.push(offset_i64.to_string());
-
     let mut select_query = sqlx::query_as::<_, Sighting>(&select_sql);
-
-    for param in &params {
+    select_query = select_query.bind(&upload_id);
+    for param in &filter_params {
         select_query = select_query.bind(param);
     }
+    select_query = select_query.bind(i64::from(page_size));
+    select_query = select_query.bind(offset_i64);
 
     let sightings = db::query_with_timeout(select_query.fetch_all(&pool))
         .await

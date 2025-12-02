@@ -259,11 +259,20 @@ impl RequestRateLimiter {
 
     async fn try_acquire(&self, key: &str) -> bool {
         let mut buckets = self.buckets.lock().await;
+        let now = Instant::now();
+
+        // Prune old entries periodically (every 1000 operations to avoid overhead)
+        // Remove entries whose window has expired by more than one window duration
+        if buckets.len() > 1000 {
+            let prune_before = now - self.window * 2;
+            buckets.retain(|_, state| state.start > prune_before);
+        }
+
         let state = buckets.entry(key.to_string()).or_insert(RateWindow {
-            start: Instant::now(),
+            start: now,
             count: 0,
         });
-        let now = Instant::now();
+
         if now.duration_since(state.start) >= self.window {
             state.start = now;
             state.count = 0;
