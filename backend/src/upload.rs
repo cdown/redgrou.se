@@ -285,8 +285,7 @@ fn get_country_code(lat: f64, lon: f64) -> String {
     let ids = BOUNDARIES.ids(latlon);
     // ids returns e.g. ["US-TX", "US"] or ["SG"] - we want the shortest (country) code
     ids.iter()
-        .filter(|id| !id.contains('-'))
-        .next()
+        .find(|id| !id.contains('-'))
         .or_else(|| ids.first())
         .map(|s| s.to_string())
         .unwrap_or_else(|| "XX".to_string())
@@ -436,7 +435,7 @@ async fn ingest_csv_field(
 ) -> Result<usize, ApiError> {
     let stream = field
         .into_stream()
-        .map(|result| result.map_err(|err| io::Error::new(io::ErrorKind::Other, err)));
+        .map(|result| result.map_err(io::Error::other));
     let limited_stream = SizeLimitedStream::new(stream, MAX_UPLOAD_BYTES);
     let reader = StreamReader::new(limited_stream);
     read_csv(reader, pool, upload_id).await
@@ -455,9 +454,9 @@ where
         .await
         .map_err(|err| map_csv_error(err, "Failed to read CSV headers", "Invalid CSV headers"))?;
 
-    validate_header_limits(&headers)?;
+    validate_header_limits(headers)?;
 
-    let col_map = ColumnMap::from_headers(&headers);
+    let col_map = ColumnMap::from_headers(headers);
     if !col_map.is_valid() {
         error!("CSV missing required columns");
         return Err(ApiError::bad_request(

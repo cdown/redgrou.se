@@ -3,6 +3,12 @@ name = "redgrouse"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
+description = "Bird sighting analytics backend"
+license = "MIT"
+repository = "https://github.com/cdown/redgrouse"
+readme = "../README.md"
+keywords = ["birding", "sightings", "analytics", "map"]
+categories = ["web-programming", "science"]
 
 [dependencies]
 anyhow = "1"

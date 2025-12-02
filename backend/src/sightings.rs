@@ -97,7 +97,7 @@ fn validate_group_by_fields(fields: &[String]) -> Result<Vec<String>, ApiError> 
         if allowed.contains(&trimmed) {
             validated.push(trimmed.to_string());
         } else {
-            return Err(ApiError::bad_request(&format!(
+            return Err(ApiError::bad_request(format!(
                 "Invalid group_by field: {}",
                 trimmed
             )));

@@ -76,7 +76,7 @@ fn main() {
             let entry = entry.ok()?;
             let path = entry.path();
             let name = path.file_stem()?.to_str()?;
-            if path.extension().map_or(false, |ext| ext == "ts") && name != "index" {
+            if path.extension().is_some_and(|ext| ext == "ts") && name != "index" {
                 Some(name.to_string())
             } else {
                 None

@@ -248,7 +248,6 @@ export function SightingsTable({
 
   const isGrouped = groupBy.length > 0;
   const displayItems = isGrouped ? groups : sightings;
-  const displayCount = isGrouped ? groups.length : sightings.length;
 
   return (
     <div className="absolute inset-0 flex flex-col">

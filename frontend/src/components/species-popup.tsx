@@ -1,4 +1,5 @@
 import { Calendar, Users, Check, Clock } from "lucide-react";
+import Image from "next/image";
 import { sanitizeText, sanitizeUrl } from "@/lib/sanitize";
 
 const MAX_DESCRIPTION_LENGTH = 350;
@@ -56,7 +57,6 @@ interface SpeciesInfo {
 interface SpeciesPopupProps {
   name: string;
   count: number;
-  scientificName?: string;
   info?: SpeciesInfo | null;
   observedAt?: string;
   isLifer?: boolean;
@@ -66,7 +66,6 @@ interface SpeciesPopupProps {
 export function SpeciesPopup({
   name,
   count,
-  scientificName,
   info,
   observedAt,
   isLifer,
@@ -127,9 +126,11 @@ export function SpeciesPopup({
     <div className="w-[300px] overflow-hidden rounded-lg font-sans">
       {safePhotoUrl ? (
         <div className="relative">
-          <img
+          <Image
             src={safePhotoUrl}
             alt={safeCommonName}
+            width={300}
+            height={160}
             className="h-40 w-full object-cover"
           />
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2 px-3">

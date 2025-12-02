@@ -54,7 +54,6 @@ function updatePopupWithSpeciesInfo(
     <SpeciesPopup
       name={name}
       count={count}
-      scientificName={info?.scientificName}
       info={info || undefined}
       observedAt={observedAt}
       isLifer={isLifer}
