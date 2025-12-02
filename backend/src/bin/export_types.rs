@@ -92,7 +92,7 @@ fn main() {
     );
     for name in &type_names {
         if name == "api_constants" {
-            index_content.push_str(&format!("export * from \"./{}\";\n", name));
+            index_content.push_str(&format!("export * from \"./{name}\";\n"));
         } else {
             index_content.push_str(&format!(
                 "export type {{ {} }} from \"./{}\";\n",

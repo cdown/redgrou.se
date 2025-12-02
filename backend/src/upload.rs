@@ -79,7 +79,7 @@ struct UploadSizeExceeded;
 
 impl fmt::Display for UploadSizeExceeded {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "CSV exceeds {} MB upload limit", UPLOAD_LIMIT_MB)
+        write!(f, "CSV exceeds {UPLOAD_LIMIT_MB} MB upload limit")
     }
 }
 
@@ -150,8 +150,7 @@ fn size_limit_failure(err: &csv_async::Error) -> Option<ApiError> {
             .is_some()
         {
             return Some(ApiError::bad_request(format!(
-                "CSV exceeds {} MB upload limit",
-                UPLOAD_LIMIT_MB
+                "CSV exceeds {UPLOAD_LIMIT_MB} MB upload limit"
             )));
         }
     }
@@ -163,8 +162,7 @@ fn validate_header_limits(headers: &csv_async::StringRecord) -> Result<(), ApiEr
     let column_count = headers.len();
     if column_count > MAX_CSV_COLUMNS {
         return Err(ApiError::bad_request(format!(
-            "CSV has {} columns; maximum supported is {}",
-            column_count, MAX_CSV_COLUMNS
+            "CSV has {column_count} columns; maximum supported is {MAX_CSV_COLUMNS}"
         )));
     }
     Ok(())
@@ -186,8 +184,7 @@ fn enforce_record_limits(
     let byte_len = record.as_slice().len();
     if byte_len > MAX_RECORD_BYTES {
         return Err(ApiError::bad_request(format!(
-            "Row {} exceeds {} byte limit (row is {} bytes)",
-            row_number, MAX_RECORD_BYTES, byte_len
+            "Row {row_number} exceeds {MAX_RECORD_BYTES} byte limit (row is {byte_len} bytes)"
         )));
     }
 
@@ -258,8 +255,7 @@ fn get_field(
 
     let value = std::str::from_utf8(bytes).map_err(|_| {
         ApiError::bad_request(format!(
-            "Row {} has invalid UTF-8 in column {}",
-            row_number, field_name
+            "Row {row_number} has invalid UTF-8 in column {field_name}"
         ))
     })?;
 
@@ -483,8 +479,7 @@ where
             batch.push(row);
             if total_rows + batch.len() > MAX_UPLOAD_ROWS {
                 return Err(ApiError::bad_request(format!(
-                    "CSV exceeds {} row limit",
-                    MAX_UPLOAD_ROWS
+                    "CSV exceeds {MAX_UPLOAD_ROWS} row limit"
                 )));
             }
             if batch.len() >= BATCH_SIZE {

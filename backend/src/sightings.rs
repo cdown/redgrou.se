@@ -98,8 +98,7 @@ fn validate_group_by_fields(fields: &[String]) -> Result<Vec<String>, ApiError> 
             validated.push(trimmed.to_string());
         } else {
             return Err(ApiError::bad_request(format!(
-                "Invalid group_by field: {}",
-                trimmed
+                "Invalid group_by field: {trimmed}"
             )));
         }
     }
@@ -127,9 +126,7 @@ pub async fn get_sightings(
         filter
             .validate()
             .map_err(|e| ApiError::bad_request(e.message()))?;
-        filter
-            .to_sql(&mut params)
-            .map(|sql| format!(" AND {}", sql))
+        filter.to_sql(&mut params).map(|sql| format!(" AND {sql}"))
     } else {
         None
     };
@@ -138,7 +135,7 @@ pub async fn get_sightings(
     if query.lifers_only == Some(true) {
         let lifer_clause = " AND lifer = 1".to_string();
         filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{}{}", existing, lifer_clause),
+            Some(existing) => format!("{existing}{lifer_clause}"),
             None => lifer_clause,
         });
     }
@@ -148,7 +145,7 @@ pub async fn get_sightings(
         params.push(year.to_string());
         let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();
         filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{}{}", existing, year_tick_clause),
+            Some(existing) => format!("{existing}{year_tick_clause}"),
             None => year_tick_clause,
         });
     }

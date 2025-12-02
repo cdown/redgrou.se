@@ -89,7 +89,7 @@ pub async fn get_tile(
             .map_err(|e| ApiError::bad_request(e.message()))?;
         filter
             .to_sql(&mut filter_params)
-            .map(|sql| format!(" AND {}", sql))
+            .map(|sql| format!(" AND {sql}"))
     } else {
         None
     };
@@ -98,7 +98,7 @@ pub async fn get_tile(
     if query.lifers_only == Some(true) {
         let lifer_clause = " AND s.lifer = 1".to_string();
         filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{}{}", existing, lifer_clause),
+            Some(existing) => format!("{existing}{lifer_clause}"),
             None => lifer_clause,
         });
     }
@@ -108,7 +108,7 @@ pub async fn get_tile(
         filter_params.push(year.to_string());
         let year_tick_clause = " AND s.year_tick = 1 AND s.year = ?".to_string();
         filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{}{}", existing, year_tick_clause),
+            Some(existing) => format!("{existing}{year_tick_clause}"),
             None => year_tick_clause,
         });
     }

@@ -165,8 +165,7 @@ impl Condition {
         match &self.value {
             FilterValue::List(values) if values.len() > MAX_LIST_VALUES => {
                 Err(FilterValidationError::new(format!(
-                    "Lists are limited to {} values",
-                    MAX_LIST_VALUES
+                    "Lists are limited to {MAX_LIST_VALUES} values"
                 )))
             }
             _ => Ok(()),
@@ -179,59 +178,59 @@ impl Condition {
         match (&self.operator, &self.value) {
             (Operator::Eq, FilterValue::String(v)) => {
                 params.push(v.clone());
-                Some(format!("{} = ?", field))
+                Some(format!("{field} = ?"))
             }
             (Operator::Eq, FilterValue::Number(v)) => {
                 params.push(v.to_string());
-                Some(format!("{} = ?", field))
+                Some(format!("{field} = ?"))
             }
             (Operator::Neq, FilterValue::String(v)) => {
                 params.push(v.clone());
-                Some(format!("{} != ?", field))
+                Some(format!("{field} != ?"))
             }
             (Operator::Neq, FilterValue::Number(v)) => {
                 params.push(v.to_string());
-                Some(format!("{} != ?", field))
+                Some(format!("{field} != ?"))
             }
             (Operator::Contains, FilterValue::String(v)) => {
-                params.push(format!("%{}%", v));
-                Some(format!("{} LIKE ?", field))
+                params.push(format!("%{v}%"));
+                Some(format!("{field} LIKE ?"))
             }
             (Operator::StartsWith, FilterValue::String(v)) => {
-                params.push(format!("{}%", v));
-                Some(format!("{} LIKE ?", field))
+                params.push(format!("{v}%"));
+                Some(format!("{field} LIKE ?"))
             }
             (Operator::EndsWith, FilterValue::String(v)) => {
-                params.push(format!("%{}", v));
-                Some(format!("{} LIKE ?", field))
+                params.push(format!("%{v}"));
+                Some(format!("{field} LIKE ?"))
             }
             (Operator::Gte, FilterValue::Number(v)) => {
                 params.push(v.to_string());
-                Some(format!("{} >= ?", field))
+                Some(format!("{field} >= ?"))
             }
             (Operator::Gte, FilterValue::String(v)) => {
                 params.push(v.clone());
-                Some(format!("{} >= ?", field))
+                Some(format!("{field} >= ?"))
             }
             (Operator::Lte, FilterValue::Number(v)) => {
                 params.push(v.to_string());
-                Some(format!("{} <= ?", field))
+                Some(format!("{field} <= ?"))
             }
             (Operator::Lte, FilterValue::String(v)) => {
                 params.push(v.clone());
-                Some(format!("{} <= ?", field))
+                Some(format!("{field} <= ?"))
             }
             (Operator::In, FilterValue::List(vals)) if !vals.is_empty() => {
                 let placeholders: Vec<&str> = vals.iter().map(|_| "?").collect();
                 params.extend(vals.clone());
                 // Note: year_tick is not a FilterField, so this special case
                 // is handled elsewhere (in the year_tick_year query parameter)
-                Some(format!("{} IN ({})", field, placeholders.join(", ")))
+                Some(format!("{field} IN ({})", placeholders.join(", ")))
             }
             (Operator::NotIn, FilterValue::List(vals)) if !vals.is_empty() => {
                 let placeholders: Vec<&str> = vals.iter().map(|_| "?").collect();
                 params.extend(vals.clone());
-                Some(format!("{} NOT IN ({})", field, placeholders.join(", ")))
+                Some(format!("{field} NOT IN ({})", placeholders.join(", ")))
             }
             _ => None,
         }
@@ -245,8 +244,7 @@ fn validate_group(
 ) -> Result<(), FilterValidationError> {
     if depth > MAX_FILTER_DEPTH {
         return Err(FilterValidationError::new(format!(
-            "Filters exceed maximum depth of {}",
-            MAX_FILTER_DEPTH
+            "Filters exceed maximum depth of {MAX_FILTER_DEPTH}"
         )));
     }
 
@@ -256,8 +254,7 @@ fn validate_group(
                 stats.rules += 1;
                 if stats.rules > MAX_FILTER_RULES {
                     return Err(FilterValidationError::new(format!(
-                        "Filters exceed maximum of {} conditions",
-                        MAX_FILTER_RULES
+                        "Filters exceed maximum of {MAX_FILTER_RULES} conditions"
                     )));
                 }
                 condition.validate()?;
@@ -336,8 +333,7 @@ pub async fn get_distinct_values(
 
     let column = filter_field.as_sql_column();
     let query = format!(
-        "SELECT DISTINCT CAST({} AS TEXT) FROM sightings WHERE upload_id = ? AND {} IS NOT NULL ORDER BY {} LIMIT 500",
-        column, column, column
+        "SELECT DISTINCT CAST({column} AS TEXT) FROM sightings WHERE upload_id = ? AND {column} IS NOT NULL ORDER BY {column} LIMIT 500"
     );
 
     let rows: Vec<(String,)> =

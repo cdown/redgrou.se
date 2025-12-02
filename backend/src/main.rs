@@ -466,7 +466,7 @@ fn make_request_span<B>(req: &Request<B>) -> Span {
     let path = req.uri().path();
     let query = req.uri().query();
     let full_path = if let Some(q) = query {
-        format!("{}?{}", path, q)
+        format!("{path}?{q}")
     } else {
         path.to_string()
     };
@@ -487,7 +487,7 @@ fn on_request<B>(req: &Request<B>, _span: &Span) {
     let path = req.uri().path();
     let query = req.uri().query();
     let full_path = if let Some(q) = query {
-        format!("{}?{}", path, q)
+        format!("{path}?{q}")
     } else {
         path.to_string()
     };
@@ -650,9 +650,7 @@ async fn get_filtered_count(
         filter
             .validate()
             .map_err(|e| ApiError::bad_request(e.message()))?;
-        filter
-            .to_sql(&mut params)
-            .map(|sql| format!(" AND {}", sql))
+        filter.to_sql(&mut params).map(|sql| format!(" AND {sql}"))
     } else {
         None
     };
@@ -661,7 +659,7 @@ async fn get_filtered_count(
     if query.lifers_only == Some(true) {
         let lifer_clause = " AND lifer = 1".to_string();
         filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{}{}", existing, lifer_clause),
+            Some(existing) => format!("{existing}{lifer_clause}"),
             None => lifer_clause,
         });
     }
@@ -671,7 +669,7 @@ async fn get_filtered_count(
         params.push(year.to_string());
         let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();
         filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{}{}", existing, year_tick_clause),
+            Some(existing) => format!("{existing}{year_tick_clause}"),
             None => year_tick_clause,
         });
     }
