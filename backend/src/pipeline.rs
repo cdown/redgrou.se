@@ -344,7 +344,7 @@ where
     INSERT INTO sightings (
         upload_id, sighting_uuid, common_name, scientific_name,
         count, latitude, longitude, country_code,
-        region_code, observed_at, year, lifer, year_tick
+        region_code, observed_at, year, lifer, year_tick, vis_rank
     )
     SELECT
         ?1,
@@ -358,7 +358,8 @@ where
         value->>4, -- region_code
         value->>5, -- observed_at
         CAST(value->>9 AS INTEGER), -- year
-        0, 0
+        0, 0,
+        ABS(RANDOM()) % 10001 -- vis_rank: random 0-10000 (lifers/year_ticks will override to 0 later)
     FROM json_each(?2)
     "#;
 

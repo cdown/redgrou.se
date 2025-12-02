@@ -258,6 +258,15 @@ async fn compute_lifer_and_year_tick(
     )
     .await?;
 
+    // Boost visibility of lifers and year ticks (rank 0 = highest priority)
+    // This ensures 'important' sightings are seen even at world-view zoom levels
+    db::query_with_timeout(
+        sqlx::query("UPDATE sightings SET vis_rank = 0 WHERE upload_id = ? AND (lifer = 1 OR year_tick = 1)")
+            .bind(upload_id)
+            .execute(pool),
+    )
+    .await?;
+
     Ok(())
 }
 
