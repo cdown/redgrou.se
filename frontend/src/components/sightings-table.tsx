@@ -24,6 +24,7 @@ import {
   MultiCombobox,
   MultiComboboxOption,
 } from "@/components/ui/multi-combobox";
+import { formatDisplayDate } from "@/lib/utils";
 
 interface SightingsTableProps {
   uploadId: string;
@@ -174,15 +175,6 @@ export function SightingsTable({
       setSortField(field);
       setSortDir("asc");
     }
-  };
-
-  const formatDate = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-GB", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
   };
 
   const SortIcon = ({ field }: { field: SortField }) => {
@@ -374,7 +366,7 @@ export function SightingsTable({
                     {groupBy.includes("observed_at") && (
                       <div className="w-[120px] shrink-0 px-3 py-2">
                         {group.observed_at
-                          ? formatDate(group.observed_at)
+                          ? formatDisplayDate(group.observed_at)
                           : "—"}
                       </div>
                     )}
@@ -440,7 +432,7 @@ export function SightingsTable({
                       {formatRegion(sighting.region_code)}
                     </div>
                     <div className="w-[120px] shrink-0 px-3 py-2">
-                      {formatDate(sighting.observed_at)}
+                      {formatDisplayDate(sighting.observed_at)}
                     </div>
                     <div className="flex-1 px-3 py-2"></div>
                   </div>

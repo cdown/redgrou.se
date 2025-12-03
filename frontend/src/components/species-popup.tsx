@@ -8,24 +8,12 @@ import {
   COLOUR_YEAR_TICK_BG,
   COLOUR_COUNTRY_TICK_BG,
 } from "@/lib/colours";
+import { formatDisplayDate } from "@/lib/utils";
 
 const MAX_DESCRIPTION_LENGTH = 350;
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, "");
-}
-
-function formatDate(dateString: string): string {
-  try {
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return dateString;
-  }
 }
 
 function firstParagraph(text: string): string {
@@ -80,8 +68,10 @@ export function SpeciesPopup({
   isYearTick,
   isCountryTick,
 }: SpeciesPopupProps) {
+  const formattedObservedDate = formatDisplayDate(observedAt);
+
   if (!info) {
-    const dateDisplay = observedAt ? formatDate(observedAt) : "";
+    const dateDisplay = formattedObservedDate;
     return (
       <div className="w-[280px] font-sans">
         <div className="p-3">
@@ -133,8 +123,8 @@ export function SpeciesPopup({
   const safeAttribution = sanitizeText(info.photoAttribution);
   const safePhotoUrl = sanitizeUrl(info.photoUrl);
   const safeInatUrl = sanitizeUrl(info.inaturalistUrl);
-  const safeDateDisplay = observedAt
-    ? sanitizeText(formatDate(observedAt))
+  const safeDateDisplay = formattedObservedDate
+    ? sanitizeText(formattedObservedDate)
     : null;
 
   return (

@@ -39,6 +39,7 @@ import {
   FIELDS_ROUTE,
   FIELD_VALUES_ROUTE,
 } from "@/lib/generated/api_constants";
+import { formatDisplayDate } from "@/lib/utils";
 
 function toComboboxOptions(
   values: string[],
@@ -575,14 +576,6 @@ function DatePicker({ value, onChange }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const date = value ? new Date(value) : undefined;
 
-  const formatDate = (d: Date) => {
-    return d.toLocaleDateString("en-GB", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
-  };
-
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -590,7 +583,7 @@ function DatePicker({ value, onChange }: DatePickerProps) {
           variant="outline"
           className="h-8 w-36 justify-start text-left font-normal"
         >
-          {date ? formatDate(date) : "Select date..."}
+          {date ? formatDisplayDate(date) : "Select date..."}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align="start">
