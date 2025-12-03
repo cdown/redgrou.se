@@ -29,8 +29,8 @@ use ts_rs::TS;
 use redgrouse::api_constants;
 use redgrouse::error::ApiError;
 use redgrouse::filter::{
-    get_distinct_values, get_field_metadata, CountQuery, FieldMetadata, FieldValues, FilterGroup,
-    TickFilters,
+    build_filter_clause, get_distinct_values, get_field_metadata, CountQuery, FieldMetadata,
+    FieldValues,
 };
 use redgrouse::{db, sightings, tiles, upload};
 
@@ -675,42 +675,24 @@ async fn get_filtered_count(
     Path(upload_id): Path<String>,
     Query(query): Query<CountQuery>,
 ) -> Result<Json<CountResponse>, ApiError> {
-    let mut params: Vec<String> = vec![upload_id];
+    let (filter_clause, params) = build_filter_clause(
+        query.filter.as_ref(),
+        query.lifers_only,
+        query.year_tick_year,
+        query.country_tick_country.as_ref(),
+        None,
+    )?;
 
-    let mut filter_clause = if let Some(filter_json) = &query.filter {
-        let filter: FilterGroup = filter_json.try_into()?;
-        filter.to_sql(&mut params).map(|sql| format!(" AND {sql}"))
-    } else {
-        None
-    };
-
-    let mut tick_filters = TickFilters::new();
-    if query.lifers_only == Some(true) {
-        tick_filters.add_lifers_only(None);
-    }
-    if let Some(year) = query.year_tick_year {
-        tick_filters.add_year_tick(year, None);
-    }
-    if let Some(country) = &query.country_tick_country {
-        tick_filters.add_country_tick(country, None);
-    }
-    let (clauses, tick_params) = tick_filters.into_parts();
-    params.extend(tick_params);
-    if !clauses.is_empty() {
-        let clause_str = format!(" {}", clauses.join(" "));
-        filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{clause_str}"),
-            None => clause_str.trim_start_matches(" ").to_string(),
-        });
-    }
+    let mut all_params = vec![upload_id];
+    all_params.extend(params);
 
     let sql = format!(
         "SELECT COUNT(*) as cnt FROM sightings WHERE upload_id = ?{}",
-        filter_clause.unwrap_or_default()
+        filter_clause
     );
 
     let mut db_query = sqlx::query_scalar::<_, i64>(&sql);
-    for param in &params {
+    for param in &all_params {
         db_query = db_query.bind(param);
     }
 
@@ -735,42 +717,24 @@ async fn get_bbox(
     Path(upload_id): Path<String>,
     Query(query): Query<CountQuery>,
 ) -> Result<Json<BboxResponse>, ApiError> {
-    let mut params: Vec<String> = vec![upload_id];
+    let (filter_clause, params) = build_filter_clause(
+        query.filter.as_ref(),
+        query.lifers_only,
+        query.year_tick_year,
+        query.country_tick_country.as_ref(),
+        None,
+    )?;
 
-    let mut filter_clause = if let Some(filter_json) = &query.filter {
-        let filter: FilterGroup = filter_json.try_into()?;
-        filter.to_sql(&mut params).map(|sql| format!(" AND {sql}"))
-    } else {
-        None
-    };
-
-    let mut tick_filters = TickFilters::new();
-    if query.lifers_only == Some(true) {
-        tick_filters.add_lifers_only(None);
-    }
-    if let Some(year) = query.year_tick_year {
-        tick_filters.add_year_tick(year, None);
-    }
-    if let Some(country) = &query.country_tick_country {
-        tick_filters.add_country_tick(country, None);
-    }
-    let (clauses, tick_params) = tick_filters.into_parts();
-    params.extend(tick_params);
-    if !clauses.is_empty() {
-        let clause_str = format!(" {}", clauses.join(" "));
-        filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{clause_str}"),
-            None => clause_str.trim_start_matches(" ").to_string(),
-        });
-    }
+    let mut all_params = vec![upload_id];
+    all_params.extend(params);
 
     let sql = format!(
         "SELECT MIN(longitude) as min_lng, MIN(latitude) as min_lat, MAX(longitude) as max_lng, MAX(latitude) as max_lat FROM sightings WHERE upload_id = ?{}",
-        filter_clause.unwrap_or_default()
+        filter_clause
     );
 
     let mut db_query = sqlx::query(&sql);
-    for param in &params {
+    for param in &all_params {
         db_query = db_query.bind(param);
     }
 

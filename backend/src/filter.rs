@@ -393,6 +393,47 @@ pub struct CountQuery {
     pub country_tick_country: Option<String>,
 }
 
+/// Builds filter SQL clause and parameters from query options.
+/// Returns (filter_clause, params) where filter_clause is a string like " AND (...)" or empty string.
+pub fn build_filter_clause(
+    filter_json: Option<&String>,
+    lifers_only: Option<bool>,
+    year_tick_year: Option<i32>,
+    country_tick_country: Option<&String>,
+    table_prefix: Option<&str>,
+) -> Result<(String, Vec<String>), ApiError> {
+    let mut params: Vec<String> = Vec::new();
+
+    let mut filter_clause = if let Some(filter_json) = filter_json {
+        let filter: FilterGroup = filter_json.try_into()?;
+        filter.to_sql(&mut params).map(|sql| format!(" AND {sql}"))
+    } else {
+        None
+    };
+
+    let mut tick_filters = TickFilters::new();
+    if lifers_only == Some(true) {
+        tick_filters.add_lifers_only(table_prefix);
+    }
+    if let Some(year) = year_tick_year {
+        tick_filters.add_year_tick(year, table_prefix);
+    }
+    if let Some(country) = country_tick_country {
+        tick_filters.add_country_tick(country, table_prefix);
+    }
+    let (clauses, tick_params) = tick_filters.into_parts();
+    params.extend(tick_params);
+    if !clauses.is_empty() {
+        let clause_str = format!(" {}", clauses.join(" "));
+        filter_clause = Some(match filter_clause {
+            Some(existing) => format!("{existing}{clause_str}"),
+            None => clause_str.trim_start_matches(" ").to_string(),
+        });
+    }
+
+    Ok((filter_clause.unwrap_or_default(), params))
+}
+
 pub async fn get_distinct_values(
     pool: &SqlitePool,
     upload_id: &str,

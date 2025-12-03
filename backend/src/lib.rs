@@ -18,8 +18,8 @@ pub async fn create_test_router(pool: SqlitePool) -> Router {
     use crate::api_constants;
     use crate::error::ApiError;
     use crate::filter::{
-        get_distinct_values, get_field_metadata, CountQuery, FieldMetadata, FieldValues,
-        TickFilters,
+        build_filter_clause, get_distinct_values, get_field_metadata, CountQuery, FieldMetadata,
+        FieldValues,
     };
     use crate::sightings::get_sightings;
     use crate::tiles::get_tile;
@@ -64,40 +64,24 @@ pub async fn create_test_router(pool: SqlitePool) -> Router {
         axum::extract::Path(upload_id): axum::extract::Path<String>,
         axum::extract::Query(query): axum::extract::Query<CountQuery>,
     ) -> Result<Json<CountResponse>, ApiError> {
-        use crate::filter::FilterGroup;
-        let mut params: Vec<String> = vec![upload_id.clone()];
+        let (filter_clause, params) = build_filter_clause(
+            query.filter.as_ref(),
+            query.lifers_only,
+            query.year_tick_year,
+            query.country_tick_country.as_ref(),
+            None,
+        )?;
 
-        let mut filter_clause = if let Some(filter_json) = &query.filter {
-            let filter: FilterGroup = filter_json.try_into()?;
-            filter.to_sql(&mut params).map(|sql| format!(" AND {sql}"))
-        } else {
-            None
-        };
-
-        let mut tick_filters = TickFilters::new();
-        if query.lifers_only == Some(true) {
-            tick_filters.add_lifers_only(None);
-        }
-        if let Some(year) = query.year_tick_year {
-            tick_filters.add_year_tick(year, None);
-        }
-        let (clauses, tick_params) = tick_filters.into_parts();
-        params.extend(tick_params);
-        if !clauses.is_empty() {
-            let clause_str = format!(" {}", clauses.join(" "));
-            filter_clause = Some(match filter_clause {
-                Some(existing) => format!("{existing}{clause_str}"),
-                None => clause_str.trim_start_matches(" ").to_string(),
-            });
-        }
+        let mut all_params = vec![upload_id];
+        all_params.extend(params);
 
         let sql = format!(
             "SELECT COUNT(*) as cnt FROM sightings WHERE upload_id = ?{}",
-            filter_clause.unwrap_or_default()
+            filter_clause
         );
 
         let mut db_query = sqlx::query_scalar::<_, i64>(&sql);
-        for param in &params {
+        for param in &all_params {
             db_query = db_query.bind(param);
         }
 

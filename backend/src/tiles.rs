@@ -8,7 +8,7 @@ use tracing::{debug, error};
 
 use crate::db;
 use crate::error::ApiError;
-use crate::filter::{FilterGroup, TickFilters};
+use crate::filter::build_filter_clause;
 
 const TILE_EXTENT: u32 = 4096;
 // Maximum vis_rank value (0-10000). When threshold equals this, all points are included.
@@ -73,36 +73,13 @@ pub async fn get_tile(
         z, x, y, lon_min, lat_min, lon_max, lat_max
     );
 
-    let mut filter_params: Vec<String> = Vec::new();
-
-    let mut filter_clause = if let Some(filter_json) = &query.filter {
-        let filter: FilterGroup = filter_json.try_into()?;
-        filter
-            .to_sql(&mut filter_params)
-            .map(|sql| format!(" AND {sql}"))
-    } else {
-        None
-    };
-
-    let mut tick_filters = TickFilters::new();
-    if query.lifers_only == Some(true) {
-        tick_filters.add_lifers_only(Some("s"));
-    }
-    if let Some(year) = query.year_tick_year {
-        tick_filters.add_year_tick(year, Some("s"));
-    }
-    if let Some(country) = &query.country_tick_country {
-        tick_filters.add_country_tick(country, Some("s"));
-    }
-    let (clauses, tick_params) = tick_filters.into_parts();
-    filter_params.extend(tick_params);
-    if !clauses.is_empty() {
-        let clause_str = format!(" {}", clauses.join(" "));
-        filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{clause_str}"),
-            None => clause_str.trim_start_matches(" ").to_string(),
-        });
-    }
+    let (filter_clause, filter_params) = build_filter_clause(
+        query.filter.as_ref(),
+        query.lifers_only,
+        query.year_tick_year,
+        query.country_tick_country.as_ref(),
+        Some("s"),
+    )?;
 
     // Use vis_rank-based sampling for efficient tile generation.
     // vis_rank is assigned at ingest time (0-MAX_VIS_RANK, where 0 = highest priority for lifers/year_ticks).
@@ -158,8 +135,7 @@ pub async fn get_tile(
         {}
         LIMIT ?
         ",
-        vis_rank_clause,
-        filter_clause.unwrap_or_default()
+        vis_rank_clause, filter_clause
     );
 
     let mut db_query = sqlx::query(&sql).bind(&upload_id);

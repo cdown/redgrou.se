@@ -7,7 +7,7 @@ use ts_rs::TS;
 use crate::api_constants;
 use crate::db;
 use crate::error::ApiError;
-use crate::filter::{FilterGroup, TickFilters};
+use crate::filter::build_filter_clause;
 
 #[derive(Debug, Serialize, Deserialize, TS, Clone, Copy)]
 #[ts(export)]
@@ -121,35 +121,13 @@ pub async fn get_sightings(
     let offset_i64 = i64::try_from(offset).unwrap_or(i64::MAX);
 
     // Collect filter params separately so upload_id stays first and field names remain enum-whitelisted.
-    let mut filter_params: Vec<String> = Vec::new();
-    let mut filter_clause_parts: Vec<String> = Vec::new();
-
-    if let Some(filter_json) = &query.filter {
-        let filter: FilterGroup = filter_json.try_into()?;
-        if let Some(sql) = filter.to_sql(&mut filter_params) {
-            filter_clause_parts.push(format!("AND {sql}"));
-        }
-    }
-
-    let mut tick_filters = TickFilters::new();
-    if query.lifers_only == Some(true) {
-        tick_filters.add_lifers_only(None);
-    }
-    if let Some(year) = query.year_tick_year {
-        tick_filters.add_year_tick(year, None);
-    }
-    if let Some(country) = &query.country_tick_country {
-        tick_filters.add_country_tick(country, None);
-    }
-    let (clauses, tick_params) = tick_filters.into_parts();
-    filter_clause_parts.extend(clauses);
-    filter_params.extend(tick_params);
-
-    let filter_clause_str = if filter_clause_parts.is_empty() {
-        String::new()
-    } else {
-        format!(" {}", filter_clause_parts.join(" "))
-    };
+    let (filter_clause_str, filter_params) = build_filter_clause(
+        query.filter.as_ref(),
+        query.lifers_only,
+        query.year_tick_year,
+        query.country_tick_country.as_ref(),
+        None,
+    )?;
 
     if let Some(group_by_str) = &query.group_by {
         let group_by_fields: Vec<String> =
