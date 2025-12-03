@@ -14,12 +14,17 @@ export function subscribeToVersionMismatch(callback: () => void): () => void {
 export function checkVersionHeader(response: Response): void {
   if (versionMismatchDetected) return;
 
-  const serverVersion = response.headers.get("x-build-version");
-  if (!serverVersion || serverVersion === "unknown" || BUILD_VERSION === "unknown") {
+  const serverVersion = response.headers.get("x-build-version")?.trim();
+  const clientVersion = BUILD_VERSION.trim();
+
+  // Don't show mismatch if either version is missing or unknown
+  // This prevents false positives when build info isn't available
+  if (!serverVersion || serverVersion === "unknown" || clientVersion === "unknown") {
     return;
   }
 
-  if (serverVersion !== BUILD_VERSION) {
+  // Only show mismatch if both versions are valid and different
+  if (serverVersion !== clientVersion) {
     versionMismatchDetected = true;
     callbacks.forEach((cb) => cb());
   }

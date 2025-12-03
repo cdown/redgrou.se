@@ -115,7 +115,7 @@ if [[ "$MODE" == "prod" ]]; then
     # Build backend (release mode, optimized)
     # Run in background and track PID so we can kill it if interrupted
     echo "[rgrse] Building backend..." >&2
-    (cd backend && touch build.rs && RUSTFLAGS="-C target-cpu=native" cargo build --release) &
+    (cd backend && touch build.rs && rm -f target/release/build/redgrouse-*/output && RUSTFLAGS="-C target-cpu=native" cargo build --release) &
     BUILD_PID=$!
     wait $BUILD_PID
     BUILD_PID=""
