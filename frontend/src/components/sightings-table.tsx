@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useState, useRef } from "react";
 import { MapPin } from "lucide-react";
-import { apiFetch, buildApiUrl, buildFilterParams } from "@/lib/api";
+import {
+  apiFetch,
+  buildApiUrl,
+  buildFilterParams,
+  checkApiResponse,
+  getErrorMessage,
+} from "@/lib/api";
 import { FilterGroup } from "@/lib/filter-types";
 import { formatCountry } from "@/lib/countries";
 import { formatRegion } from "@/lib/regions";
@@ -96,11 +102,7 @@ export function SightingsTable({
         })}?${params}`;
 
         const res = await apiFetch(url);
-        if (!res.ok) {
-          const errorText = await res.text();
-          console.error("API error:", res.status, errorText);
-          throw new Error(`API error: ${res.status}`);
-        }
+        await checkApiResponse(res, "Failed to fetch sightings");
         const json: SightingsResponse = await res.json();
 
         if (groupBy.length > 0 && json.groups) {
@@ -128,7 +130,7 @@ export function SightingsTable({
         setHasMore(pageNum < json.total_pages);
         pageRef.current = pageNum;
       } catch (e) {
-        console.error("Failed to fetch sightings:", e);
+        console.error("Failed to fetch sightings:", getErrorMessage(e, "Unknown error"));
       } finally {
         loadingRef.current = false;
         setLoading(false);
