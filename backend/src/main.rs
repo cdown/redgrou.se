@@ -29,10 +29,8 @@ use ts_rs::TS;
 use redgrouse::api_constants;
 use redgrouse::config;
 use redgrouse::error::ApiError;
-use redgrouse::filter::{
-    build_filter_clause, get_distinct_values, get_field_metadata, CountQuery, FieldMetadata,
-    FieldValues,
-};
+use redgrouse::filter::{build_filter_clause, CountQuery};
+use redgrouse::handlers;
 use redgrouse::{db, sightings, tiles, upload};
 
 const BUILD_VERSION: &str = env!("BUILD_VERSION");
@@ -159,17 +157,23 @@ async fn main() -> anyhow::Result<()> {
         .route(api_constants::VERSION_ROUTE, get(version_info))
         .route(
             api_constants::UPLOAD_DETAILS_ROUTE,
-            get(get_upload).delete(upload::delete_upload),
+            get(handlers::get_upload).delete(upload::delete_upload),
         )
-        .route(api_constants::UPLOAD_COUNT_ROUTE, get(get_filtered_count))
+        .route(
+            api_constants::UPLOAD_COUNT_ROUTE,
+            get(handlers::get_filtered_count),
+        )
         .route(api_constants::UPLOAD_BBOX_ROUTE, get(get_bbox))
         .route(
             api_constants::UPLOAD_SIGHTINGS_ROUTE,
             get(sightings::get_sightings),
         )
         .route(api_constants::TILE_ROUTE, get(tiles::get_tile))
-        .route(api_constants::FIELDS_ROUTE, get(fields_metadata))
-        .route(api_constants::FIELD_VALUES_ROUTE, get(field_values))
+        .route(api_constants::FIELDS_ROUTE, get(handlers::fields_metadata))
+        .route(
+            api_constants::FIELD_VALUES_ROUTE,
+            get(handlers::field_values),
+        )
         .merge(ingest_routes)
         .layer(from_fn(enforce_upload_limit))
         .layer(from_fn(enforce_rate_limit))
@@ -625,75 +629,6 @@ async fn fetch_cloudflare_proxies() -> anyhow::Result<Vec<IpNet>> {
 
 #[derive(Serialize, TS)]
 #[ts(export)]
-struct UploadMetadata {
-    upload_id: String,
-    filename: String,
-    row_count: i64,
-}
-
-async fn get_upload(
-    State(pool): State<SqlitePool>,
-    Path(upload_id): Path<String>,
-) -> Result<Json<UploadMetadata>, ApiError> {
-    let row = db::query_with_timeout(
-        sqlx::query_as::<_, (String, String, i64)>(
-            "SELECT id, filename, row_count FROM uploads WHERE id = ?",
-        )
-        .bind(&upload_id)
-        .fetch_optional(&pool),
-    )
-    .await
-    .map_err(|e| e.into_api_error("loading upload metadata", "Database error"))?
-    .ok_or_else(|| ApiError::not_found("Upload not found"))?;
-
-    Ok(Json(UploadMetadata {
-        upload_id: row.0,
-        filename: row.1,
-        row_count: row.2,
-    }))
-}
-
-#[derive(Serialize, TS)]
-#[ts(export)]
-struct CountResponse {
-    count: i64,
-}
-
-async fn get_filtered_count(
-    State(pool): State<SqlitePool>,
-    Path(upload_id): Path<String>,
-    Query(query): Query<CountQuery>,
-) -> Result<Json<CountResponse>, ApiError> {
-    let (filter_clause, params) = build_filter_clause(
-        query.filter.as_ref(),
-        query.lifers_only,
-        query.year_tick_year,
-        query.country_tick_country.as_ref(),
-        None,
-    )?;
-
-    let mut all_params = vec![upload_id];
-    all_params.extend(params);
-
-    let sql = format!(
-        "SELECT COUNT(*) as cnt FROM sightings WHERE upload_id = ?{}",
-        filter_clause
-    );
-
-    let mut db_query = sqlx::query_scalar::<_, i64>(&sql);
-    for param in &all_params {
-        db_query = db_query.bind(param);
-    }
-
-    let count = db::query_with_timeout(db_query.fetch_one(&pool))
-        .await
-        .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
-
-    Ok(Json(CountResponse { count }))
-}
-
-#[derive(Serialize, TS)]
-#[ts(export)]
 struct BboxResponse {
     min_lng: f64,
     min_lat: f64,
@@ -747,19 +682,4 @@ async fn get_bbox(
         max_lng: max_lng.unwrap(),
         max_lat: max_lat.unwrap(),
     }))
-}
-
-async fn fields_metadata() -> Json<Vec<FieldMetadata>> {
-    Json(get_field_metadata())
-}
-
-async fn field_values(
-    State(pool): State<SqlitePool>,
-    Path((upload_id, field)): Path<(String, String)>,
-) -> Result<Json<FieldValues>, ApiError> {
-    let values = get_distinct_values(&pool, &upload_id, &field)
-        .await
-        .map_err(|e| e.into_api_error("loading field values", "Database error"))?;
-
-    Ok(Json(FieldValues { field, values }))
 }
