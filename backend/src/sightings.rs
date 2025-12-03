@@ -3,6 +3,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, SqlitePool};
 use ts_rs::TS;
+use uuid::Uuid;
 
 use crate::api_constants;
 use crate::bind_filter_params;
@@ -123,6 +124,8 @@ pub async fn get_sightings(
     Path(upload_id): Path<String>,
     Query(query): Query<SightingsQuery>,
 ) -> Result<Json<SightingsResponse>, ApiError> {
+    let upload_uuid = Uuid::parse_str(&upload_id)
+        .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
     let page = query.page.unwrap_or(1).max(1);
     let page_size = query
         .page_size
@@ -196,7 +199,7 @@ pub async fn get_sightings(
 
         let count_query = bind_filter_params!(
             sqlx::query_scalar::<_, i64>(&count_sql),
-            &upload_id,
+            &upload_uuid.as_bytes()[..],
             &filter_params
         );
 
@@ -255,8 +258,11 @@ pub async fn get_sightings(
             sort_dir
         );
 
-        let mut select_query =
-            bind_filter_params!(sqlx::query(&select_sql), &upload_id, &filter_params);
+        let mut select_query = bind_filter_params!(
+            sqlx::query(&select_sql),
+            &upload_uuid.as_bytes()[..],
+            &filter_params
+        );
         select_query = select_query.bind(i64::from(page_size));
         select_query = select_query.bind(offset_i64);
 
@@ -320,7 +326,7 @@ pub async fn get_sightings(
     );
     let count_query = bind_filter_params!(
         sqlx::query_scalar::<_, i64>(&count_sql),
-        &upload_id,
+        &upload_uuid.as_bytes()[..],
         &filter_params
     );
 
@@ -341,7 +347,7 @@ pub async fn get_sightings(
 
     let mut select_query = bind_filter_params!(
         sqlx::query_as::<_, Sighting>(&select_sql),
-        &upload_id,
+        &upload_uuid.as_bytes()[..],
         &filter_params
     );
     select_query = select_query.bind(i64::from(page_size));

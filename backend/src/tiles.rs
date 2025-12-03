@@ -59,6 +59,8 @@ pub async fn get_tile(
     Path((upload_id, z, x, y_str)): Path<(String, u32, u32, String)>,
     Query(query): Query<TileQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let upload_uuid = uuid::Uuid::parse_str(&upload_id)
+        .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
     let y: u32 = match y_str.trim_end_matches(".pbf").parse() {
         Ok(v) => v,
         Err(_) => {
@@ -139,7 +141,7 @@ pub async fn get_tile(
         vis_rank_clause, filter_clause
     );
 
-    let mut db_query = sqlx::query(&sql).bind(&upload_id);
+    let mut db_query = sqlx::query(&sql).bind(&upload_uuid.as_bytes()[..]);
     if !include_all_points {
         db_query = db_query.bind(vis_rank_threshold);
     }

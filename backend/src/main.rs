@@ -649,8 +649,8 @@ async fn get_bbox(
         None,
     )?;
 
-    let mut all_params = vec![upload_id];
-    all_params.extend(params);
+    let upload_uuid = uuid::Uuid::parse_str(&upload_id)
+        .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
 
     let sql = format!(
         "SELECT MIN(longitude) as min_lng, MIN(latitude) as min_lat, MAX(longitude) as max_lng, MAX(latitude) as max_lat FROM sightings WHERE upload_id = ?{}",
@@ -658,7 +658,8 @@ async fn get_bbox(
     );
 
     let mut db_query = sqlx::query(&sql);
-    for param in &all_params {
+    db_query = db_query.bind(&upload_uuid.as_bytes()[..]);
+    for param in &params {
         db_query = db_query.bind(param);
     }
 

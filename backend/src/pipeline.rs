@@ -434,11 +434,17 @@ where
         return Ok(());
     }
 
+    // Convert UUID string to BLOB for database storage
+    let upload_uuid = Uuid::parse_str(upload_id)
+        .map_err(|_| DbQueryError::Sqlx(sqlx::Error::Decode("Invalid UUID format".into())))?;
+    let upload_id_blob = &upload_uuid.as_bytes()[..];
+
     // SQLite parses JSON arrays natively. We use array indices instead of field names
     // to eliminate the overhead of writing field names in JSON serialization.
     // Serialization order: [uuid, species_id, country_code, region_code,
     //                        observed_at, count, latitude, longitude, year]
     // SELECT order must match INSERT column order exactly.
+    // UUIDs are stored as BLOB, so we convert the JSON-extracted UUID string to BLOB.
     let sql = r#"
     INSERT INTO sightings (
         upload_id, sighting_uuid, species_id,
@@ -447,7 +453,7 @@ where
     )
     SELECT
         ?1,
-        value->>0, -- sighting_uuid
+        CAST('X' || UPPER(REPLACE(value->>0, '-', '')) AS BLOB), -- sighting_uuid: convert UUID string to BLOB
         CAST(value->>1 AS INTEGER), -- species_id
         CAST(value->>5 AS INTEGER), -- count
         CAST(value->>6 AS REAL), -- latitude
@@ -463,7 +469,7 @@ where
 
     db::query_with_timeout(
         sqlx::query(sql)
-            .bind(upload_id)
+            .bind(upload_id_blob)
             .bind(json_str)
             .execute(executor),
     )

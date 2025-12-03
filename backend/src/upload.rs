@@ -222,6 +222,11 @@ async fn compute_lifer_and_year_tick(
     pool: &SqlitePool,
     upload_id: &str,
 ) -> Result<(), DbQueryError> {
+    // Convert UUID string to BLOB for database queries
+    let upload_uuid = Uuid::parse_str(upload_id)
+        .map_err(|_| DbQueryError::Sqlx(sqlx::Error::Decode("Invalid UUID format".into())))?;
+    let upload_id_blob = &upload_uuid.as_bytes()[..];
+
     // Derive lifer, year, and country ticks (first sightings per grouping) and bump their vis_rank.
     db::query_with_timeout(
         sqlx::query(
@@ -232,7 +237,7 @@ async fn compute_lifer_and_year_tick(
             ) WHERE rn = 1
         )",
         )
-        .bind(upload_id)
+        .bind(upload_id_blob)
         .execute(pool),
     )
     .await?;
@@ -246,7 +251,7 @@ async fn compute_lifer_and_year_tick(
             ) WHERE rn = 1
         )"
         )
-        .bind(upload_id)
+        .bind(upload_id_blob)
         .execute(pool),
     )
     .await?;
@@ -260,7 +265,7 @@ async fn compute_lifer_and_year_tick(
             ) WHERE rn = 1
         )"
         )
-        .bind(upload_id)
+        .bind(upload_id_blob)
         .execute(pool),
     )
     .await?;
@@ -269,7 +274,7 @@ async fn compute_lifer_and_year_tick(
     // This ensures 'important' sightings are seen even at world-view zoom levels
     db::query_with_timeout(
         sqlx::query("UPDATE sightings SET vis_rank = 0 WHERE upload_id = ? AND (lifer = 1 OR year_tick = 1 OR country_tick = 1)")
-            .bind(upload_id)
+            .bind(upload_id_blob)
             .execute(pool),
     )
     .await?;
@@ -294,9 +299,17 @@ pub async fn upload_csv(
         let edit_token = Uuid::new_v4().to_string();
         let edit_token_hash = hash_token(&edit_token);
 
+        // Convert UUID string to BLOB for database storage
+        let upload_uuid = match Uuid::parse_str(&upload_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return ApiError::internal("Failed to parse generated UUID").into_response();
+            }
+        };
+
         if let Err(e) = db::query_with_timeout(
             sqlx::query("INSERT INTO uploads (id, filename, edit_token_hash) VALUES (?, ?, ?)")
-                .bind(&upload_id)
+                .bind(&upload_uuid.as_bytes()[..])
                 .bind(&filename)
                 .bind(&edit_token_hash)
                 .execute(&pool),
@@ -311,20 +324,29 @@ pub async fn upload_csv(
         let total_rows = match ingest_csv_field(field, &pool, &upload_id).await {
             Ok(rows) => rows,
             Err(err) => {
-                let _ = db::query_with_timeout(
-                    sqlx::query("DELETE FROM uploads WHERE id = ?")
-                        .bind(&upload_id)
-                        .execute(&pool),
-                )
-                .await;
+                if let Ok(upload_uuid) = Uuid::parse_str(&upload_id) {
+                    let _ = db::query_with_timeout(
+                        sqlx::query("DELETE FROM uploads WHERE id = ?")
+                            .bind(&upload_uuid.as_bytes()[..])
+                            .execute(&pool),
+                    )
+                    .await;
+                }
                 return err.into_response();
+            }
+        };
+
+        let upload_uuid = match Uuid::parse_str(&upload_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return ApiError::internal("Failed to parse UUID").into_response();
             }
         };
 
         if let Err(e) = db::query_with_timeout(
             sqlx::query("UPDATE uploads SET row_count = ? WHERE id = ?")
                 .bind(i64::try_from(total_rows).unwrap_or(i64::MAX))
-                .bind(&upload_id)
+                .bind(&upload_uuid.as_bytes()[..])
                 .execute(&pool),
         )
         .await
@@ -375,9 +397,11 @@ async fn verify_upload_access(
     upload_id: &str,
     token: &str,
 ) -> Result<bool, DbQueryError> {
+    let upload_uuid = Uuid::parse_str(upload_id)
+        .map_err(|_| DbQueryError::Sqlx(sqlx::Error::Decode("Invalid UUID format".into())))?;
     let hash = db::query_with_timeout(
         sqlx::query_scalar::<_, Option<String>>("SELECT edit_token_hash FROM uploads WHERE id = ?")
-            .bind(upload_id)
+            .bind(&upload_uuid.as_bytes()[..])
             .fetch_optional(pool),
     )
     .await?;
@@ -424,6 +448,13 @@ pub async fn update_csv(
         return response;
     }
 
+    let upload_uuid = match Uuid::parse_str(&upload_id) {
+        Ok(uuid) => uuid,
+        Err(_) => {
+            return ApiError::bad_request("Invalid upload_id format").into_response();
+        }
+    };
+
     while let Ok(Some(field)) = multipart.next_field().await {
         let filename = field
             .file_name()
@@ -435,7 +466,7 @@ pub async fn update_csv(
 
         if let Err(e) = db::query_with_timeout(
             sqlx::query("DELETE FROM sightings WHERE upload_id = ?")
-                .bind(&upload_id)
+                .bind(&upload_uuid.as_bytes()[..])
                 .execute(&pool),
         )
         .await
@@ -454,7 +485,7 @@ pub async fn update_csv(
             sqlx::query("UPDATE uploads SET row_count = ?, filename = ? WHERE id = ?")
                 .bind(i64::try_from(total_rows).unwrap_or(i64::MAX))
                 .bind(&filename)
-                .bind(&upload_id)
+                .bind(&upload_uuid.as_bytes()[..])
                 .execute(&pool),
         )
         .await
@@ -500,10 +531,17 @@ pub async fn delete_upload(
         return response;
     }
 
+    let upload_uuid = match Uuid::parse_str(&upload_id) {
+        Ok(uuid) => uuid,
+        Err(_) => {
+            return ApiError::bad_request("Invalid upload_id format").into_response();
+        }
+    };
+
     // CASCADE will delete associated sightings
     match db::query_with_timeout(
         sqlx::query("DELETE FROM uploads WHERE id = ?")
-            .bind(&upload_id)
+            .bind(&upload_uuid.as_bytes()[..])
             .execute(&pool),
     )
     .await

@@ -436,7 +436,7 @@ pub fn build_filter_clause(
 
 pub async fn get_distinct_values(
     pool: &SqlitePool,
-    upload_id: &str,
+    upload_id: &[u8],
     field: &str,
 ) -> Result<Vec<String>, DbQueryError> {
     let (column, needs_join) = match field {
