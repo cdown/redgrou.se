@@ -7,7 +7,7 @@ use ts_rs::TS;
 use crate::api_constants;
 use crate::db;
 use crate::error::ApiError;
-use crate::filter::FilterGroup;
+use crate::filter::{FilterGroup, TickFilters};
 
 #[derive(Debug, Serialize, Deserialize, TS, Clone, Copy)]
 #[ts(export)]
@@ -131,19 +131,19 @@ pub async fn get_sightings(
         }
     }
 
+    let mut tick_filters = TickFilters::new();
     if query.lifers_only == Some(true) {
-        filter_clause_parts.push("AND lifer = 1".to_string());
+        tick_filters.add_lifers_only(None);
     }
-
     if let Some(year) = query.year_tick_year {
-        filter_clause_parts.push("AND year_tick = 1 AND year = ?".to_string());
-        filter_params.push(year.to_string());
+        tick_filters.add_year_tick(year, None);
     }
-
     if let Some(country) = &query.country_tick_country {
-        filter_clause_parts.push("AND country_tick = 1 AND country_code = ?".to_string());
-        filter_params.push(country.clone());
+        tick_filters.add_country_tick(country, None);
     }
+    let (clauses, tick_params) = tick_filters.into_parts();
+    filter_clause_parts.extend(clauses);
+    filter_params.extend(tick_params);
 
     let filter_clause_str = if filter_clause_parts.is_empty() {
         String::new()

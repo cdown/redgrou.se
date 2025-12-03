@@ -29,7 +29,7 @@ use ts_rs::TS;
 use redgrouse::api_constants;
 use redgrouse::error::ApiError;
 use redgrouse::filter::{
-    get_distinct_values, get_field_metadata, FieldMetadata, FieldValues, FilterGroup,
+    get_distinct_values, get_field_metadata, FieldMetadata, FieldValues, FilterGroup, TickFilters,
 };
 use redgrouse::{db, sightings, tiles, upload};
 
@@ -691,29 +691,23 @@ async fn get_filtered_count(
         None
     };
 
+    let mut tick_filters = TickFilters::new();
     if query.lifers_only == Some(true) {
-        let lifer_clause = " AND lifer = 1".to_string();
-        filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{lifer_clause}"),
-            None => lifer_clause,
-        });
+        tick_filters.add_lifers_only(None);
     }
-
     if let Some(year) = query.year_tick_year {
-        params.push(year.to_string());
-        let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();
-        filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{year_tick_clause}"),
-            None => year_tick_clause,
-        });
+        tick_filters.add_year_tick(year, None);
     }
-
     if let Some(country) = &query.country_tick_country {
-        params.push(country.clone());
-        let country_tick_clause = " AND country_tick = 1 AND country_code = ?".to_string();
+        tick_filters.add_country_tick(country, None);
+    }
+    let (clauses, tick_params) = tick_filters.into_parts();
+    params.extend(tick_params);
+    if !clauses.is_empty() {
+        let clause_str = format!(" {}", clauses.join(" "));
         filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{country_tick_clause}"),
-            None => country_tick_clause,
+            Some(existing) => format!("{existing}{clause_str}"),
+            None => clause_str.trim_start_matches(" ").to_string(),
         });
     }
 
@@ -757,29 +751,23 @@ async fn get_bbox(
         None
     };
 
+    let mut tick_filters = TickFilters::new();
     if query.lifers_only == Some(true) {
-        let lifer_clause = " AND lifer = 1".to_string();
-        filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{lifer_clause}"),
-            None => lifer_clause,
-        });
+        tick_filters.add_lifers_only(None);
     }
-
     if let Some(year) = query.year_tick_year {
-        params.push(year.to_string());
-        let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();
-        filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{year_tick_clause}"),
-            None => year_tick_clause,
-        });
+        tick_filters.add_year_tick(year, None);
     }
-
     if let Some(country) = &query.country_tick_country {
-        params.push(country.clone());
-        let country_tick_clause = " AND country_tick = 1 AND country_code = ?".to_string();
+        tick_filters.add_country_tick(country, None);
+    }
+    let (clauses, tick_params) = tick_filters.into_parts();
+    params.extend(tick_params);
+    if !clauses.is_empty() {
+        let clause_str = format!(" {}", clauses.join(" "));
         filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{country_tick_clause}"),
-            None => country_tick_clause,
+            Some(existing) => format!("{existing}{clause_str}"),
+            None => clause_str.trim_start_matches(" ").to_string(),
         });
     }
 

@@ -17,7 +17,9 @@ use sqlx::SqlitePool;
 pub async fn create_test_router(pool: SqlitePool) -> Router {
     use crate::api_constants;
     use crate::error::ApiError;
-    use crate::filter::{get_distinct_values, get_field_metadata, FieldMetadata, FieldValues};
+    use crate::filter::{
+        get_distinct_values, get_field_metadata, FieldMetadata, FieldValues, TickFilters,
+    };
     use crate::sightings::get_sightings;
     use crate::tiles::get_tile;
     use crate::upload::{delete_upload, update_csv, upload_csv};
@@ -78,20 +80,20 @@ pub async fn create_test_router(pool: SqlitePool) -> Router {
             None
         };
 
+        let mut tick_filters = TickFilters::new();
         if query.lifers_only == Some(true) {
-            let lifer_clause = " AND lifer = 1".to_string();
-            filter_clause = Some(match filter_clause {
-                Some(existing) => format!("{existing}{lifer_clause}"),
-                None => lifer_clause,
-            });
+            tick_filters.add_lifers_only(None);
         }
-
         if let Some(year) = query.year_tick_year {
-            params.push(year.to_string());
-            let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();
+            tick_filters.add_year_tick(year, None);
+        }
+        let (clauses, tick_params) = tick_filters.into_parts();
+        params.extend(tick_params);
+        if !clauses.is_empty() {
+            let clause_str = format!(" {}", clauses.join(" "));
             filter_clause = Some(match filter_clause {
-                Some(existing) => format!("{existing}{year_tick_clause}"),
-                None => year_tick_clause,
+                Some(existing) => format!("{existing}{clause_str}"),
+                None => clause_str.trim_start_matches(" ").to_string(),
             });
         }
 

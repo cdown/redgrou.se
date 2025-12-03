@@ -8,7 +8,7 @@ use tracing::{debug, error};
 
 use crate::db;
 use crate::error::ApiError;
-use crate::filter::FilterGroup;
+use crate::filter::{FilterGroup, TickFilters};
 
 const TILE_EXTENT: u32 = 4096;
 // Maximum vis_rank value (0-10000). When threshold equals this, all points are included.
@@ -84,29 +84,23 @@ pub async fn get_tile(
         None
     };
 
+    let mut tick_filters = TickFilters::new();
     if query.lifers_only == Some(true) {
-        let lifer_clause = " AND s.lifer = 1".to_string();
-        filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{lifer_clause}"),
-            None => lifer_clause,
-        });
+        tick_filters.add_lifers_only(Some("s"));
     }
-
     if let Some(year) = query.year_tick_year {
-        filter_params.push(year.to_string());
-        let year_tick_clause = " AND s.year_tick = 1 AND s.year = ?".to_string();
-        filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{year_tick_clause}"),
-            None => year_tick_clause,
-        });
+        tick_filters.add_year_tick(year, Some("s"));
     }
-
     if let Some(country) = &query.country_tick_country {
-        filter_params.push(country.clone());
-        let country_tick_clause = " AND s.country_tick = 1 AND s.country_code = ?".to_string();
+        tick_filters.add_country_tick(country, Some("s"));
+    }
+    let (clauses, tick_params) = tick_filters.into_parts();
+    filter_params.extend(tick_params);
+    if !clauses.is_empty() {
+        let clause_str = format!(" {}", clauses.join(" "));
         filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{country_tick_clause}"),
-            None => country_tick_clause,
+            Some(existing) => format!("{existing}{clause_str}"),
+            None => clause_str.trim_start_matches(" ").to_string(),
         });
     }
 

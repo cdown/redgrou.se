@@ -341,6 +341,50 @@ impl TryFrom<&String> for FilterGroup {
     }
 }
 
+pub struct TickFilters {
+    pub clauses: Vec<String>,
+    pub params: Vec<String>,
+}
+
+impl TickFilters {
+    pub fn new() -> Self {
+        Self {
+            clauses: Vec::new(),
+            params: Vec::new(),
+        }
+    }
+
+    pub fn add_lifers_only(&mut self, table_prefix: Option<&str>) {
+        let prefix = table_prefix.map(|p| format!("{p}.")).unwrap_or_default();
+        self.clauses.push(format!("AND {prefix}lifer = 1"));
+    }
+
+    pub fn add_year_tick(&mut self, year: i32, table_prefix: Option<&str>) {
+        let prefix = table_prefix.map(|p| format!("{p}.")).unwrap_or_default();
+        self.params.push(year.to_string());
+        self.clauses
+            .push(format!("AND {prefix}year_tick = 1 AND {prefix}year = ?"));
+    }
+
+    pub fn add_country_tick(&mut self, country: &str, table_prefix: Option<&str>) {
+        let prefix = table_prefix.map(|p| format!("{p}.")).unwrap_or_default();
+        self.params.push(country.to_string());
+        self.clauses.push(format!(
+            "AND {prefix}country_tick = 1 AND {prefix}country_code = ?"
+        ));
+    }
+
+    pub fn into_parts(self) -> (Vec<String>, Vec<String>) {
+        (self.clauses, self.params)
+    }
+}
+
+impl Default for TickFilters {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub async fn get_distinct_values(
     pool: &SqlitePool,
     upload_id: &str,
