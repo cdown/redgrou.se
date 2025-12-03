@@ -2,7 +2,13 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { apiFetch, buildApiUrl, buildFilterParams } from "@/lib/api";
+import {
+  apiFetch,
+  buildApiUrl,
+  buildFilterParams,
+  checkApiResponse,
+  getErrorMessage,
+} from "@/lib/api";
 import {
   getEditToken as getStoredEditToken,
   setEditToken as setStoredEditToken,
@@ -243,15 +249,12 @@ export default function UploadPage() {
         },
       );
 
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Delete failed");
-      }
+      await checkApiResponse(res, "Delete failed");
 
       removeEditToken(uploadId);
       router.push("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Delete failed");
+      setError(getErrorMessage(err, "Delete failed"));
       setShowDeleteConfirm(false);
     } finally {
       setIsDeleting(false);
@@ -280,10 +283,7 @@ export default function UploadPage() {
           },
         );
 
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || "Update failed");
-        }
+        await checkApiResponse(res, "Update failed");
 
         const result = await res.json();
         setUpload({
@@ -295,7 +295,7 @@ export default function UploadPage() {
         setFilter(null);
         setFilteredCount(null);
       } catch (err) {
-        setUpdateError(err instanceof Error ? err.message : "Update failed");
+        setUpdateError(getErrorMessage(err, "Update failed"));
       } finally {
         setIsUpdating(false);
       }

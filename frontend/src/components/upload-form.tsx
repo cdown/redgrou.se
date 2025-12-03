@@ -2,7 +2,11 @@
 
 import { useState, useCallback } from "react";
 import { Upload, FileText } from "lucide-react";
-import { apiFetch } from "@/lib/api";
+import {
+  apiFetch,
+  checkApiResponse,
+  getErrorMessage,
+} from "@/lib/api";
 import { setEditToken } from "@/lib/storage";
 import { UPLOAD_ROUTE } from "@/lib/generated/api_constants";
 
@@ -41,16 +45,13 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
           body: formData,
         });
 
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || "Upload failed");
-        }
+        await checkApiResponse(res, "Upload failed");
 
         const result: UploadResult = await res.json();
         setEditToken(result.upload_id, result.edit_token);
         onUploadComplete(result);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Upload failed");
+        setError(getErrorMessage(err, "Upload failed"));
       } finally {
         setIsUploading(false);
       }
