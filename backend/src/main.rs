@@ -590,6 +590,21 @@ async fn fetch_cloudfront_proxies() -> anyhow::Result<Vec<IpNet>> {
     Ok(networks)
 }
 
+async fn parse_cidr_list(text: &str, label: &str) -> Vec<IpNet> {
+    let mut networks = Vec::new();
+    for cidr in text.lines().map(str::trim) {
+        if cidr.is_empty() || cidr.starts_with('#') {
+            continue;
+        }
+
+        match cidr.parse::<IpNet>() {
+            Ok(net) => networks.push(net),
+            Err(err) => warn!("Skipping invalid {} CIDR {} ({})", label, cidr, err),
+        }
+    }
+    networks
+}
+
 async fn fetch_cloudflare_proxies() -> anyhow::Result<Vec<IpNet>> {
     let mut networks = Vec::new();
 
@@ -597,31 +612,13 @@ async fn fetch_cloudflare_proxies() -> anyhow::Result<Vec<IpNet>> {
         .await?
         .text()
         .await?;
-    for cidr in ipv4_text.lines().map(str::trim) {
-        if cidr.is_empty() || cidr.starts_with('#') {
-            continue;
-        }
-
-        match cidr.parse::<IpNet>() {
-            Ok(net) => networks.push(net),
-            Err(err) => warn!("Skipping invalid Cloudflare IPv4 CIDR {} ({})", cidr, err),
-        }
-    }
+    networks.extend(parse_cidr_list(&ipv4_text, "Cloudflare IPv4").await);
 
     let ipv6_text = reqwest::get(CLOUDFLARE_IPV6_RANGES_URL)
         .await?
         .text()
         .await?;
-    for cidr in ipv6_text.lines().map(str::trim) {
-        if cidr.is_empty() || cidr.starts_with('#') {
-            continue;
-        }
-
-        match cidr.parse::<IpNet>() {
-            Ok(net) => networks.push(net),
-            Err(err) => warn!("Skipping invalid Cloudflare IPv6 CIDR {} ({})", cidr, err),
-        }
-    }
+    networks.extend(parse_cidr_list(&ipv6_text, "Cloudflare IPv6").await);
 
     Ok(networks)
 }
