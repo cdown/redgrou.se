@@ -23,6 +23,8 @@ import {
   RefreshCw,
   Trash2,
   Upload,
+  Info,
+  Github,
 } from "lucide-react";
 import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
@@ -32,6 +34,7 @@ import {
   UPLOAD_DETAILS_ROUTE,
   UPLOAD_COUNT_ROUTE,
   FIELD_VALUES_ROUTE,
+  VERSION_ROUTE,
 } from "@/lib/generated/api_constants";
 import { getCountryName } from "@/lib/countries";
 
@@ -77,6 +80,12 @@ export default function UploadPage() {
   const [editToken, setEditToken] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showAboutModal, setShowAboutModal] = useState(false);
+  const [backendVersion, setBackendVersion] = useState<{
+    git_hash: string;
+    build_date: string;
+    rustc_version: string;
+  } | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -693,29 +702,34 @@ export default function UploadPage() {
                 <Upload className="h-4 w-4" />
                 Upload new
               </button>
+              <button
+                onClick={() => {
+                  setShowAboutModal(true);
+                  setMenuExpanded(false);
+                  // Fetch backend version info
+                  if (!backendVersion) {
+                    apiFetch(buildApiUrl(VERSION_ROUTE))
+                      .then((res) => res.json())
+                      .then((data) => setBackendVersion(data))
+                      .catch(() => {
+                        setBackendVersion({
+                          git_hash: "unknown",
+                          build_date: "unknown",
+                          rustc_version: "unknown",
+                        });
+                      });
+                  }
+                }}
+                className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
+              >
+                <Info className="h-4 w-4" />
+                About
+              </button>
             </>
           )}
         </div>
       </div>
 
-      {/* Bottom-left: Brand */}
-      {viewMode !== "table" && (
-        <div className="absolute bottom-4 left-4 flex flex-col gap-2">
-          <div className="flex flex-col leading-tight">
-            <span className="text-sm font-semibold tracking-tight text-stone-600 drop-shadow-sm">
-              redgrouse
-            </span>
-            <a
-              href="https://chrisdown.name"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[10px] tracking-[0.2em] text-stone-400 hover:text-stone-600 transition-colors"
-            >
-              by chris down
-            </a>
-          </div>
-        </div>
-      )}
 
       {/* Delete confirmation modal */}
       {showDeleteConfirm && (
@@ -809,6 +823,100 @@ export default function UploadPage() {
                     Choose file
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* About modal */}
+      {showAboutModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="mb-4 text-lg font-semibold text-stone-900">About redgrou.se</h3>
+            <p className="mb-6 text-sm text-stone-600">
+              A high-performance bird sighting analytics platform. Upload your
+              sightings, explore them all on an interactive map, and filter by
+              species, location, date, significance, and more.
+            </p>
+
+            <div className="mb-6 space-y-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-stone-500">Backend Git Hash:</span>
+                {backendVersion?.git_hash && backendVersion.git_hash !== "unknown" ? (
+                  <a
+                    href={`https://github.com/cdown/redgrou.se/commit/${backendVersion.git_hash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-stone-900 underline hover:text-rose-600 transition-colors"
+                  >
+                    {backendVersion.git_hash}
+                  </a>
+                ) : (
+                  <span className="font-mono text-stone-900">
+                    {backendVersion?.git_hash || "Loading..."}
+                  </span>
+                )}
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Frontend Git Hash:</span>
+                {process.env.NEXT_PUBLIC_BUILD_VERSION &&
+                process.env.NEXT_PUBLIC_BUILD_VERSION !== "unknown" ? (
+                  <a
+                    href={`https://github.com/cdown/redgrou.se/commit/${process.env.NEXT_PUBLIC_BUILD_VERSION}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-stone-900 underline hover:text-rose-600 transition-colors"
+                  >
+                    {process.env.NEXT_PUBLIC_BUILD_VERSION}
+                  </a>
+                ) : (
+                  <span className="font-mono text-stone-900">
+                    {process.env.NEXT_PUBLIC_BUILD_VERSION || "unknown"}
+                  </span>
+                )}
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Build Date:</span>
+                <span className="font-mono text-stone-900">
+                  {backendVersion?.build_date || process.env.NEXT_PUBLIC_BUILD_DATE || "unknown"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Rustc Version:</span>
+                <span className="font-mono text-stone-900">
+                  {backendVersion?.rustc_version || "Loading..."}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Next.js Version:</span>
+                <span className="font-mono text-stone-900">
+                  {process.env.NEXT_PUBLIC_NEXTJS_VERSION || "unknown"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Node.js Version:</span>
+                <span className="font-mono text-stone-900">
+                  {process.env.NEXT_PUBLIC_NODE_VERSION || "unknown"}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <a
+                href="https://github.com/cdown/redgrou.se"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mr-3 flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-stone-600 hover:bg-stone-100 transition-colors"
+              >
+                <Github className="h-4 w-4" />
+                View on GitHub
+              </a>
+              <button
+                onClick={() => setShowAboutModal(false)}
+                className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 transition-colors"
+              >
+                Close
               </button>
             </div>
           </div>

@@ -2,6 +2,7 @@
 // Do not edit manually
 
 export const HEALTH_ROUTE = "/health";
+export const VERSION_ROUTE = "/api/version";
 export const UPLOAD_ROUTE = "/api/uploads";
 export const UPLOAD_DETAILS_ROUTE = "/api/uploads/{upload_id}";
 export const UPLOAD_COUNT_ROUTE = "/api/uploads/{upload_id}/count";
