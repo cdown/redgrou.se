@@ -120,14 +120,15 @@ pub async fn get_tile(
             s.id,
             s.latitude,
             s.longitude,
-            s.common_name,
-            s.scientific_name,
+            sp.common_name,
+            sp.scientific_name,
             s.count,
             s.observed_at,
             s.lifer,
             s.year_tick,
             s.country_tick
         FROM sightings AS s
+        JOIN species sp ON s.species_id = sp.id
         JOIN sightings_geo AS sg ON sg.id = s.id
         WHERE s.upload_id = ?{}
           AND sg.max_lat >= ? AND sg.min_lat <= ?

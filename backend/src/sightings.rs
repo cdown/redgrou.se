@@ -25,12 +25,12 @@ pub enum SortField {
 impl SortField {
     pub const fn as_sql_column(&self) -> &'static str {
         match self {
-            Self::CommonName => "common_name",
-            Self::ScientificName => "scientific_name",
-            Self::Count => "count",
+            Self::CommonName => "sp.common_name",
+            Self::ScientificName => "sp.scientific_name",
+            Self::Count => "s.count",
             Self::SpeciesCount => "species_count",
-            Self::CountryCode => "country_code",
-            Self::ObservedAt => "observed_at",
+            Self::CountryCode => "s.country_code",
+            Self::ObservedAt => "s.observed_at",
         }
     }
 }
@@ -152,35 +152,46 @@ pub async fn get_sightings(
             ));
         }
 
-        // Group by requested fields, coercing observed_at to DATE() so it matches the SELECT.
-        let group_by_clause: Vec<String> = validated_fields
+        // Build SELECT and GROUP BY clauses with proper table aliases
+        let select_clause_with_aliases: Vec<String> = validated_fields
             .iter()
             .map(|f| {
                 if f == "observed_at" {
-                    "DATE(observed_at)".to_string()
+                    "DATE(s.observed_at) as observed_at".to_string()
+                } else if f == "common_name" {
+                    "sp.common_name".to_string()
+                } else if f == "scientific_name" {
+                    "sp.scientific_name".to_string()
+                } else if f == "country_code" {
+                    "s.country_code".to_string()
                 } else {
-                    f.clone()
+                    format!("s.{}", f)
                 }
             })
             .collect();
-        let group_by_clause_str = group_by_clause.join(", ");
+        let select_clause_with_aliases_str = select_clause_with_aliases.join(", ");
 
-        // SELECT mirrors the grouping; DATE() gives YYYY-MM-DD for consistent frontend parsing.
-        let select_clause: Vec<String> = validated_fields
+        let group_by_clause_with_aliases: Vec<String> = validated_fields
             .iter()
             .map(|f| {
                 if f == "observed_at" {
-                    "DATE(observed_at) as observed_at".to_string()
+                    "DATE(s.observed_at)".to_string()
+                } else if f == "common_name" {
+                    "sp.common_name".to_string()
+                } else if f == "scientific_name" {
+                    "sp.scientific_name".to_string()
+                } else if f == "country_code" {
+                    "s.country_code".to_string()
                 } else {
-                    f.clone()
+                    format!("s.{}", f)
                 }
             })
             .collect();
-        let select_clause_str = select_clause.join(", ");
+        let group_by_clause_with_aliases_str = group_by_clause_with_aliases.join(", ");
 
         let count_sql = format!(
-            "SELECT COUNT(*) FROM (SELECT {} FROM sightings WHERE upload_id = ?{} GROUP BY {})",
-            select_clause_str, filter_clause_str, group_by_clause_str
+            "SELECT COUNT(*) FROM (SELECT {} FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ?{} GROUP BY {})",
+            select_clause_with_aliases_str, filter_clause_str, group_by_clause_with_aliases_str
         );
 
         let count_query = bind_filter_params!(
@@ -195,33 +206,52 @@ pub async fn get_sightings(
 
         let sort_field = if let Some(sf) = query.sort_field {
             let col = sf.as_sql_column();
-            if validated_fields.contains(&col.to_string())
-                || col == "count"
-                || col == "species_count"
+            // Check if the column (with or without alias) is in validated_fields
+            let col_base = col
+                .strip_prefix("sp.")
+                .unwrap_or(col.strip_prefix("s.").unwrap_or(col));
+            if validated_fields.contains(&col_base.to_string())
+                || col_base == "count"
+                || col_base == "species_count"
             {
-                col
+                col.to_string()
             } else {
-                validated_fields.first().unwrap()
+                // Default to first validated field with proper alias
+                let first_field = validated_fields.first().unwrap();
+                if first_field == "common_name" {
+                    "sp.common_name".to_string()
+                } else if first_field == "scientific_name" {
+                    "sp.scientific_name".to_string()
+                } else if first_field == "country_code" {
+                    "s.country_code".to_string()
+                } else if first_field == "observed_at" {
+                    "DATE(s.observed_at)".to_string()
+                } else {
+                    format!("s.{}", first_field)
+                }
             }
         } else {
-            "count"
+            "count".to_string()
         };
 
         let sort_dir = parse_sort_direction(query.sort_dir.as_ref());
 
         // For sorting by observed_at, use DATE() to match the grouping
-        let sort_field_actual = if sort_field == "observed_at" {
-            "DATE(observed_at)"
+        let sort_field_with_alias = if sort_field == "sp.observed_at"
+            || sort_field == "s.observed_at"
+            || sort_field == "observed_at"
+        {
+            "DATE(s.observed_at)"
         } else {
-            sort_field
+            &sort_field
         };
 
         let select_sql = format!(
-            "SELECT {}, COUNT(*) as count, COUNT(DISTINCT scientific_name) as species_count FROM sightings WHERE upload_id = ?{} GROUP BY {} ORDER BY {} {} LIMIT ? OFFSET ?",
-            select_clause_str,
+            "SELECT {}, COUNT(*) as count, COUNT(DISTINCT sp.scientific_name) as species_count FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ?{} GROUP BY {} ORDER BY {} {} LIMIT ? OFFSET ?",
+            select_clause_with_aliases_str,
             filter_clause_str,
-            group_by_clause_str,
-            sort_field_actual,
+            group_by_clause_with_aliases_str,
+            sort_field_with_alias,
             sort_dir
         );
 
@@ -279,12 +309,13 @@ pub async fn get_sightings(
     let sort_field = query
         .sort_field
         .unwrap_or(SortField::ObservedAt)
-        .as_sql_column();
+        .as_sql_column()
+        .to_string();
 
     let sort_dir = parse_sort_direction(query.sort_dir.as_ref());
 
     let count_sql = format!(
-        "SELECT COUNT(*) FROM sightings WHERE upload_id = ?{}",
+        "SELECT COUNT(*) FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ?{}",
         filter_clause_str
     );
     let count_query = bind_filter_params!(
@@ -298,13 +329,14 @@ pub async fn get_sightings(
         .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
     let select_sql = format!(
-        r"SELECT id, common_name, scientific_name, count, latitude, longitude,
-            country_code, region_code, observed_at
-            FROM sightings
-            WHERE upload_id = ?{}
+        r"SELECT s.id, sp.common_name, sp.scientific_name, s.count, s.latitude, s.longitude,
+            s.country_code, s.region_code, s.observed_at
+            FROM sightings s
+            JOIN species sp ON s.species_id = sp.id
+            WHERE s.upload_id = ?{}
             ORDER BY {} {}
             LIMIT ? OFFSET ?",
-        filter_clause_str, sort_field, sort_dir
+        filter_clause_str, &sort_field, sort_dir
     );
 
     let mut select_query = bind_filter_params!(

@@ -439,20 +439,25 @@ pub async fn get_distinct_values(
     upload_id: &str,
     field: &str,
 ) -> Result<Vec<String>, DbQueryError> {
-    let filter_field = match field {
-        "common_name" => FilterField::CommonName,
-        "scientific_name" => FilterField::ScientificName,
-        "country_code" => FilterField::CountryCode,
-        "count" => FilterField::Count,
-        "observed_at" => FilterField::ObservedAt,
-        "year" => FilterField::Year,
+    let (column, needs_join) = match field {
+        "common_name" => ("sp.common_name", true),
+        "scientific_name" => ("sp.scientific_name", true),
+        "country_code" => ("s.country_code", true),
+        "count" => ("s.count", false),
+        "observed_at" => ("s.observed_at", false),
+        "year" => ("s.year", false),
         _ => return Ok(vec![]),
     };
 
-    let column = filter_field.as_sql_column();
-    let query = format!(
-        "SELECT DISTINCT CAST({column} AS TEXT) FROM sightings WHERE upload_id = ? AND {column} IS NOT NULL ORDER BY {column} LIMIT 500"
-    );
+    let query = if needs_join {
+        format!(
+            "SELECT DISTINCT CAST({column} AS TEXT) FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ? AND {column} IS NOT NULL ORDER BY {column} LIMIT 500"
+        )
+    } else {
+        format!(
+            "SELECT DISTINCT CAST({column} AS TEXT) FROM sightings s WHERE s.upload_id = ? AND {column} IS NOT NULL ORDER BY {column} LIMIT 500"
+        )
+    };
 
     let rows: Vec<(String,)> =
         db::query_with_timeout(sqlx::query_as(&query).bind(upload_id).fetch_all(pool)).await?;

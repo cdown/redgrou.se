@@ -49,9 +49,11 @@ type SString = SmartString<LazyCompact>;
 pub struct ProcessedSighting {
     // UUID: 16 bytes on stack (no heap allocation, no destructor overhead)
     pub sighting_uuid: Uuid,
-    // Names & codes: stack-allocated if < 24 bytes ("Blue Tit", "US", "US-NY" fit inline)
+    // Species names stored temporarily for lookup, then converted to species_id
     pub common_name: SString,
     pub scientific_name: Option<SString>,
+    // Species ID (looked up before insertion)
+    pub species_id: Option<i64>,
     pub country_code: SString,
     pub region_code: Option<SString>,
     // ISO dates "YYYY-MM-DD" are 10 bytes -> fit inline perfectly
@@ -68,20 +70,22 @@ impl Serialize for ProcessedSighting {
         S: Serializer,
     {
         // Serialize as tuple (array) instead of object to eliminate field name overhead.
-        // This removes serialize_field calls that write "common_name":, "latitude":, etc.
-        // for every single row, reducing payload size by ~40% and serialization time.
-        let mut tup = serializer.serialize_tuple(10)?;
+        // This removes serialize_field calls that write field names for every single row,
+        // reducing payload size by ~40% and serialization time.
+        // Serialization order: [uuid, species_id, country_code, region_code,
+        //                        observed_at, count, latitude, longitude, year]
+        // SELECT order must match INSERT column order exactly.
+        let mut tup = serializer.serialize_tuple(9)?;
 
         tup.serialize_element(&self.sighting_uuid)?; // Index 0
-        tup.serialize_element(&self.common_name)?; // Index 1
-        tup.serialize_element(&self.scientific_name)?; // Index 2
-        tup.serialize_element(&self.country_code)?; // Index 3
-        tup.serialize_element(&self.region_code)?; // Index 4
-        tup.serialize_element(&self.observed_at)?; // Index 5
-        tup.serialize_element(&self.count)?; // Index 6
-        tup.serialize_element(&self.latitude)?; // Index 7
-        tup.serialize_element(&self.longitude)?; // Index 8
-        tup.serialize_element(&self.year)?; // Index 9
+        tup.serialize_element(&self.species_id)?; // Index 1
+        tup.serialize_element(&self.country_code)?; // Index 2
+        tup.serialize_element(&self.region_code)?; // Index 3
+        tup.serialize_element(&self.observed_at)?; // Index 4
+        tup.serialize_element(&self.count)?; // Index 5
+        tup.serialize_element(&self.latitude)?; // Index 6
+        tup.serialize_element(&self.longitude)?; // Index 7
+        tup.serialize_element(&self.year)?; // Index 8
 
         tup.end()
     }
@@ -227,6 +231,7 @@ impl Geocoder {
                     sighting_uuid,
                     common_name: sighting.common_name.into(),
                     scientific_name: sighting.scientific_name.map(Into::into),
+                    species_id: None, // Will be looked up before insertion
                     count: sighting.count,
                     latitude: sighting.latitude,
                     longitude: sighting.longitude,
@@ -293,6 +298,28 @@ impl DbSink {
                 ApiError::internal("Database error")
             })?;
 
+            // Look up or insert species for all sightings in the batch
+            for sighting in &mut self.batch {
+                if sighting.species_id.is_none() {
+                    let scientific_name_str = sighting.scientific_name.as_deref();
+                    match get_or_insert_species(
+                        &mut *conn,
+                        &sighting.common_name,
+                        scientific_name_str,
+                    )
+                    .await
+                    {
+                        Ok(id) => sighting.species_id = Some(id),
+                        Err(e) => {
+                            return Err(e.into_api_error(
+                                "looking up species",
+                                "Failed to look up species",
+                            ));
+                        }
+                    }
+                }
+            }
+
             // Clear buffer (O(1), keeps capacity) and serialize directly to it
             // This avoids the allocation overhead of serde_json::to_string
             self.json_buffer.clear();
@@ -324,6 +351,77 @@ impl DbSink {
     }
 }
 
+async fn get_or_insert_species(
+    executor: &mut sqlx::SqliteConnection,
+    common_name: &str,
+    scientific_name: Option<&str>,
+) -> Result<i64, DbQueryError> {
+    // Try to get existing species first
+    let existing_id: Option<i64> = db::query_with_timeout(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM species WHERE common_name = ? AND (scientific_name = ? OR (scientific_name IS NULL AND ? IS NULL))"
+        )
+        .bind(common_name)
+        .bind(scientific_name)
+        .bind(scientific_name)
+        .fetch_optional(&mut *executor),
+    )
+    .await?;
+
+    if let Some(id) = existing_id {
+        return Ok(id);
+    }
+
+    // Insert new species. If it fails due to unique constraint (race condition),
+    // fall back to selecting the existing one.
+    let insert_result = db::query_with_timeout(
+        sqlx::query_scalar::<_, i64>(
+            "INSERT INTO species (common_name, scientific_name) VALUES (?, ?) RETURNING id",
+        )
+        .bind(common_name)
+        .bind(scientific_name)
+        .fetch_optional(&mut *executor),
+    )
+    .await;
+
+    match insert_result {
+        Ok(Some(id)) => Ok(id),
+        Ok(None) => {
+            // Insert succeeded but RETURNING returned None (shouldn't happen, but handle it)
+            // Fall back to SELECT
+            db::query_with_timeout(
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT id FROM species WHERE common_name = ? AND (scientific_name = ? OR (scientific_name IS NULL AND ? IS NULL))"
+                )
+                .bind(common_name)
+                .bind(scientific_name)
+                .bind(scientific_name)
+                .fetch_optional(&mut *executor),
+            )
+            .await?
+            .ok_or_else(|| DbQueryError::Sqlx(sqlx::Error::RowNotFound))
+        }
+        Err(DbQueryError::Sqlx(sqlx::Error::Database(db_err)))
+            if db_err.code().as_deref() == Some("2067") =>
+        {
+            // Unique constraint violation (SQLITE_CONSTRAINT_UNIQUE = 2067)
+            // Another thread inserted it, so fetch the existing one
+            db::query_with_timeout(
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT id FROM species WHERE common_name = ? AND (scientific_name = ? OR (scientific_name IS NULL AND ? IS NULL))"
+                )
+                .bind(common_name)
+                .bind(scientific_name)
+                .bind(scientific_name)
+                .fetch_optional(&mut *executor),
+            )
+            .await?
+            .ok_or_else(|| DbQueryError::Sqlx(sqlx::Error::RowNotFound))
+        }
+        Err(e) => Err(e),
+    }
+}
+
 async fn insert_batch<'e, E>(
     executor: E,
     upload_id: &str,
@@ -338,27 +436,26 @@ where
 
     // SQLite parses JSON arrays natively. We use array indices instead of field names
     // to eliminate the overhead of writing field names in JSON serialization.
-    // Serialization order: [uuid, common_name, scientific_name, country_code, region_code,
+    // Serialization order: [uuid, species_id, country_code, region_code,
     //                        observed_at, count, latitude, longitude, year]
     // SELECT order must match INSERT column order exactly.
     let sql = r#"
     INSERT INTO sightings (
-        upload_id, sighting_uuid, common_name, scientific_name,
+        upload_id, sighting_uuid, species_id,
         count, latitude, longitude, country_code,
         region_code, observed_at, year, lifer, year_tick, vis_rank
     )
     SELECT
         ?1,
         value->>0, -- sighting_uuid
-        value->>1, -- common_name
-        value->>2, -- scientific_name
-        CAST(value->>6 AS INTEGER), -- count
-        CAST(value->>7 AS REAL), -- latitude
-        CAST(value->>8 AS REAL), -- longitude
-        value->>3, -- country_code
-        value->>4, -- region_code
-        value->>5, -- observed_at
-        CAST(value->>9 AS INTEGER), -- year
+        CAST(value->>1 AS INTEGER), -- species_id
+        CAST(value->>5 AS INTEGER), -- count
+        CAST(value->>6 AS REAL), -- latitude
+        CAST(value->>7 AS REAL), -- longitude
+        value->>2, -- country_code
+        value->>3, -- region_code
+        value->>4, -- observed_at
+        CAST(value->>8 AS INTEGER), -- year
         0, 0,
         ABS(RANDOM()) % 10001 -- vis_rank: random 0-10000 (lifers/year_ticks will override to 0 later)
     FROM json_each(?2)

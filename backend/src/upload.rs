@@ -227,7 +227,7 @@ async fn compute_lifer_and_year_tick(
         sqlx::query(
             "UPDATE sightings SET lifer = 1 WHERE id IN (
             SELECT id FROM (
-                SELECT id, ROW_NUMBER() OVER (PARTITION BY common_name ORDER BY observed_at) as rn
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY species_id ORDER BY observed_at) as rn
                 FROM sightings WHERE upload_id = ?
             ) WHERE rn = 1
         )",
@@ -241,7 +241,7 @@ async fn compute_lifer_and_year_tick(
         sqlx::query(
         "UPDATE sightings SET year_tick = 1 WHERE id IN (
             SELECT id FROM (
-                SELECT id, ROW_NUMBER() OVER (PARTITION BY common_name, year ORDER BY observed_at) as rn
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY species_id, year ORDER BY observed_at) as rn
                 FROM sightings WHERE upload_id = ?
             ) WHERE rn = 1
         )"
@@ -255,7 +255,7 @@ async fn compute_lifer_and_year_tick(
         sqlx::query(
         "UPDATE sightings SET country_tick = 1 WHERE id IN (
             SELECT id FROM (
-                SELECT id, ROW_NUMBER() OVER (PARTITION BY common_name, country_code ORDER BY observed_at) as rn
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY species_id, country_code ORDER BY observed_at) as rn
                 FROM sightings WHERE upload_id = ? AND country_code IS NOT NULL
             ) WHERE rn = 1
         )"
