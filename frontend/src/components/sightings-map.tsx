@@ -379,6 +379,40 @@ export function SightingsMap({
       },
     });
 
+    // Use MutationObserver to ensure attribution starts collapsed
+    const container = map.getContainer();
+    const attributionObserver = new MutationObserver(() => {
+      const attribElement = container.querySelector(".maplibregl-ctrl-attrib") as HTMLElement;
+      if (attribElement) {
+        if (!attribElement.classList.contains("maplibregl-compact")) {
+          attribElement.classList.add("maplibregl-compact");
+        }
+        if (attribElement.classList.contains("maplibregl-compact-show")) {
+          attribElement.classList.remove("maplibregl-compact-show");
+        }
+        // Let MapLibre handle it from here
+        attributionObserver.disconnect();
+      }
+    });
+    attributionObserver.observe(container, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+
+    // Try to collapse immediately
+    requestAnimationFrame(() => {
+      const attribElement = container.querySelector(".maplibregl-ctrl-attrib") as HTMLElement;
+      if (attribElement) {
+        attribElement.classList.add("maplibregl-compact");
+        if (attribElement.classList.contains("maplibregl-compact-show")) {
+          attribElement.classList.remove("maplibregl-compact-show");
+        }
+        attributionObserver.disconnect();
+      }
+    });
+
     // Increase scroll zoom speed (default 1/450 feels sluggish)
     map.scrollZoom.setZoomRate(1 / 225);
 
@@ -532,6 +566,8 @@ export function SightingsMap({
     mapRef.current = map;
 
     return () => {
+      // Disconnect attribution observer
+      attributionObserver.disconnect();
       // Cancel all pending tile requests
       controllersMap.forEach((controller) => {
         controller.abort();
