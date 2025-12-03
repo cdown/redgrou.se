@@ -8,9 +8,59 @@ import {
   COLOUR_YEAR_TICK_BG,
   COLOUR_COUNTRY_TICK_BG,
 } from "@/lib/colours";
-import { formatDisplayDate } from "@/lib/utils";
+import { cn, formatDisplayDate } from "@/lib/utils";
 
 const MAX_DESCRIPTION_LENGTH = 350;
+
+interface TickBadgesProps {
+  isLifer?: boolean;
+  isYearTick?: boolean;
+  isCountryTick?: boolean;
+  className?: string;
+}
+
+function TickBadges({
+  isLifer,
+  isYearTick,
+  isCountryTick,
+  className,
+}: TickBadgesProps) {
+  if (!isLifer && !isYearTick && !isCountryTick) {
+    return null;
+  }
+
+  return (
+    <div className={cn("flex gap-1.5 flex-wrap", className)}>
+      {isLifer && (
+        <div
+          className="flex items-center gap-1 rounded px-2 py-0.5 text-xs"
+          style={{ backgroundColor: COLOUR_LIFER_BG, color: COLOUR_LIFER }}
+        >
+          <Check className="h-3 w-3" style={{ color: COLOUR_LIFER }} />
+          <span>Lifer</span>
+        </div>
+      )}
+      {!isLifer && isYearTick && (
+        <div
+          className="flex items-center gap-1 rounded px-2 py-0.5 text-xs"
+          style={{ backgroundColor: COLOUR_YEAR_TICK_BG, color: COLOUR_YEAR_TICK }}
+        >
+          <Calendar className="h-3 w-3" style={{ color: COLOUR_YEAR_TICK }} />
+          <span>Year Tick</span>
+        </div>
+      )}
+      {!isLifer && isCountryTick && (
+        <div
+          className="flex items-center gap-1 rounded px-2 py-0.5 text-xs"
+          style={{ backgroundColor: COLOUR_COUNTRY_TICK_BG, color: COLOUR_COUNTRY_TICK }}
+        >
+          <MapPin className="h-3 w-3" style={{ color: COLOUR_COUNTRY_TICK }} />
+          <span>Country Tick</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, "");
@@ -71,44 +121,16 @@ export function SpeciesPopup({
   const formattedObservedDate = formatDisplayDate(observedAt);
 
   if (!info) {
-    const dateDisplay = formattedObservedDate;
+    const safeName = sanitizeText(name);
     return (
       <div className="w-[280px] font-sans">
         <div className="p-3">
           <div className="mb-1 text-[15px] font-semibold text-gray-900">
-            {sanitizeText(name)}
+            {safeName}
           </div>
-          <div className="mb-2 text-[13px] text-gray-600">
-            Count: {sanitizeText(String(count))}
+          <div className="text-[13px] text-gray-600">
+            Failed to load species details from iNaturalist.
           </div>
-          {dateDisplay && (
-            <div className="mb-1 flex items-center gap-1 text-[13px] text-gray-600">
-              <Calendar className="h-3.5 w-3.5" />
-              <span>{sanitizeText(dateDisplay)}</span>
-            </div>
-          )}
-          {(isLifer || isYearTick || isCountryTick) && (
-            <div className="mt-2 flex gap-1.5 flex-wrap">
-              {isLifer && (
-                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_LIFER_BG, color: COLOUR_LIFER }}>
-                  <Check className="h-3 w-3" style={{ color: COLOUR_LIFER }} />
-                  <span>Lifer</span>
-                </div>
-              )}
-              {!isLifer && isYearTick && (
-                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_YEAR_TICK_BG, color: COLOUR_YEAR_TICK }}>
-                  <Calendar className="h-3 w-3" style={{ color: COLOUR_YEAR_TICK }} />
-                  <span>Year Tick</span>
-                </div>
-              )}
-              {!isLifer && isCountryTick && (
-                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_COUNTRY_TICK_BG, color: COLOUR_COUNTRY_TICK }}>
-                  <MapPin className="h-3 w-3" style={{ color: COLOUR_COUNTRY_TICK }} />
-                  <span>Country Tick</span>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
     );
@@ -195,28 +217,11 @@ export function SpeciesPopup({
               </a>
             )}
           </div>
-          {(isLifer || isYearTick || isCountryTick) && (
-            <div className="flex gap-1.5 flex-wrap">
-              {isLifer && (
-                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_LIFER_BG, color: COLOUR_LIFER }}>
-                  <Check className="h-3 w-3" style={{ color: COLOUR_LIFER }} />
-                  <span>Lifer</span>
-                </div>
-              )}
-              {!isLifer && isYearTick && (
-                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_YEAR_TICK_BG, color: COLOUR_YEAR_TICK }}>
-                  <Calendar className="h-3 w-3" style={{ color: COLOUR_YEAR_TICK }} />
-                  <span>Year Tick</span>
-                </div>
-              )}
-              {!isLifer && isCountryTick && (
-                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_COUNTRY_TICK_BG, color: COLOUR_COUNTRY_TICK }}>
-                  <MapPin className="h-3 w-3" style={{ color: COLOUR_COUNTRY_TICK }} />
-                  <span>Country Tick</span>
-                </div>
-              )}
-            </div>
-          )}
+          <TickBadges
+            isLifer={isLifer}
+            isYearTick={isYearTick}
+            isCountryTick={isCountryTick}
+          />
         </div>
         {safeAttribution && (
           <div className="mt-2 text-[10px] text-gray-400">
