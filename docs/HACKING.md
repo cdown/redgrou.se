@@ -90,7 +90,7 @@ sqlite3 data/redgrouse.db
 .tables                              -- List tables
 .schema sightings                    -- Show schema
 SELECT COUNT(*) FROM sightings;      -- Count all sightings
-SELECT * FROM uploads;               -- List uploads
+SELECT hex(id), filename FROM uploads;  -- List uploads
 
 # Check a specific upload's data
 SELECT common_name, COUNT(*) as cnt
