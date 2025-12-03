@@ -85,6 +85,13 @@ pub struct SightingsResponse {
     pub total_pages: u32,
 }
 
+fn parse_sort_direction(sort_dir: Option<&String>) -> &'static str {
+    match sort_dir {
+        Some(dir) if dir == "asc" => "ASC",
+        _ => "DESC",
+    }
+}
+
 fn validate_group_by_fields(fields: &[String]) -> Result<Vec<String>, ApiError> {
     let allowed = [
         "common_name",
@@ -195,10 +202,7 @@ pub async fn get_sightings(
             "count"
         };
 
-        let sort_dir = match query.sort_dir.as_deref() {
-            Some("asc") => "ASC",
-            _ => "DESC",
-        };
+        let sort_dir = parse_sort_direction(query.sort_dir.as_ref());
 
         // For sorting by observed_at, use DATE() to match the grouping
         let sort_field_actual = if sort_field == "observed_at" {
@@ -275,10 +279,7 @@ pub async fn get_sightings(
         .unwrap_or(SortField::ObservedAt)
         .as_sql_column();
 
-    let sort_dir = match query.sort_dir.as_deref() {
-        Some("asc") => "ASC",
-        _ => "DESC",
-    };
+    let sort_dir = parse_sort_direction(query.sort_dir.as_ref());
 
     let count_sql = format!(
         "SELECT COUNT(*) FROM sightings WHERE upload_id = ?{}",
