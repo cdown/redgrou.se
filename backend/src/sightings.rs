@@ -93,6 +93,10 @@ fn parse_sort_direction(sort_dir: Option<&String>) -> &'static str {
     }
 }
 
+fn calculate_total_pages(total: i64, page_size: u32) -> u32 {
+    ((total as f64) / (f64::from(page_size))).ceil() as u32
+}
+
 fn validate_group_by_fields(fields: &[String]) -> Result<Vec<String>, ApiError> {
     let allowed = [
         "common_name",
@@ -260,7 +264,7 @@ pub async fn get_sightings(
             groups.push(grouped);
         }
 
-        let total_pages = ((total as f64) / (f64::from(page_size))).ceil() as u32;
+        let total_pages = calculate_total_pages(total, page_size);
 
         return Ok(Json(SightingsResponse {
             sightings: None,
@@ -315,7 +319,7 @@ pub async fn get_sightings(
         .await
         .map_err(|e| e.into_api_error("loading sightings", "Database error"))?;
 
-    let total_pages = ((total as f64) / (page_size as f64)).ceil() as u32;
+    let total_pages = calculate_total_pages(total, page_size);
 
     Ok(Json(SightingsResponse {
         sightings: Some(sightings),
