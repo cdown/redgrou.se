@@ -125,11 +125,7 @@ pub async fn get_sightings(
     let mut filter_clause_parts: Vec<String> = Vec::new();
 
     if let Some(filter_json) = &query.filter {
-        let filter: FilterGroup = serde_json::from_str(filter_json)
-            .map_err(|_| ApiError::bad_request("Invalid filter JSON"))?;
-        filter
-            .validate()
-            .map_err(|e| ApiError::bad_request(e.message()))?;
+        let filter: FilterGroup = filter_json.try_into()?;
         if let Some(sql) = filter.to_sql(&mut filter_params) {
             filter_clause_parts.push(format!("AND {sql}"));
         }

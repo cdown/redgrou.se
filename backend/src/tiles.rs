@@ -76,13 +76,7 @@ pub async fn get_tile(
     let mut filter_params: Vec<String> = Vec::new();
 
     let mut filter_clause = if let Some(filter_json) = &query.filter {
-        let filter: FilterGroup = serde_json::from_str(filter_json).map_err(|e| {
-            error!("Invalid filter JSON: {}", e);
-            ApiError::bad_request("Invalid filter JSON")
-        })?;
-        filter
-            .validate()
-            .map_err(|e| ApiError::bad_request(e.message()))?;
+        let filter: FilterGroup = filter_json.try_into()?;
         filter
             .to_sql(&mut filter_params)
             .map(|sql| format!(" AND {sql}"))

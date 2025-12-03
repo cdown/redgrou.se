@@ -72,11 +72,7 @@ pub async fn create_test_router(pool: SqlitePool) -> Router {
         let mut params: Vec<String> = vec![upload_id.clone()];
 
         let mut filter_clause = if let Some(filter_json) = &query.filter {
-            let filter: FilterGroup = serde_json::from_str(filter_json)
-                .map_err(|_| ApiError::bad_request("Invalid filter JSON"))?;
-            filter
-                .validate()
-                .map_err(|e| ApiError::bad_request(e.message()))?;
+            let filter: FilterGroup = filter_json.try_into()?;
             filter.to_sql(&mut params).map(|sql| format!(" AND {sql}"))
         } else {
             None

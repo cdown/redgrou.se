@@ -1,6 +1,8 @@
 use crate::db::{self, DbQueryError};
+use crate::error::ApiError;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use std::convert::TryFrom;
 use ts_rs::TS;
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -308,6 +310,35 @@ pub fn get_field_metadata() -> Vec<FieldMetadata> {
 pub struct FieldValues {
     pub field: String,
     pub values: Vec<String>,
+}
+
+impl TryFrom<&str> for FilterGroup {
+    type Error = ApiError;
+
+    fn try_from(filter_json: &str) -> Result<Self, Self::Error> {
+        let filter: FilterGroup = serde_json::from_str(filter_json)
+            .map_err(|_| ApiError::bad_request("Invalid filter JSON"))?;
+        filter
+            .validate()
+            .map_err(|e| ApiError::bad_request(e.message()))?;
+        Ok(filter)
+    }
+}
+
+impl TryFrom<String> for FilterGroup {
+    type Error = ApiError;
+
+    fn try_from(filter_json: String) -> Result<Self, Self::Error> {
+        filter_json.as_str().try_into()
+    }
+}
+
+impl TryFrom<&String> for FilterGroup {
+    type Error = ApiError;
+
+    fn try_from(filter_json: &String) -> Result<Self, Self::Error> {
+        filter_json.as_str().try_into()
+    }
 }
 
 pub async fn get_distinct_values(
