@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Map, Filter, Link } from "lucide-react";
+import { Map, Filter, Unlock } from "lucide-react";
 import { UploadForm } from "@/components/upload-form";
 
 export default function Home() {
@@ -74,10 +74,10 @@ export default function Home() {
             </div>
             <div className="rounded-xl bg-white/50 p-4 backdrop-blur-sm">
               <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-stone-100">
-                <Link className="h-[18px] w-[18px] text-stone-600" />
+                <Unlock className="h-[18px] w-[18px] text-stone-600" />
               </div>
               <span className="text-xs font-medium text-stone-700">
-                Shareable links
+                Open source
               </span>
             </div>
           </div>
