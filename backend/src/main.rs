@@ -29,7 +29,8 @@ use ts_rs::TS;
 use redgrouse::api_constants;
 use redgrouse::error::ApiError;
 use redgrouse::filter::{
-    get_distinct_values, get_field_metadata, FieldMetadata, FieldValues, FilterGroup, TickFilters,
+    get_distinct_values, get_field_metadata, CountQuery, FieldMetadata, FieldValues, FilterGroup,
+    TickFilters,
 };
 use redgrouse::{db, sightings, tiles, upload};
 
@@ -661,14 +662,6 @@ async fn get_upload(
         filename: row.1,
         row_count: row.2,
     }))
-}
-
-#[derive(Debug, Deserialize)]
-struct CountQuery {
-    filter: Option<String>,
-    lifers_only: Option<bool>,
-    year_tick_year: Option<i32>,
-    country_tick_country: Option<String>,
 }
 
 #[derive(Serialize, TS)]

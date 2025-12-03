@@ -385,6 +385,14 @@ impl Default for TickFilters {
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CountQuery {
+    pub filter: Option<String>,
+    pub lifers_only: Option<bool>,
+    pub year_tick_year: Option<i32>,
+    pub country_tick_country: Option<String>,
+}
+
 pub async fn get_distinct_values(
     pool: &SqlitePool,
     upload_id: &str,

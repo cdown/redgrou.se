@@ -18,7 +18,8 @@ pub async fn create_test_router(pool: SqlitePool) -> Router {
     use crate::api_constants;
     use crate::error::ApiError;
     use crate::filter::{
-        get_distinct_values, get_field_metadata, FieldMetadata, FieldValues, TickFilters,
+        get_distinct_values, get_field_metadata, CountQuery, FieldMetadata, FieldValues,
+        TickFilters,
     };
     use crate::sightings::get_sightings;
     use crate::tiles::get_tile;
@@ -51,13 +52,6 @@ pub async fn create_test_router(pool: SqlitePool) -> Router {
             filename: row.1,
             row_count: row.2,
         }))
-    }
-
-    #[derive(serde::Deserialize)]
-    struct CountQuery {
-        filter: Option<String>,
-        lifers_only: Option<bool>,
-        year_tick_year: Option<i32>,
     }
 
     #[derive(serde::Serialize)]
