@@ -105,13 +105,13 @@ export function SpeciesPopup({
                   <span>Lifer</span>
                 </div>
               )}
-              {isYearTick && (
+              {!isLifer && isYearTick && (
                 <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_YEAR_TICK_BG, color: COLOUR_YEAR_TICK }}>
                   <Calendar className="h-3 w-3" style={{ color: COLOUR_YEAR_TICK }} />
                   <span>Year Tick</span>
                 </div>
               )}
-              {isCountryTick && (
+              {!isLifer && isCountryTick && (
                 <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_COUNTRY_TICK_BG, color: COLOUR_COUNTRY_TICK }}>
                   <MapPin className="h-3 w-3" style={{ color: COLOUR_COUNTRY_TICK }} />
                   <span>Country Tick</span>
@@ -213,13 +213,13 @@ export function SpeciesPopup({
                   <span>Lifer</span>
                 </div>
               )}
-              {isYearTick && (
+              {!isLifer && isYearTick && (
                 <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_YEAR_TICK_BG, color: COLOUR_YEAR_TICK }}>
                   <Calendar className="h-3 w-3" style={{ color: COLOUR_YEAR_TICK }} />
                   <span>Year Tick</span>
                 </div>
               )}
-              {isCountryTick && (
+              {!isLifer && isCountryTick && (
                 <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_COUNTRY_TICK_BG, color: COLOUR_COUNTRY_TICK }}>
                   <MapPin className="h-3 w-3" style={{ color: COLOUR_COUNTRY_TICK }} />
                   <span>Country Tick</span>
