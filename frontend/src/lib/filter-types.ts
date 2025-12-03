@@ -111,7 +111,6 @@ export function filterToJson(filter: FilterGroup): string {
         if (isGroup(rule)) {
           return clean(rule);
         }
-        // Handle special operators
         if (rule.operator === "is_true") {
           return { field: rule.field, operator: "eq", value: 1 };
         }

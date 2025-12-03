@@ -22,7 +22,7 @@ use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
 use crate::pipeline::{CsvParser, DbSink, Geocoder, BATCH_SIZE};
 
-pub const MAX_UPLOAD_BYTES: usize = 200 * 1024 * 1024; // 200 MiB
+pub const MAX_UPLOAD_BYTES: usize = 200 * 1024 * 1024;
 pub const MAX_UPLOAD_BODY_BYTES: usize = MAX_UPLOAD_BYTES + (2 * 1024 * 1024); // allow multipart overhead
 const UPLOAD_LIMIT_MB: usize = MAX_UPLOAD_BYTES / (1024 * 1024);
 
@@ -163,7 +163,6 @@ where
         .await
         .map_err(|err| map_csv_error(err, "Failed to read CSV headers", "Invalid CSV headers"))?;
 
-    // Initialize pipeline stages
     let mut parser = CsvParser::new(headers)?;
     let geocoder = Geocoder::new();
     let mut sink = DbSink::new(upload_id.to_string());
@@ -188,13 +187,12 @@ where
         if let Some(parsed) = parser.parse_row(&record)? {
             pending_rows.push(parsed);
 
-            // Geocode in batches to avoid blocking the async runtime
+            // Geocode batched rows on blocking threads to avoid stalling the async runtime.
             if pending_rows.len() >= BATCH_SIZE {
                 let processed = geocoder.geocode_batch(pending_rows).await?;
                 pending_rows = Vec::new();
 
                 for sighting in processed {
-                    // Check if we need to flush before adding
                     if sink.needs_flush() {
                         sink.flush(&mut tx).await?;
                     }
@@ -204,7 +202,6 @@ where
         }
     }
 
-    // Process remaining pending rows
     if !pending_rows.is_empty() {
         let processed = geocoder.geocode_batch(pending_rows).await?;
         for sighting in processed {
@@ -212,7 +209,6 @@ where
         }
     }
 
-    // Flush any remaining rows
     sink.flush(&mut tx).await?;
 
     db::query_with_timeout(tx.commit())
@@ -222,13 +218,11 @@ where
     Ok(sink.total_rows())
 }
 
-// We compute lifer, year_tick, and country_tick ourselves rather than trusting the CSV.
-// Birda data sometimes has these fields set incorrectly (e.g. lifers not marked as year ticks).
 async fn compute_lifer_and_year_tick(
     pool: &SqlitePool,
     upload_id: &str,
 ) -> Result<(), DbQueryError> {
-    // A lifer is the first sighting of a species (by common_name) ever within this upload
+    // Derive lifer, year, and country ticks (first sightings per grouping) and bump their vis_rank.
     db::query_with_timeout(
         sqlx::query(
             "UPDATE sightings SET lifer = 1 WHERE id IN (
@@ -243,7 +237,6 @@ async fn compute_lifer_and_year_tick(
     )
     .await?;
 
-    // A year tick is the first sighting of a species in each year (lifers are also year ticks)
     db::query_with_timeout(
         sqlx::query(
         "UPDATE sightings SET year_tick = 1 WHERE id IN (
@@ -258,8 +251,6 @@ async fn compute_lifer_and_year_tick(
     )
     .await?;
 
-    // A country tick is the first sighting of a species in each country
-    // Only compute for sightings that have a country_code
     db::query_with_timeout(
         sqlx::query(
         "UPDATE sightings SET country_tick = 1 WHERE id IN (
@@ -436,7 +427,6 @@ pub async fn update_csv(
             continue;
         }
 
-        // Delete existing sightings
         if let Err(e) = db::query_with_timeout(
             sqlx::query("DELETE FROM sightings WHERE upload_id = ?")
                 .bind(&upload_id)

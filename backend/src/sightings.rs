@@ -120,11 +120,7 @@ pub async fn get_sightings(
         .min(u64::try_from(i64::MAX).unwrap_or(u64::MAX));
     let offset_i64 = i64::try_from(offset).unwrap_or(i64::MAX);
 
-    // Collect filter parameters separately from upload_id.
-    // The filter module uses enum-based field names (FilterField enum) which
-    // prevents SQL injection at compile time. Values are bound as parameters.
-    // While string concatenation is used for the WHERE clause, it's safe because
-    // field names are whitelisted via enums, not user input.
+    // Collect filter params separately so upload_id stays first and field names remain enum-whitelisted.
     let mut filter_params: Vec<String> = Vec::new();
     let mut filter_clause_parts: Vec<String> = Vec::new();
 
@@ -139,18 +135,15 @@ pub async fn get_sightings(
         }
     }
 
-    // Add lifers_only filter if requested
     if query.lifers_only == Some(true) {
         filter_clause_parts.push("AND lifer = 1".to_string());
     }
 
-    // Add year_tick filter if requested
     if let Some(year) = query.year_tick_year {
         filter_clause_parts.push("AND year_tick = 1 AND year = ?".to_string());
         filter_params.push(year.to_string());
     }
 
-    // Add country_tick filter if requested
     if let Some(country) = &query.country_tick_country {
         filter_clause_parts.push("AND country_tick = 1 AND country_code = ?".to_string());
         filter_params.push(country.clone());
@@ -162,7 +155,6 @@ pub async fn get_sightings(
         format!(" {}", filter_clause_parts.join(" "))
     };
 
-    // Handle grouped query
     if let Some(group_by_str) = &query.group_by {
         let group_by_fields: Vec<String> =
             group_by_str.split(',').map(ToString::to_string).collect();
@@ -174,7 +166,7 @@ pub async fn get_sightings(
             ));
         }
 
-        // Build GROUP BY clause - use DATE() for observed_at to group by date only
+        // Group by requested fields, coercing observed_at to DATE() so it matches the SELECT.
         let group_by_clause: Vec<String> = validated_fields
             .iter()
             .map(|f| {
@@ -187,15 +179,11 @@ pub async fn get_sightings(
             .collect();
         let group_by_clause_str = group_by_clause.join(", ");
 
-        // Build SELECT clause - use DATE() for observed_at to group by date only.
-        // DATE() returns YYYY-MM-DD format. We format it as ISO 8601 date string
-        // (YYYY-MM-DD) explicitly to ensure consistent parsing in the frontend.
-        // Note: This is intentionally date-only (not datetime) for grouped results.
+        // SELECT mirrors the grouping; DATE() gives YYYY-MM-DD for consistent frontend parsing.
         let select_clause: Vec<String> = validated_fields
             .iter()
             .map(|f| {
                 if f == "observed_at" {
-                    // DATE() returns YYYY-MM-DD, which is a valid ISO 8601 date string
                     "DATE(observed_at) as observed_at".to_string()
                 } else {
                     f.clone()
@@ -204,7 +192,6 @@ pub async fn get_sightings(
             .collect();
         let select_clause_str = select_clause.join(", ");
 
-        // Count total groups
         let count_sql = format!(
             "SELECT COUNT(*) FROM (SELECT {} FROM sightings WHERE upload_id = ?{} GROUP BY {})",
             select_clause_str, filter_clause_str, group_by_clause_str
@@ -220,7 +207,6 @@ pub async fn get_sightings(
             .await
             .map_err(|e| e.into_api_error("counting grouped sightings", "Database error"))?;
 
-        // Determine sort field (must be one of the grouped fields, count, or species_count)
         let sort_field = if let Some(sf) = query.sort_field {
             let col = sf.as_sql_column();
             if validated_fields.contains(&col.to_string())
@@ -240,7 +226,6 @@ pub async fn get_sightings(
             _ => "DESC",
         };
 
-        // Build SELECT query with COUNT(*)
         // For sorting by observed_at, use DATE() to match the grouping
         let sort_field_actual = if sort_field == "observed_at" {
             "DATE(observed_at)"
@@ -257,7 +242,6 @@ pub async fn get_sightings(
             sort_dir
         );
 
-        // Build query with proper parameter binding
         let mut select_query = sqlx::query(&select_sql);
         select_query = select_query.bind(&upload_id);
         for param in &filter_params {
@@ -270,7 +254,6 @@ pub async fn get_sightings(
             .await
             .map_err(|e| e.into_api_error("loading grouped sightings", "Database error"))?;
 
-        // Parse results into GroupedSighting
         let mut groups = Vec::new();
         for row in rows {
             let mut grouped = GroupedSighting {
@@ -313,7 +296,6 @@ pub async fn get_sightings(
         }));
     }
 
-    // Original individual sightings query
     let sort_field = query
         .sort_field
         .unwrap_or(SortField::ObservedAt)
@@ -324,8 +306,6 @@ pub async fn get_sightings(
         _ => "DESC",
     };
 
-    // Build count query - use parameterized queries with filter clause
-    // (filter clause is safe because field names come from enums)
     let count_sql = format!(
         "SELECT COUNT(*) FROM sightings WHERE upload_id = ?{}",
         filter_clause_str
@@ -340,8 +320,6 @@ pub async fn get_sightings(
         .await
         .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
-    // Build select query - use QueryBuilder for structure, string for filter clause
-    // (filter clause is safe because field names come from enums)
     let select_sql = format!(
         r"SELECT id, common_name, scientific_name, count, latitude, longitude,
             country_code, region_code, observed_at

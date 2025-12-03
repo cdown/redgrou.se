@@ -82,7 +82,6 @@ pub async fn create_test_router(pool: SqlitePool) -> Router {
             None
         };
 
-        // Add lifers_only filter if requested
         if query.lifers_only == Some(true) {
             let lifer_clause = " AND lifer = 1".to_string();
             filter_clause = Some(match filter_clause {
@@ -91,7 +90,6 @@ pub async fn create_test_router(pool: SqlitePool) -> Router {
             });
         }
 
-        // Add year_tick filter if requested
         if let Some(year) = query.year_tick_year {
             params.push(year.to_string());
             let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();

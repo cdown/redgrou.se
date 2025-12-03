@@ -312,7 +312,6 @@ impl RequestRateLimiter {
     }
 }
 
-/// Per-IP upload limiter tracking both concurrency and rate.
 #[derive(Clone)]
 struct UploadLimiter {
     max_concurrent: usize,
@@ -337,7 +336,6 @@ impl UploadLimiter {
         }
     }
 
-    /// Try to start an upload. Returns Ok(guard) if allowed, Err(message) if denied.
     async fn try_start(&self, key: &str) -> Result<(), &'static str> {
         let mut state = self.state.lock().await;
         let entry = state.entry(key.to_string()).or_insert(UploadState {
@@ -365,7 +363,6 @@ impl UploadLimiter {
         Ok(())
     }
 
-    /// Mark an upload as finished for the given IP.
     async fn finish(&self, key: &str) {
         let mut state = self.state.lock().await;
         if let Some(entry) = state.get_mut(key) {
@@ -381,7 +378,6 @@ async fn enforce_upload_limit(
     req: Request<Body>,
     next: Next,
 ) -> Response {
-    // Skip rate limiting if disable-rate-limits feature is enabled (for benchmarks)
     #[cfg(feature = "disable-rate-limits")]
     {
         return next.run(req).await;
@@ -389,7 +385,6 @@ async fn enforce_upload_limit(
 
     #[cfg(not(feature = "disable-rate-limits"))]
     {
-        // Only apply to upload routes (POST /upload, PUT /single/{id})
         let dominated_by_upload =
             req.method() == axum::http::Method::POST || req.method() == axum::http::Method::PUT;
         if !dominated_by_upload {
@@ -417,7 +412,6 @@ async fn enforce_rate_limit(
     req: Request<Body>,
     next: Next,
 ) -> Response {
-    // Skip rate limiting if disable-rate-limits feature is enabled (for benchmarks)
     #[cfg(feature = "disable-rate-limits")]
     {
         return next.run(req).await;
@@ -489,7 +483,6 @@ fn extract_client_addr<B>(
     peer_addr.ip().to_string()
 }
 
-// Store extracted client IP in request extensions for logging
 async fn extract_and_log_ip(
     Extension(trusted): Extension<TrustedProxyList>,
     ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
@@ -501,18 +494,14 @@ async fn extract_and_log_ip(
     next.run(req).await
 }
 
-// Extract client IP from request extensions (set by extract_and_log_ip middleware)
 fn extract_ip_for_logging<B>(req: &Request<B>) -> String {
-    // Get from extensions (set by middleware)
     if let Some(ip) = req.extensions().get::<String>() {
         return ip.clone();
     }
 
-    // Fallback if middleware didn't run (shouldn't happen)
     "unknown".to_string()
 }
 
-// Custom span maker for TraceLayer that includes IP and path
 fn make_request_span<B>(req: &Request<B>) -> Span {
     let method = req.method();
     let path = req.uri().path();
@@ -533,7 +522,6 @@ fn make_request_span<B>(req: &Request<B>) -> Span {
     )
 }
 
-// Log request details when it starts
 fn on_request<B>(req: &Request<B>, _span: &Span) {
     let method = req.method();
     let path = req.uri().path();
@@ -548,7 +536,6 @@ fn on_request<B>(req: &Request<B>, _span: &Span) {
     info!("{} {} from {}", method, full_path, client_ip);
 }
 
-// Log response details when it completes
 fn on_response<B>(response: &Response<B>, latency: Duration, _span: &Span) {
     let status = response.status();
     let latency_ms = latency.as_millis();
@@ -708,7 +695,6 @@ async fn get_filtered_count(
         None
     };
 
-    // Add lifers_only filter if requested
     if query.lifers_only == Some(true) {
         let lifer_clause = " AND lifer = 1".to_string();
         filter_clause = Some(match filter_clause {
@@ -717,7 +703,6 @@ async fn get_filtered_count(
         });
     }
 
-    // Add year_tick filter if requested
     if let Some(year) = query.year_tick_year {
         params.push(year.to_string());
         let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();
@@ -727,7 +712,6 @@ async fn get_filtered_count(
         });
     }
 
-    // Add country_tick filter if requested
     if let Some(country) = &query.country_tick_country {
         params.push(country.clone());
         let country_tick_clause = " AND country_tick = 1 AND country_code = ?".to_string();
@@ -781,7 +765,6 @@ async fn get_bbox(
         None
     };
 
-    // Add lifers_only filter if requested
     if query.lifers_only == Some(true) {
         let lifer_clause = " AND lifer = 1".to_string();
         filter_clause = Some(match filter_clause {
@@ -790,7 +773,6 @@ async fn get_bbox(
         });
     }
 
-    // Add year_tick filter if requested
     if let Some(year) = query.year_tick_year {
         params.push(year.to_string());
         let year_tick_clause = " AND year_tick = 1 AND year = ?".to_string();
@@ -800,7 +782,6 @@ async fn get_bbox(
         });
     }
 
-    // Add country_tick filter if requested
     if let Some(country) = &query.country_tick_country {
         params.push(country.clone());
         let country_tick_clause = " AND country_tick = 1 AND country_code = ?".to_string();

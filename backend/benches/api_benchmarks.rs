@@ -43,7 +43,6 @@ fn generate_csv(rows: usize) -> Vec<u8> {
 
     for i in 0..rows {
         let (lat_base, lon_base, _country) = regions[i % regions.len()];
-        // Add some variation to coordinates
         let lat = lat_base + (i as f64 % 100.0) * 0.01;
         let lon = lon_base + (i as f64 % 100.0) * 0.01;
         let (common_name, scientific_name) = species[i % species.len()];

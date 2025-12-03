@@ -42,7 +42,6 @@ pub struct ParsedSighting {
     pub observed_at: String,
 }
 
-/// Type alias for stack-allocated strings (inline up to 23 bytes on 64-bit)
 type SString = SmartString<LazyCompact>;
 
 /// Fully processed sighting ready for database insertion
@@ -88,7 +87,6 @@ impl Serialize for ProcessedSighting {
     }
 }
 
-/// CSV Parser stage: reads CSV and parses rows into ParsedSighting
 pub struct CsvParser {
     col_map: ColumnMap,
     row_number: usize,
@@ -186,7 +184,6 @@ impl CsvParser {
     }
 }
 
-/// Geocoder stage: adds country/region codes to parsed sightings
 pub struct Geocoder;
 
 impl Geocoder {
@@ -224,7 +221,6 @@ impl Geocoder {
             .zip(geocode_results)
             .map(|(sighting, (country_code, region_code))| {
                 let year = extract_year(&sighting.observed_at);
-                // Parse UUID from CSV string (validated during CSV parsing)
                 let sighting_uuid = Uuid::parse_str(&sighting.sighting_uuid)
                     .expect("Invalid UUID format (should be caught during CSV parsing)");
                 ProcessedSighting {
@@ -250,7 +246,6 @@ impl Default for Geocoder {
     }
 }
 
-/// Database sink stage: writes processed sightings to the database
 pub struct DbSink {
     upload_id: String,
     batch: Vec<ProcessedSighting>,

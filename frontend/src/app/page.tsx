@@ -9,7 +9,6 @@ export default function Home() {
 
   return (
     <main className="fixed inset-0 overflow-hidden">
-      {/* Background with subtle topographic pattern */}
       <div className="absolute inset-0 bg-gradient-to-br from-stone-50 via-amber-50/30 to-rose-50/40" />
       <div
         className="absolute inset-0 opacity-[0.03]"
@@ -18,14 +17,11 @@ export default function Home() {
         }}
       />
 
-      {/* Decorative circles */}
       <div className="absolute -left-32 -top-32 h-96 w-96 rounded-full bg-gradient-to-br from-rose-200/30 to-transparent blur-3xl" />
       <div className="absolute -bottom-48 -right-48 h-[500px] w-[500px] rounded-full bg-gradient-to-tl from-amber-200/40 to-transparent blur-3xl" />
 
-      {/* Content */}
       <div className="relative flex h-full items-center justify-center p-6">
         <div className="w-full max-w-md">
-          {/* Logo */}
           <div className="mb-8 flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-rose-500 to-rose-600 shadow-lg shadow-rose-500/25">
               <Map className="h-6 w-6 text-white" />
@@ -38,7 +34,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Upload card */}
           <div className="rounded-2xl bg-white/80 p-6 shadow-xl shadow-stone-900/5 ring-1 ring-stone-900/5 backdrop-blur-sm">
             <h2 className="mb-2 text-lg font-semibold text-stone-900">
               Visualise your sightings
@@ -54,7 +49,6 @@ export default function Home() {
             />
           </div>
 
-          {/* Features */}
           <div className="mt-8 grid grid-cols-3 gap-4 text-center">
             <div className="rounded-xl bg-white/50 p-4 backdrop-blur-sm">
               <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-stone-100">

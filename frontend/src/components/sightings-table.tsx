@@ -30,7 +30,6 @@ interface SightingsTableProps {
 
 type SortDir = "asc" | "desc";
 
-// Local type with number instead of bigint for display
 type GroupedSightingDisplay = Omit<
   GroupedSighting,
   "count" | "species_count"
@@ -121,7 +120,6 @@ export function SightingsTable({
         const json: SightingsResponse = await res.json();
 
         if (groupBy.length > 0 && json.groups) {
-          // Handle grouped response - convert bigint to number
           const groupsData: GroupedSightingDisplay[] = json.groups.map((g) => ({
             ...g,
             count: Number(g.count),
@@ -134,7 +132,6 @@ export function SightingsTable({
           }
           setSightings([]);
         } else if (json.sightings) {
-          // Handle individual sightings response
           if (append) {
             setSightings((prev) => [...prev, ...json.sightings!]);
           } else {

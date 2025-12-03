@@ -49,7 +49,6 @@ interface UploadMetadata {
 function getEditToken(uploadId: string): string | null {
   if (typeof window === "undefined") return null;
 
-  // Check URL parameter first (for edit links)
   const urlParams = new URLSearchParams(window.location.search);
   const urlToken = urlParams.get("token");
   if (urlToken) return urlToken;
@@ -106,12 +105,10 @@ export default function UploadPage() {
     setEditToken(getEditToken(uploadId));
   }, [uploadId]);
 
-  // Measure top-right controls height to position table overlay
   useEffect(() => {
     const updateTableTop = () => {
       if (topRightControlsRef.current) {
         const rect = topRightControlsRef.current.getBoundingClientRect();
-        // Add some padding (16px = top-4) + gap (8px) for spacing
         setTableTopOffset(rect.bottom + 8);
       }
     };
@@ -128,7 +125,6 @@ export default function UploadPage() {
     if (urlToken && uploadId) {
       setStoredEditToken(uploadId, urlToken);
 
-      // Remove token from URL without triggering navigation
       const cleanUrl = `${window.location.origin}/single/${uploadId}`;
       window.history.replaceState({}, "", cleanUrl);
     }
@@ -146,7 +142,6 @@ export default function UploadPage() {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
 
-    // Fetch available years for year tick filter
     apiFetch(
       buildApiUrl(FIELD_VALUES_ROUTE, {
         upload_id: uploadId,
@@ -163,14 +158,11 @@ export default function UploadPage() {
         const years = data.values
           .map((y) => parseInt(y, 10))
           .filter((y) => !isNaN(y))
-          .sort((a, b) => b - a); // Sort descending (most recent first)
+          .sort((a, b) => b - a);
         setAvailableYears(years);
       })
-      .catch(() => {
-        // Ignore errors, just don't show year selector
-      });
+      .catch(() => {});
 
-    // Fetch available countries for country tick filter
     apiFetch(
       buildApiUrl(FIELD_VALUES_ROUTE, {
         upload_id: uploadId,
@@ -184,7 +176,6 @@ export default function UploadPage() {
         return { values: [] };
       })
       .then((data: { values: string[] }) => {
-        // Filter out null/empty values and sort by human-readable name
         const countries = data.values
           .filter((c) => c && c.trim() !== "")
           .sort((a, b) => {
@@ -194,9 +185,7 @@ export default function UploadPage() {
           });
         setAvailableCountries(countries);
       })
-      .catch(() => {
-        // Ignore errors, just don't show country selector
-      });
+      .catch(() => {});
   }, [uploadId]);
 
   useEffect(() => {
@@ -319,7 +308,6 @@ export default function UploadPage() {
           row_count: result.row_count,
         });
         setShowUpdateModal(false);
-        // Reset filter since data changed
         setFilter(null);
         setFilteredCount(null);
       } catch (err) {
@@ -380,7 +368,6 @@ export default function UploadPage() {
 
   return (
     <main className="fixed inset-0 overflow-hidden">
-      {/* Full-screen map */}
       <div className="absolute inset-0">
         <SightingsMap
           uploadId={upload.upload_id}
@@ -395,7 +382,6 @@ export default function UploadPage() {
         />
       </div>
 
-      {/* Table overlay (slides up from bottom when active) */}
       <div
         className={`absolute inset-x-0 bottom-0 bg-white shadow-2xl transition-transform duration-300 ease-out ${
           viewMode === "table" ? "translate-y-0" : "translate-y-full"
@@ -438,7 +424,6 @@ export default function UploadPage() {
         </div>
       </div>
 
-      {/* Filter panel (slides in from left) */}
       <div
         className={`absolute inset-0 md:bottom-4 md:left-4 md:top-4 md:w-[400px] md:rounded-2xl overflow-hidden bg-white shadow-2xl transition-transform duration-300 ease-out z-40 ${
           filterOpen
@@ -454,14 +439,12 @@ export default function UploadPage() {
         />
       </div>
 
-      {/* Top-right: View controls */}
       <div
         ref={topRightControlsRef}
         className={`absolute right-4 top-4 flex flex-col gap-2 z-50 transition-opacity ${
           filterOpen ? "opacity-0 pointer-events-none" : "opacity-100"
         }`}
       >
-        {/* Lifers, Year Tick, and Country Tick filters - mutually exclusive */}
         <div className="flex gap-2">
           <button
             onClick={() => {
@@ -575,7 +558,6 @@ export default function UploadPage() {
           )}
         </div>
 
-        {/* View toggle */}
         <div className="flex overflow-hidden rounded-lg bg-white shadow-lg">
           <button
             onClick={() => setViewMode("map")}
@@ -601,7 +583,6 @@ export default function UploadPage() {
           </button>
         </div>
 
-        {/* More options */}
         <div className="flex flex-col overflow-hidden rounded-lg bg-white shadow-lg">
           <button
             onClick={() => setMenuExpanded(!menuExpanded)}
@@ -706,7 +687,6 @@ export default function UploadPage() {
                 onClick={() => {
                   setShowAboutModal(true);
                   setMenuExpanded(false);
-                  // Fetch backend version info
                   if (!backendVersion) {
                     apiFetch(buildApiUrl(VERSION_ROUTE))
                       .then((res) => res.json())
@@ -731,7 +711,6 @@ export default function UploadPage() {
       </div>
 
 
-      {/* Delete confirmation modal */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
@@ -770,7 +749,6 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* Update modal */}
       {showUpdateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
@@ -829,7 +807,6 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* About modal */}
       {showAboutModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">

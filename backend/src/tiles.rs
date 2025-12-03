@@ -90,7 +90,6 @@ pub async fn get_tile(
         None
     };
 
-    // Add lifers_only filter if requested
     if query.lifers_only == Some(true) {
         let lifer_clause = " AND s.lifer = 1".to_string();
         filter_clause = Some(match filter_clause {
@@ -99,7 +98,6 @@ pub async fn get_tile(
         });
     }
 
-    // Add year_tick filter if requested
     if let Some(year) = query.year_tick_year {
         filter_params.push(year.to_string());
         let year_tick_clause = " AND s.year_tick = 1 AND s.year = ?".to_string();
@@ -109,7 +107,6 @@ pub async fn get_tile(
         });
     }
 
-    // Add country_tick filter if requested
     if let Some(country) = &query.country_tick_country {
         filter_params.push(country.clone());
         let country_tick_clause = " AND s.country_tick = 1 AND s.country_code = ?".to_string();
@@ -135,19 +132,16 @@ pub async fn get_tile(
         _ => MAX_VIS_RANK, // High zoom: all points
     };
 
-    // Limit points returned to prevent memory spikes (safety cap)
+    // Safety cap on rendered points.
     let max_points = match z {
-        0..=2 => 5000,  // Very low zoom: 5k points max
-        3..=4 => 10000, // Low zoom: 10k points max
-        5..=7 => 25000, // Medium-low zoom: 25k points max
-        _ => 100000,    // Higher zoom: 100k points max (effectively unlimited)
+        0..=2 => 5000,
+        3..=4 => 10000,
+        5..=7 => 25000,
+        _ => 100000,
     };
 
-    // Optimize query order: filter by upload_id and vis_rank first (uses index),
-    // then join to rtree for bbox filtering. This allows SQLite to use the
-    // idx_sightings_vis_rank index efficiently before the spatial join.
-    // At high zoom (vis_rank_threshold = MAX_VIS_RANK), skip the vis_rank filter entirely
-    // since it would match all points anyway, avoiding unnecessary index scan overhead.
+    // Filter by upload_id + vis_rank before the rtree join; skip the vis_rank predicate
+    // entirely when the threshold would include everyone.
     let include_all_points = vis_rank_threshold >= MAX_VIS_RANK;
     let vis_rank_clause = if include_all_points {
         String::new()

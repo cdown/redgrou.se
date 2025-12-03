@@ -51,7 +51,6 @@ pub enum FilterField {
 }
 
 impl FilterField {
-    /// Returns the SQL column name for this field.
     pub const fn as_sql_column(&self) -> &'static str {
         match self {
             Self::CommonName => "common_name",
@@ -63,14 +62,10 @@ impl FilterField {
         }
     }
 
-    /// Returns the string representation used in the API.
     pub fn as_str(&self) -> &'static str {
         self.as_sql_column()
     }
 }
-
-// Serialization/deserialization is handled by serde's rename attributes above
-// The enum will serialize as the snake_case string values
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -320,7 +315,6 @@ pub async fn get_distinct_values(
     upload_id: &str,
     field: &str,
 ) -> Result<Vec<String>, DbQueryError> {
-    // Parse and validate the field string into a FilterField enum
     let filter_field = match field {
         "common_name" => FilterField::CommonName,
         "scientific_name" => FilterField::ScientificName,
@@ -328,7 +322,7 @@ pub async fn get_distinct_values(
         "count" => FilterField::Count,
         "observed_at" => FilterField::ObservedAt,
         "year" => FilterField::Year,
-        _ => return Ok(vec![]), // Invalid field, return empty
+        _ => return Ok(vec![]),
     };
 
     let column = filter_field.as_sql_column();

@@ -205,10 +205,6 @@ function handleSightingFeature(
   );
 }
 
-/**
- * Find a feature by sighting ID and show its popup
- * Uses O(1) lookup from pre-cached features map
- */
 function showPopupBySightingId(
   map: maplibregl.Map,
   sightingId: number,
@@ -216,7 +212,6 @@ function showPopupBySightingId(
   lng: number,
   featuresById: Map<number, maplibregl.MapGeoJSONFeature>,
 ): void {
-  // O(1) lookup from pre-cached features
   const feature = featuresById.get(sightingId);
 
   if (feature) {
@@ -224,15 +219,12 @@ function showPopupBySightingId(
   }
 }
 
-/**
- * Add sightings layer and attach event handlers
- */
 function addSightingsLayer(
   map: maplibregl.Map,
   featuresById: Map<number, maplibregl.MapGeoJSONFeature>,
 ): void {
   if (map.getLayer("sightings-circles")) {
-    return; // Layer already exists
+    return;
   }
 
   // Add invisible hit detection layer with larger radius for better tap targets
@@ -270,25 +262,20 @@ function addSightingsLayer(
     },
   });
 
-
-  // Attach click handlers to the hit detection layer
   map.on("click", "sightings-circles-hit", (e) => {
     if (!e.features?.length) return;
     const feature = e.features[0];
     const featureId = feature.id;
     if (typeof featureId !== "number") return;
 
-    // Cache the feature for O(1) lookup later
     featuresById.set(featureId, feature);
 
-    // Extract coordinates from feature geometry
     const geometry = feature.geometry;
     if (geometry.type !== "Point" || !geometry.coordinates) {
       return;
     }
     const [lng, lat] = geometry.coordinates;
 
-    // Use ID-based navigation to ensure consistent behavior
     showPopupBySightingId(map, featureId, lat, lng, featuresById);
   });
 
@@ -313,20 +300,16 @@ export function SightingsMap({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const onMapReadyRef = useRef(onMapReady);
-  // Cache features by ID for O(1) lookup
   const featuresByIdRef = useRef<Map<number, maplibregl.MapGeoJSONFeature>>(new Map());
 
-  // Update ref when prop changes
   useEffect(() => {
     onMapReadyRef.current = onMapReady;
   }, [onMapReady]);
 
-  // Initialize map (only when uploadId changes)
   useEffect(() => {
     if (!containerRef.current) return;
 
     if (mapRef.current) {
-      // Cancel all pending tile requests before removing the map
       abortControllersRef.current.forEach((controller) => {
         controller.abort();
       });
@@ -362,7 +345,6 @@ export function SightingsMap({
             controllersMap.delete(url);
           }
 
-          // Create a new AbortController for this request
           const controller = new AbortController();
           controllersMap.set(url, controller);
 
@@ -374,7 +356,6 @@ export function SightingsMap({
             signal: controller.signal,
           };
         }
-        // For non-tile requests or other sources, return undefined to use default handling
         return undefined;
       },
     });
@@ -460,10 +441,8 @@ export function SightingsMap({
       }
     }, 5000);
 
-    // Create navigation function that will be exposed to parent
     const createNavigateFunction = () => {
       return (sightingId: number, lat: number, lng: number) => {
-        // Validate coordinates are valid numbers
         if (
           typeof lat !== "number" ||
           typeof lng !== "number" ||
@@ -476,13 +455,11 @@ export function SightingsMap({
           return;
         }
 
-        // Validate coordinate ranges
         if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
           console.warn("Coordinates out of valid range:", { lat, lng });
           return;
         }
 
-        // Validate sighting ID
         if (typeof sightingId !== "number" || isNaN(sightingId) || !isFinite(sightingId)) {
           console.warn("Invalid sighting ID for navigation:", { sightingId });
           return;
@@ -490,13 +467,12 @@ export function SightingsMap({
 
         // After map moves, find feature by ID and show popup
         const showPopupById = () => {
-          // Small delay to ensure tiles are loaded
+          // Small delay to ensure tiles are loaded, idle is too slow
           setTimeout(() => {
             showPopupBySightingId(map, sightingId, lat, lng, featuresByIdRef.current);
           }, 200);
         };
 
-        // Use one-time moveend listener to show popup after animation completes
         const handleMoveEnd = () => {
           map.off("moveend", handleMoveEnd);
           showPopupById();
@@ -511,7 +487,6 @@ export function SightingsMap({
       };
     };
 
-    // Add sightings source and layer when map loads
     map.on("load", () => {
       const tileUrl = buildTileUrl(uploadId, filter, lifersOnly, yearTickYear, countryTickCountry);
 
@@ -527,11 +502,9 @@ export function SightingsMap({
       const source = map.getSource("sightings") as maplibregl.VectorTileSource;
       if (source) {
         const cacheFeatures = () => {
-          // Only cache if layer exists
           if (!map.getLayer("sightings-circles-hit")) {
             return;
           }
-          // Query all rendered features and cache them by ID
           const features = map.queryRenderedFeatures(undefined, {
             layers: ["sightings-circles-hit"],
           });
@@ -542,14 +515,12 @@ export function SightingsMap({
           });
         };
 
-        // Cache features when source data loads
         source.on("data", (e) => {
           if (e.dataType === "source" && e.isSourceLoaded) {
             cacheFeatures();
           }
         });
 
-        // Also cache features when tiles load (more granular)
         map.on("sourcedata", (e) => {
           if (e.sourceId === "sightings" && e.isSourceLoaded) {
             cacheFeatures();
@@ -557,7 +528,6 @@ export function SightingsMap({
         });
       }
 
-      // Expose navigation function to parent component when map loads
       if (onMapReadyRef.current) {
         onMapReadyRef.current(createNavigateFunction());
       }
@@ -566,9 +536,7 @@ export function SightingsMap({
     mapRef.current = map;
 
     return () => {
-      // Disconnect attribution observer
       attributionObserver.disconnect();
-      // Cancel all pending tile requests
       controllersMap.forEach((controller) => {
         controller.abort();
       });
@@ -588,7 +556,7 @@ export function SightingsMap({
     // recreating the map, preserving the viewport.
   }, [uploadId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Update tile source when filters change (preserves viewport)
+  // Update tile source when filters change, preserving the viewport
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.getSource("sightings")) {
@@ -598,22 +566,18 @@ export function SightingsMap({
     const tileUrl = buildTileUrl(uploadId, filter, lifersOnly, yearTickYear, countryTickCountry);
     const source = map.getSource("sightings") as maplibregl.VectorTileSource;
 
-    // Check if URL actually changed
     if (source && source.tiles && source.tiles[0] === tileUrl) {
       return;
     }
 
-    // Preserve current viewport
     const center = map.getCenter();
     const zoom = map.getZoom();
     const bearing = map.getBearing();
     const pitch = map.getPitch();
 
-    // Clear feature cache when filters change (new data will be loaded)
     featuresByIdRef.current.clear();
 
-    // Remove layers first (they depend on the source)
-    // Event handlers are automatically removed when layers are removed
+    // Remove dependent layers before swapping the source
     if (map.getLayer("sightings-circles-hit")) {
       map.removeLayer("sightings-circles-hit");
     }
@@ -621,25 +585,20 @@ export function SightingsMap({
       map.removeLayer("sightings-circles");
     }
 
-    // Remove and re-add source with new tile URL
     map.removeSource("sightings");
     map.addSource("sightings", {
       type: "vector",
       tiles: [tileUrl],
     });
 
-    // Re-add layer and event handlers
     addSightingsLayer(map, featuresByIdRef.current);
 
-    // Re-setup feature caching for new source (after layers are added)
     const newSource = map.getSource("sightings") as maplibregl.VectorTileSource;
     if (newSource) {
       const cacheFeatures = () => {
-        // Only cache if layer exists
         if (!map.getLayer("sightings-circles-hit")) {
           return;
         }
-        // Query all rendered features and cache them by ID
         const features = map.queryRenderedFeatures(undefined, {
           layers: ["sightings-circles-hit"],
         });
@@ -663,7 +622,6 @@ export function SightingsMap({
       });
     }
 
-    // Restore viewport immediately (map will not animate)
     map.jumpTo({
       center: center,
       zoom: zoom,
@@ -672,7 +630,6 @@ export function SightingsMap({
     });
   }, [uploadId, filter, lifersOnly, yearTickYear, countryTickCountry]);
 
-  // Zoom to bounding box when country tick is selected
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !countryTickCountry) {
@@ -714,9 +671,7 @@ export function SightingsMap({
           );
         }
       })
-      .catch(() => {
-        // Ignore errors
-      });
+      .catch(() => {});
   }, [uploadId, countryTickCountry, filter, lifersOnly, yearTickYear]);
 
   return <div ref={containerRef} className="h-full w-full" />;
