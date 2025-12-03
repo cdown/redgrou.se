@@ -140,12 +140,12 @@ export default function UploadPage() {
     if (!uploadId) return;
 
     apiFetch(buildApiUrl(UPLOAD_DETAILS_ROUTE, { upload_id: uploadId }))
-      .then((res) => {
-        if (!res.ok) throw new Error("Upload not found");
+      .then(async (res) => {
+        await checkApiResponse(res, "Upload not found");
         return res.json();
       })
       .then(setUpload)
-      .catch((err) => setError(err.message))
+      .catch((err) => setError(getErrorMessage(err, "Upload not found")))
       .finally(() => setLoading(false));
 
     apiFetch(
