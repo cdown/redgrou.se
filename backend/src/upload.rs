@@ -279,6 +279,27 @@ async fn compute_lifer_and_year_tick(
     )
     .await?;
 
+    // Ensure at least one sighting per 1-degree grid cell is visible. Basically the logic is:
+    //
+    // 1. Partitions data into grid cells
+    // 2. Select the best sighting per cell (ordered by vis_rank ASC)
+    //
+    // This ensures isolated sightings in remote locations remain visible at low zoom levels, like
+    // Tonia's Newark sighting.
+    db::query_with_timeout(
+        sqlx::query(
+            "UPDATE sightings SET vis_rank = 0 WHERE id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (PARTITION BY CAST(latitude AS INTEGER), CAST(longitude AS INTEGER) ORDER BY vis_rank ASC) as rn
+                    FROM sightings WHERE upload_id = ?
+                ) WHERE rn = 1
+            )"
+        )
+            .bind(upload_id_blob)
+            .execute(pool),
+    )
+    .await?;
+
     Ok(())
 }
 
