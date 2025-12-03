@@ -9,6 +9,17 @@ use crate::db;
 use crate::error::ApiError;
 use crate::filter::build_filter_clause;
 
+macro_rules! bind_filter_params {
+    ($query:expr, $upload_id:expr, $filter_params:expr) => {{
+        let mut q = $query;
+        q = q.bind($upload_id);
+        for param in $filter_params {
+            q = q.bind(param);
+        }
+        q
+    }};
+}
+
 #[derive(Debug, Serialize, Deserialize, TS, Clone, Copy)]
 #[ts(export)]
 #[serde(rename_all = "snake_case")]
@@ -178,11 +189,11 @@ pub async fn get_sightings(
             select_clause_str, filter_clause_str, group_by_clause_str
         );
 
-        let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
-        count_query = count_query.bind(&upload_id);
-        for param in &filter_params {
-            count_query = count_query.bind(param);
-        }
+        let count_query = bind_filter_params!(
+            sqlx::query_scalar::<_, i64>(&count_sql),
+            &upload_id,
+            &filter_params
+        );
 
         let total = db::query_with_timeout(count_query.fetch_one(&pool))
             .await
@@ -220,11 +231,8 @@ pub async fn get_sightings(
             sort_dir
         );
 
-        let mut select_query = sqlx::query(&select_sql);
-        select_query = select_query.bind(&upload_id);
-        for param in &filter_params {
-            select_query = select_query.bind(param);
-        }
+        let mut select_query =
+            bind_filter_params!(sqlx::query(&select_sql), &upload_id, &filter_params);
         select_query = select_query.bind(i64::from(page_size));
         select_query = select_query.bind(offset_i64);
 
@@ -285,11 +293,11 @@ pub async fn get_sightings(
         "SELECT COUNT(*) FROM sightings WHERE upload_id = ?{}",
         filter_clause_str
     );
-    let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
-    count_query = count_query.bind(&upload_id);
-    for param in &filter_params {
-        count_query = count_query.bind(param);
-    }
+    let count_query = bind_filter_params!(
+        sqlx::query_scalar::<_, i64>(&count_sql),
+        &upload_id,
+        &filter_params
+    );
 
     let total = db::query_with_timeout(count_query.fetch_one(&pool))
         .await
@@ -305,11 +313,11 @@ pub async fn get_sightings(
         filter_clause_str, sort_field, sort_dir
     );
 
-    let mut select_query = sqlx::query_as::<_, Sighting>(&select_sql);
-    select_query = select_query.bind(&upload_id);
-    for param in &filter_params {
-        select_query = select_query.bind(param);
-    }
+    let mut select_query = bind_filter_params!(
+        sqlx::query_as::<_, Sighting>(&select_sql),
+        &upload_id,
+        &filter_params
+    );
     select_query = select_query.bind(i64::from(page_size));
     select_query = select_query.bind(offset_i64);
 
