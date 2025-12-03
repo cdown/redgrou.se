@@ -1,4 +1,5 @@
 pub mod api_constants;
+pub mod config;
 pub mod db;
 pub mod error;
 pub mod filter;
