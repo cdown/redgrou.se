@@ -34,6 +34,8 @@ use redgrouse::filter::{
 use redgrouse::{db, sightings, tiles, upload};
 
 const BUILD_VERSION: &str = env!("BUILD_VERSION");
+const BUILD_DATE: &str = env!("BUILD_DATE");
+const RUSTC_VERSION: &str = env!("RUSTC_VERSION");
 
 /// Maximum time any request can take before being terminated.
 /// Applies to: All routes (tiles, sightings, uploads, metadata).
@@ -152,6 +154,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route(api_constants::HEALTH_ROUTE, get(health_check))
+        .route(api_constants::VERSION_ROUTE, get(version_info))
         .route(
             api_constants::UPLOAD_DETAILS_ROUTE,
             get(get_upload).delete(upload::delete_upload),
@@ -214,6 +217,22 @@ async fn main() -> anyhow::Result<()> {
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+#[derive(Serialize, TS)]
+#[ts(export)]
+struct VersionInfo {
+    git_hash: String,
+    build_date: String,
+    rustc_version: String,
+}
+
+async fn version_info() -> Json<VersionInfo> {
+    Json(VersionInfo {
+        git_hash: BUILD_VERSION.to_string(),
+        build_date: BUILD_DATE.to_string(),
+        rustc_version: RUSTC_VERSION.to_string(),
+    })
 }
 
 async fn handle_layer_error(err: BoxError) -> ApiError {

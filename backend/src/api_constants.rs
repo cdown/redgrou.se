@@ -1,4 +1,5 @@
 pub const HEALTH_ROUTE: &str = "/health";
+pub const VERSION_ROUTE: &str = "/api/version";
 pub const UPLOAD_ROUTE: &str = "/api/uploads";
 pub const UPLOAD_DETAILS_ROUTE: &str = "/api/uploads/{upload_id}";
 pub const UPLOAD_COUNT_ROUTE: &str = "/api/uploads/{upload_id}/count";
