@@ -36,7 +36,7 @@ for production.
 
 ## Data import formats
 
-redgrou.se accepts CSV exports from [Birda](https://www.birda.com/). You can
+redgrou.se accepts CSV exports from [Birda](https://www.birda.org/). You can
 export them [on this page](https://app.birda.org/exports).
 
 Adding support for exports from other services is very welcome, please feel
