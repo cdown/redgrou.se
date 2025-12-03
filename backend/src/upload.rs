@@ -286,10 +286,7 @@ pub async fn upload_csv(
             .file_name()
             .map_or_else(|| "unknown.csv".to_string(), ToString::to_string);
 
-        if !std::path::Path::new(&filename)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("csv"))
-        {
+        if !is_csv_file(&filename) {
             continue;
         }
 
@@ -359,6 +356,12 @@ pub async fn upload_csv(
     ApiError::bad_request("No CSV file found in upload").into_response()
 }
 
+fn is_csv_file(filename: &str) -> bool {
+    std::path::Path::new(filename)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("csv"))
+}
+
 fn extract_edit_token(headers: &axum::http::HeaderMap) -> Option<String> {
     headers
         .get(header::AUTHORIZATION)
@@ -420,10 +423,7 @@ pub async fn update_csv(
             .file_name()
             .map_or_else(|| "unknown.csv".to_string(), ToString::to_string);
 
-        if !std::path::Path::new(&filename)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("csv"))
-        {
+        if !is_csv_file(&filename) {
             continue;
         }
 
