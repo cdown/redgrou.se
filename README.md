@@ -2,17 +2,10 @@
 
 https://github.com/user-attachments/assets/a6956e5b-c8ac-4214-9dd8-7d24c9554e32
 
-A high-performance bird sighting analytics platform. Upload your sightings, explore them all on an interactive map, and filter by species, location, date, significance, and more.
+A bird sighting analytics platform. Upload your sightings, explore them all on
+an interactive map, and filter by species, location, date, significance, etc.
 
-## Features
-
-- Interactive map - Rendered smoothly at any level of zoom
-- Powerful filtering - Intuitive filtering for lifers, year ticks, country ticks, etc, and a query builder for advanced queries
-- Table view - Sortable columns with infinite scroll, synced with map filters
-- Shareable URLs - Anyone with the link can view your sightings
-- Privacy conscious - No accounts required, edit access via tokens stored in browser localStorage
-
-## Quick Start
+## Quick start
 
 ### Prerequisites
 
@@ -38,7 +31,8 @@ redgrou.se is designed at [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ./rgrse prod
 ```
 
-This compiles the Rust backend in release mode and builds the Next.js frontend for production.
+This compiles the Rust backend in release mode and builds the Next.js frontend
+for production.
 
 ## Data import formats
 
