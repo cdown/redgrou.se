@@ -148,7 +148,7 @@ elif [[ "$MODE" == "dev" ]]; then
     echo "[rgrse] Starting in development mode..." >&2
 
     # Ensure frontend dependencies are installed
-    if [[ ! -d "frontend/node_modules" ]]; then
+    if [[ ! -f "frontend/node_modules/.bin/next" ]]; then
         echo "[rgrse] Installing frontend dependencies..." >&2
         (cd frontend && npm install)
     fi
