@@ -1,5 +1,7 @@
 # redgrou.se
 
+https://github.com/user-attachments/assets/a6956e5b-c8ac-4214-9dd8-7d24c9554e32
+
 A high-performance bird sighting analytics platform. Upload your sightings, explore them all on an interactive map, and filter by species, location, date, significance, and more.
 
 ## Features
