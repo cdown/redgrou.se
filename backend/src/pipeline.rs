@@ -234,13 +234,19 @@ impl Geocoder {
                     count: sighting.count,
                     latitude: sighting.latitude,
                     longitude: sighting.longitude,
-                    country_code: country_code.into(),
-                    region_code: region_code.map(Into::into),
+                    country_code,
+                    region_code,
                     observed_at: sighting.observed_at.into(),
                     year,
                 }
             })
             .collect())
+    }
+}
+
+impl Default for Geocoder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

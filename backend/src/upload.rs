@@ -164,7 +164,7 @@ where
         .map_err(|err| map_csv_error(err, "Failed to read CSV headers", "Invalid CSV headers"))?;
 
     // Initialize pipeline stages
-    let mut parser = CsvParser::new(&headers)?;
+    let mut parser = CsvParser::new(headers)?;
     let geocoder = Geocoder::new();
     let mut sink = DbSink::new(upload_id.to_string());
 
