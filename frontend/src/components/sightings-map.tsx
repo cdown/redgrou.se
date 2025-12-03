@@ -9,6 +9,13 @@ import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { fetchSpeciesInfo } from "@/lib/species-api";
 import { TILE_ROUTE, UPLOAD_BBOX_ROUTE } from "@/lib/generated/api_constants";
 import { SpeciesPopup, SpeciesPopupLoading } from "@/components/species-popup";
+import {
+  COLOUR_LIFER,
+  COLOUR_YEAR_TICK,
+  COLOUR_COUNTRY_TICK,
+  COLOUR_NORMAL_SIGHTING,
+  COLOUR_WHITE,
+} from "@/lib/colours";
 
 interface SightingsMapProps {
   uploadId: string;
@@ -250,15 +257,15 @@ function addSightingsLayer(
       "circle-color": [
         "case",
         [">", ["get", "lifer"], 0],
-        "#9333EA", // Purple for lifers
+        COLOUR_LIFER,
         [">", ["get", "country_tick"], 0],
-        "#F97316", // Gold/Orange for country ticks
+        COLOUR_COUNTRY_TICK,
         [">", ["get", "year_tick"], 0],
-        "#3B82F6", // Blue for year ticks
-        "#e63946", // Red for normal sightings
+        COLOUR_YEAR_TICK,
+        COLOUR_NORMAL_SIGHTING,
       ],
       "circle-stroke-width": 1.5,
-      "circle-stroke-color": "#fff",
+      "circle-stroke-color": COLOUR_WHITE,
     },
   });
 

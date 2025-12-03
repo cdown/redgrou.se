@@ -1,5 +1,13 @@
 import { Calendar, Users, Check, Clock, MapPin } from "lucide-react";
 import { sanitizeText, sanitizeUrl } from "@/lib/sanitize";
+import {
+  COLOUR_LIFER,
+  COLOUR_YEAR_TICK,
+  COLOUR_COUNTRY_TICK,
+  COLOUR_LIFER_BG,
+  COLOUR_YEAR_TICK_BG,
+  COLOUR_COUNTRY_TICK_BG,
+} from "@/lib/colours";
 
 const MAX_DESCRIPTION_LENGTH = 350;
 
@@ -92,20 +100,20 @@ export function SpeciesPopup({
           {(isLifer || isYearTick || isCountryTick) && (
             <div className="mt-2 flex gap-1.5 flex-wrap">
               {isLifer && (
-                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: '#F3E8FF', color: '#9333EA' }}>
-                  <Check className="h-3 w-3" style={{ color: '#9333EA' }} />
+                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_LIFER_BG, color: COLOUR_LIFER }}>
+                  <Check className="h-3 w-3" style={{ color: COLOUR_LIFER }} />
                   <span>Lifer</span>
                 </div>
               )}
               {isYearTick && (
-                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: '#DBEAFE', color: '#3B82F6' }}>
-                  <Calendar className="h-3 w-3" style={{ color: '#3B82F6' }} />
+                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_YEAR_TICK_BG, color: COLOUR_YEAR_TICK }}>
+                  <Calendar className="h-3 w-3" style={{ color: COLOUR_YEAR_TICK }} />
                   <span>Year Tick</span>
                 </div>
               )}
               {isCountryTick && (
-                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: '#FFEDD5', color: '#F97316' }}>
-                  <MapPin className="h-3 w-3" style={{ color: '#F97316' }} />
+                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_COUNTRY_TICK_BG, color: COLOUR_COUNTRY_TICK }}>
+                  <MapPin className="h-3 w-3" style={{ color: COLOUR_COUNTRY_TICK }} />
                   <span>Country Tick</span>
                 </div>
               )}
@@ -200,20 +208,20 @@ export function SpeciesPopup({
           {(isLifer || isYearTick || isCountryTick) && (
             <div className="flex gap-1.5 flex-wrap">
               {isLifer && (
-                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: '#F3E8FF', color: '#9333EA' }}>
-                  <Check className="h-3 w-3" style={{ color: '#9333EA' }} />
+                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_LIFER_BG, color: COLOUR_LIFER }}>
+                  <Check className="h-3 w-3" style={{ color: COLOUR_LIFER }} />
                   <span>Lifer</span>
                 </div>
               )}
               {isYearTick && (
-                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: '#DBEAFE', color: '#3B82F6' }}>
-                  <Calendar className="h-3 w-3" style={{ color: '#3B82F6' }} />
+                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_YEAR_TICK_BG, color: COLOUR_YEAR_TICK }}>
+                  <Calendar className="h-3 w-3" style={{ color: COLOUR_YEAR_TICK }} />
                   <span>Year Tick</span>
                 </div>
               )}
               {isCountryTick && (
-                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: '#FFEDD5', color: '#F97316' }}>
-                  <MapPin className="h-3 w-3" style={{ color: '#F97316' }} />
+                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: COLOUR_COUNTRY_TICK_BG, color: COLOUR_COUNTRY_TICK }}>
+                  <MapPin className="h-3 w-3" style={{ color: COLOUR_COUNTRY_TICK }} />
                   <span>Country Tick</span>
                 </div>
               )}
