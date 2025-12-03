@@ -388,6 +388,24 @@ async fn verify_upload_access(
     }
 }
 
+async fn verify_edit_token(
+    pool: &SqlitePool,
+    headers: &axum::http::HeaderMap,
+    upload_id: &str,
+) -> Result<(), axum::response::Response> {
+    let Some(token) = extract_edit_token(headers) else {
+        return Err(ApiError::unauthorised("Missing edit token").into_response());
+    };
+
+    match verify_upload_access(pool, upload_id, &token).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(ApiError::forbidden("Invalid edit token").into_response()),
+        Err(e) => Err(e
+            .into_api_error("verifying edit token", "Database error")
+            .into_response()),
+    }
+}
+
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub struct UpdateResponse {
@@ -402,20 +420,8 @@ pub async fn update_csv(
     headers: axum::http::HeaderMap,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
-    let Some(token) = extract_edit_token(&headers) else {
-        return ApiError::unauthorised("Missing edit token").into_response();
-    };
-
-    match verify_upload_access(&pool, &upload_id, &token).await {
-        Ok(true) => {}
-        Ok(false) => {
-            return ApiError::forbidden("Invalid edit token").into_response();
-        }
-        Err(e) => {
-            return e
-                .into_api_error("verifying edit token", "Database error")
-                .into_response();
-        }
+    if let Err(response) = verify_edit_token(&pool, &headers, &upload_id).await {
+        return response;
     }
 
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -490,20 +496,8 @@ pub async fn delete_upload(
     Path(upload_id): Path<String>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-    let Some(token) = extract_edit_token(&headers) else {
-        return ApiError::unauthorised("Missing edit token").into_response();
-    };
-
-    match verify_upload_access(&pool, &upload_id, &token).await {
-        Ok(true) => {}
-        Ok(false) => {
-            return ApiError::forbidden("Invalid edit token").into_response();
-        }
-        Err(e) => {
-            return e
-                .into_api_error("verifying edit token", "Database error")
-                .into_response();
-        }
+    if let Err(response) = verify_edit_token(&pool, &headers, &upload_id).await {
+        return response;
     }
 
     // CASCADE will delete associated sightings
