@@ -4,8 +4,8 @@ import { useRef, useEffect } from "react";
 import { createRoot, Root } from "react-dom/client";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { getApiUrl, buildApiUrl, apiFetch } from "@/lib/api";
-import { FilterGroup, filterToJson } from "@/lib/filter-types";
+import { getApiUrl, buildApiUrl, apiFetch, buildFilterParams } from "@/lib/api";
+import { FilterGroup } from "@/lib/filter-types";
 import { fetchSpeciesInfo } from "@/lib/species-api";
 import { TILE_ROUTE, UPLOAD_BBOX_ROUTE } from "@/lib/generated/api_constants";
 import { SpeciesPopup, SpeciesPopupLoading } from "@/components/species-popup";
@@ -148,20 +148,7 @@ function buildTileUrl(
   yearTickYear: number | null,
   countryTickCountry: string | null,
 ): string {
-  const params = new URLSearchParams();
-  if (filter) {
-    params.set("filter", filterToJson(filter));
-  }
-  if (lifersOnly) {
-    params.set("lifers_only", "true");
-  }
-  if (yearTickYear !== null) {
-    params.set("year_tick_year", String(yearTickYear));
-  }
-  if (countryTickCountry !== null) {
-    params.set("country_tick_country", countryTickCountry);
-  }
-
+  const params = buildFilterParams(filter, lifersOnly, yearTickYear, countryTickCountry);
   const queryString = params.toString();
   const filterParam = queryString ? `?${queryString}` : "";
 
@@ -643,17 +630,7 @@ export function SightingsMap({
       return;
     }
 
-    const params = new URLSearchParams();
-    params.set("country_tick_country", countryTickCountry);
-    if (filter) {
-      params.set("filter", filterToJson(filter));
-    }
-    if (lifersOnly) {
-      params.set("lifers_only", "true");
-    }
-    if (yearTickYear !== null) {
-      params.set("year_tick_year", String(yearTickYear));
-    }
+    const params = buildFilterParams(filter, lifersOnly, yearTickYear, countryTickCountry);
 
     const url = `${buildApiUrl(UPLOAD_BBOX_ROUTE, { upload_id: uploadId })}?${params}`;
 

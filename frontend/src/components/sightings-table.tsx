@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState, useRef } from "react";
 import { MapPin } from "lucide-react";
-import { apiFetch, buildApiUrl } from "@/lib/api";
-import { FilterGroup, filterToJson } from "@/lib/filter-types";
+import { apiFetch, buildApiUrl, buildFilterParams } from "@/lib/api";
+import { FilterGroup } from "@/lib/filter-types";
 import { formatCountry } from "@/lib/countries";
 import { formatRegion } from "@/lib/regions";
 import {
@@ -80,30 +80,14 @@ export function SightingsTable({
       loadingRef.current = true;
       setLoading(true);
 
-      const params = new URLSearchParams();
+      const params = buildFilterParams(filter, lifersOnly, yearTickYear, countryTickCountry);
       params.set("sort_field", sortField);
       params.set("sort_dir", sortDir);
       params.set("page", String(pageNum));
       params.set("page_size", String(DEFAULT_PAGE_SIZE));
 
-      if (filter) {
-        params.set("filter", filterToJson(filter));
-      }
-
       if (groupBy.length > 0) {
         params.set("group_by", groupBy.join(","));
-      }
-
-      if (lifersOnly) {
-        params.set("lifers_only", "true");
-      }
-
-      if (yearTickYear !== null) {
-        params.set("year_tick_year", String(yearTickYear));
-      }
-
-      if (countryTickCountry !== null) {
-        params.set("country_tick_country", countryTickCountry);
       }
 
       try {

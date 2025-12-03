@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { apiFetch, buildApiUrl } from "@/lib/api";
+import { apiFetch, buildApiUrl, buildFilterParams } from "@/lib/api";
 import {
   getEditToken as getStoredEditToken,
   setEditToken as setStoredEditToken,
@@ -29,7 +29,7 @@ import {
 import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
 import { QueryBuilder } from "@/components/query-builder";
-import { FilterGroup, filterToJson } from "@/lib/filter-types";
+import { FilterGroup } from "@/lib/filter-types";
 import {
   UPLOAD_DETAILS_ROUTE,
   UPLOAD_COUNT_ROUTE,
@@ -192,23 +192,7 @@ export default function UploadPage() {
     if (!uploadId) return;
 
     let cancelled = false;
-    const params = new URLSearchParams();
-
-    if (filter) {
-      params.set("filter", filterToJson(filter));
-    }
-
-    if (lifersOnly) {
-      params.set("lifers_only", "true");
-    }
-
-    if (yearTickYear !== null) {
-      params.set("year_tick_year", String(yearTickYear));
-    }
-
-    if (countryTickCountry !== null) {
-      params.set("country_tick_country", countryTickCountry);
-    }
+    const params = buildFilterParams(filter, lifersOnly, yearTickYear, countryTickCountry);
 
     const url = `${buildApiUrl(UPLOAD_COUNT_ROUTE, { upload_id: uploadId })}?${params}`;
 
