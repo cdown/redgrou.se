@@ -5,20 +5,10 @@ use sqlx::{FromRow, Row, SqlitePool};
 use ts_rs::TS;
 
 use crate::api_constants;
+use crate::bind_filter_params;
 use crate::db;
 use crate::error::ApiError;
 use crate::filter::build_filter_clause;
-
-macro_rules! bind_filter_params {
-    ($query:expr, $upload_id:expr, $filter_params:expr) => {{
-        let mut q = $query;
-        q = q.bind($upload_id);
-        for param in $filter_params {
-            q = q.bind(param);
-        }
-        q
-    }};
-}
 
 #[derive(Debug, Serialize, Deserialize, TS, Clone, Copy)]
 #[ts(export)]

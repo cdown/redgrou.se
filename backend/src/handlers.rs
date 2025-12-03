@@ -4,6 +4,7 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 use ts_rs::TS;
 
+use crate::bind_filter_params;
 use crate::db;
 use crate::error::ApiError;
 use crate::filter::{
@@ -52,7 +53,7 @@ pub async fn get_filtered_count(
     Path(upload_id): Path<String>,
     Query(query): Query<CountQuery>,
 ) -> Result<Json<CountResponse>, ApiError> {
-    let (filter_clause, params) = build_filter_clause(
+    let (filter_clause, filter_params) = build_filter_clause(
         query.filter.as_ref(),
         query.lifers_only,
         query.year_tick_year,
@@ -60,18 +61,16 @@ pub async fn get_filtered_count(
         None,
     )?;
 
-    let mut all_params = vec![upload_id];
-    all_params.extend(params);
-
     let sql = format!(
         "SELECT COUNT(*) as cnt FROM sightings WHERE upload_id = ?{}",
         filter_clause
     );
 
-    let mut db_query = sqlx::query_scalar::<_, i64>(&sql);
-    for param in &all_params {
-        db_query = db_query.bind(param);
-    }
+    let db_query = bind_filter_params!(
+        sqlx::query_scalar::<_, i64>(&sql),
+        &upload_id,
+        &filter_params
+    );
 
     let count = db::query_with_timeout(db_query.fetch_one(&pool))
         .await
