@@ -92,20 +92,20 @@ export function SpeciesPopup({
           {(isLifer || isYearTick || isCountryTick) && (
             <div className="mt-2 flex gap-1.5 flex-wrap">
               {isLifer && (
-                <div className="flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
-                  <Check className="h-3 w-3" />
+                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: '#F3E8FF', color: '#9333EA' }}>
+                  <Check className="h-3 w-3" style={{ color: '#9333EA' }} />
                   <span>Lifer</span>
                 </div>
               )}
               {isYearTick && (
-                <div className="flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
-                  <Calendar className="h-3 w-3" />
+                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: '#DBEAFE', color: '#3B82F6' }}>
+                  <Calendar className="h-3 w-3" style={{ color: '#3B82F6' }} />
                   <span>Year Tick</span>
                 </div>
               )}
               {isCountryTick && (
-                <div className="flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
-                  <MapPin className="h-3 w-3" />
+                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: '#FFEDD5', color: '#F97316' }}>
+                  <MapPin className="h-3 w-3" style={{ color: '#F97316' }} />
                   <span>Country Tick</span>
                 </div>
               )}
@@ -200,20 +200,20 @@ export function SpeciesPopup({
           {(isLifer || isYearTick || isCountryTick) && (
             <div className="flex gap-1.5 flex-wrap">
               {isLifer && (
-                <div className="flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
-                  <Check className="h-3 w-3" />
+                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: '#F3E8FF', color: '#9333EA' }}>
+                  <Check className="h-3 w-3" style={{ color: '#9333EA' }} />
                   <span>Lifer</span>
                 </div>
               )}
               {isYearTick && (
-                <div className="flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
-                  <Calendar className="h-3 w-3" />
+                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: '#DBEAFE', color: '#3B82F6' }}>
+                  <Calendar className="h-3 w-3" style={{ color: '#3B82F6' }} />
                   <span>Year Tick</span>
                 </div>
               )}
               {isCountryTick && (
-                <div className="flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
-                  <MapPin className="h-3 w-3" />
+                <div className="flex items-center gap-1 rounded px-2 py-0.5 text-xs" style={{ backgroundColor: '#FFEDD5', color: '#F97316' }}>
+                  <MapPin className="h-3 w-3" style={{ color: '#F97316' }} />
                   <span>Country Tick</span>
                 </div>
               )}
