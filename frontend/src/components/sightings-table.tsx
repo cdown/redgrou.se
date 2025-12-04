@@ -101,6 +101,9 @@ export function SightingsTable({
   const loadingRef = useRef(false);
   const pageRef = useRef(1);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const hasMoreRef = useRef(true);
+  const fetchPageRef = useRef<((pageNum: number, append: boolean) => Promise<void>) | null>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
 
   const fetchPage = useCallback(
     async (pageNum: number, append: boolean) => {
@@ -154,7 +157,9 @@ export function SightingsTable({
         }
 
         setTotal(Number(data.total));
-        setHasMore(pageNum < data.totalPages);
+        const newHasMore = pageNum < data.totalPages;
+        setHasMore(newHasMore);
+        hasMoreRef.current = newHasMore;
         pageRef.current = pageNum;
       } catch (e) {
         console.error("Failed to fetch sightings:", getErrorMessage(e, "Unknown error"));
@@ -167,10 +172,15 @@ export function SightingsTable({
   );
 
   useEffect(() => {
+    fetchPageRef.current = fetchPage;
+  }, [fetchPage]);
+
+  useEffect(() => {
     setSightings([]);
     setGroups([]);
     pageRef.current = 1;
     setHasMore(true);
+    hasMoreRef.current = true;
     fetchPage(1, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadId, filter, sortField, sortDir, groupBy, lifersOnly, yearTickYear, countryTickCountry]);
@@ -178,14 +188,24 @@ export function SightingsTable({
   useEffect(() => {
     const sentinel = sentinelRef.current;
     const container = scrollContainerRef.current;
-    if (!sentinel || !container || !hasMore) return;
+    if (!sentinel || !container) return;
+
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+    }
+
+    const checkAndLoad = () => {
+      if (!loadingRef.current && hasMoreRef.current && fetchPageRef.current) {
+        const nextPage = pageRef.current + 1;
+        fetchPageRef.current(nextPage, true);
+      }
+    };
 
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
-        if (entry.isIntersecting && !loadingRef.current && hasMore) {
-          const nextPage = pageRef.current + 1;
-          fetchPage(nextPage, true);
+        if (entry.isIntersecting) {
+          checkAndLoad();
         }
       },
       {
@@ -196,8 +216,68 @@ export function SightingsTable({
     );
 
     observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore, fetchPage]);
+    observerRef.current = observer;
+
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const container = scrollContainerRef.current;
+    if (!sentinel || !container) {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+      return;
+    }
+
+    if (!observerRef.current) {
+      const checkAndLoad = () => {
+        if (!loadingRef.current && hasMoreRef.current && fetchPageRef.current) {
+          const nextPage = pageRef.current + 1;
+          fetchPageRef.current(nextPage, true);
+        }
+      };
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          if (entry.isIntersecting) {
+            checkAndLoad();
+          }
+        },
+        {
+          root: container,
+          rootMargin: "200px",
+          threshold: 0,
+        }
+      );
+
+      observer.observe(sentinel);
+      observerRef.current = observer;
+    }
+
+    if (loading || !hasMoreRef.current) return;
+
+    const rect = sentinel.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const isIntersecting =
+      rect.top < containerRect.bottom + 200 &&
+      rect.bottom > containerRect.top - 200 &&
+      rect.left < containerRect.right &&
+      rect.right > containerRect.left;
+
+    if (isIntersecting && fetchPageRef.current && !loadingRef.current) {
+      const nextPage = pageRef.current + 1;
+      fetchPageRef.current(nextPage, true);
+    }
+  }, [sightings.length, groups.length, loading]);
 
   const handleSort = (field: SortField) => {
     if (field === sortField) {
@@ -482,7 +562,7 @@ export function SightingsTable({
                   </div>
                 ))}
 
-            <div ref={sentinelRef} className="h-1" />
+            <div ref={sentinelRef} className="h-4" />
 
             {loading && (
               <div className="flex justify-center py-4">
