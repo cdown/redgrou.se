@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package redgrouse.api;
+
+message ApiErrorBody {
+  string error = 1;
+  optional string code = 2;
+}
+
+message UploadMetadata {
+  string upload_id = 1;
+  string filename = 2;
+  int64 row_count = 3;
+}
+
+message UploadResponse {
+  string upload_id = 1;
+  string filename = 2;
+  int64 row_count = 3;
+  string edit_token = 4;
+}
+
+message UpdateResponse {
+  string upload_id = 1;
+  string filename = 2;
+  int64 row_count = 3;
+}
+
+message DeleteResponse {
+  bool deleted = 1;
+}
+
+message CountResponse {
+  int64 count = 1;
+}
+
+message FieldMetadata {
+  string name = 1;
+  string label = 2;
+  string field_type = 3;
+}
+
+message FieldMetadataList {
+  repeated FieldMetadata fields = 1;
+}
+
+message FieldValues {
+  string field = 1;
+  repeated string values = 2;
+}
+
+message BboxResponse {
+  double min_lng = 1;
+  double min_lat = 2;
+  double max_lng = 3;
+  double max_lat = 4;
+}
+
+message Sighting {
+  int64 id = 1;
+  string common_name = 2;
+  optional string scientific_name = 3;
+  optional int64 count = 4;
+  double latitude = 5;
+  double longitude = 6;
+  optional string country_code = 7;
+  optional string region_code = 8;
+  string observed_at = 9;
+}
+
+message GroupedSighting {
+  optional string common_name = 1;
+  optional string scientific_name = 2;
+  optional string country_code = 3;
+  optional string observed_at = 4;
+  int64 count = 5;
+  int64 species_count = 6;
+}
+
+message SightingsResponse {
+  repeated Sighting sightings = 1;
+  repeated GroupedSighting groups = 2;
+  int64 total = 3;
+  uint32 page = 4;
+  uint32 page_size = 5;
+  uint32 total_pages = 6;
+}
+
+message VersionInfo {
+  string git_hash = 1;
+  string build_date = 2;
+  string rustc_version = 3;
+}

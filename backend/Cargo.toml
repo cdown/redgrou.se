@@ -36,13 +36,15 @@ sha2 = "0.10"
 hex = "0.4"
 subtle = "2.6"
 country-boundaries = "1.2.0"
-ts-rs = "11"
 encoding_rs = "0.8"
 urlencoding = "2"
+prost = "0.13"
+bytes = "1"
 
 [build-dependencies]
 chrono = "0.4"
 rustc_version = "0.4"
+prost-build = "0.13"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }

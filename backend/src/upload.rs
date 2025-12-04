@@ -2,10 +2,8 @@ use axum::body::Bytes;
 use axum::extract::{multipart::Field, Multipart, Path, State};
 use axum::http::header;
 use axum::response::IntoResponse;
-use axum::Json;
 use csv_async::AsyncReaderBuilder;
 use futures::{Stream, StreamExt, TryStreamExt};
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use std::fmt;
@@ -15,25 +13,16 @@ use std::task::{Context, Poll};
 use subtle::ConstantTimeEq;
 use tokio_util::io::StreamReader;
 use tracing::{error, info};
-use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
 use crate::pipeline::{CsvParser, DbSink, Geocoder, BATCH_SIZE};
+use crate::proto::{pb, Proto};
 
 pub const MAX_UPLOAD_BYTES: usize = 200 * 1024 * 1024;
 pub const MAX_UPLOAD_BODY_BYTES: usize = MAX_UPLOAD_BYTES + (2 * 1024 * 1024); // allow multipart overhead
 const UPLOAD_LIMIT_MB: usize = MAX_UPLOAD_BYTES / (1024 * 1024);
-
-#[derive(Serialize, TS)]
-#[ts(export)]
-pub struct UploadResponse {
-    pub upload_id: String,
-    pub filename: String,
-    pub row_count: usize,
-    pub edit_token: String,
-}
 
 // No salt needed: tokens are 122-bit random UUIDs, not user-chosen passwords.
 // Salting prevents rainbow table attacks on low-entropy secrets, but rainbow
@@ -386,10 +375,10 @@ pub async fn upload_csv(
 
         return (
             axum::http::StatusCode::OK,
-            Json(UploadResponse {
+            Proto::new(pb::UploadResponse {
                 upload_id,
                 filename,
-                row_count: total_rows,
+                row_count: i64::try_from(total_rows).unwrap_or(i64::MAX),
                 edit_token,
             }),
         )
@@ -449,14 +438,6 @@ async fn verify_edit_token(
             .into_api_error("verifying edit token", "Database error")
             .into_response()),
     }
-}
-
-#[derive(Serialize, TS)]
-#[ts(export)]
-pub struct UpdateResponse {
-    pub upload_id: String,
-    pub filename: String,
-    pub row_count: usize,
 }
 
 pub async fn update_csv(
@@ -525,22 +506,16 @@ pub async fn update_csv(
 
         return (
             axum::http::StatusCode::OK,
-            Json(UpdateResponse {
+            Proto::new(pb::UpdateResponse {
                 upload_id,
                 filename,
-                row_count: total_rows,
+                row_count: i64::try_from(total_rows).unwrap_or(i64::MAX),
             }),
         )
             .into_response();
     }
 
     ApiError::bad_request("No CSV file found in upload").into_response()
-}
-
-#[derive(Serialize, TS)]
-#[ts(export)]
-pub struct DeleteResponse {
-    pub deleted: bool,
 }
 
 pub async fn delete_upload(
@@ -571,7 +546,7 @@ pub async fn delete_upload(
             info!("Deleted upload: {}", upload_id);
             (
                 axum::http::StatusCode::OK,
-                Json(DeleteResponse { deleted: true }),
+                Proto::new(pb::DeleteResponse { deleted: true }),
             )
                 .into_response()
         }

@@ -8,6 +8,7 @@ import {
   buildFilterParams,
   checkApiResponse,
   getErrorMessage,
+  parseProtoResponse,
 } from "@/lib/api";
 import { FilterGroup } from "@/lib/filter-types";
 import { formatCountry } from "@/lib/countries";
@@ -16,9 +17,12 @@ import {
   UPLOAD_SIGHTINGS_ROUTE,
   DEFAULT_PAGE_SIZE,
 } from "@/lib/generated/api_constants";
-import { SortField } from "@/lib/generated/SortField";
-import { SightingsResponseSchema } from "@/lib/schemas";
-import type { Sighting, GroupedSighting } from "@/lib/schemas";
+import { SortField } from "@/lib/sort-field";
+import type {
+  Sighting as SightingMessage,
+  GroupedSighting as GroupedSightingMessage,
+} from "@/lib/proto/redgrouse_api";
+import { SightingsResponse as SightingsResponseDecoder } from "@/lib/proto/redgrouse_api";
 import {
   MultiCombobox,
   MultiComboboxOption,
@@ -37,11 +41,11 @@ interface SightingsTableProps {
 type SortDir = "asc" | "desc";
 
 type GroupedSightingDisplay = Omit<
-  GroupedSighting,
-  "count" | "species_count"
+  GroupedSightingMessage,
+  "count" | "speciesCount"
 > & {
   count: number;
-  species_count: number;
+  speciesCount: number;
 };
 
 const COLUMNS: { field: SortField; label: string; width: string }[] = [
@@ -67,7 +71,7 @@ export function SightingsTable({
   countryTickCountry,
   onNavigateToSighting,
 }: SightingsTableProps) {
-  const [sightings, setSightings] = useState<Sighting[]>([]);
+  const [sightings, setSightings] = useState<SightingMessage[]>([]);
   const [groups, setGroups] = useState<GroupedSightingDisplay[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -104,14 +108,13 @@ export function SightingsTable({
 
         const res = await apiFetch(url);
         await checkApiResponse(res, "Failed to fetch sightings");
-        const jsonData = await res.json();
-        const json = SightingsResponseSchema.parse(jsonData);
+        const data = await parseProtoResponse(res, SightingsResponseDecoder);
 
-        if (groupBy.length > 0 && json.groups) {
-          const groupsData: GroupedSightingDisplay[] = json.groups.map((g) => ({
+        if (groupBy.length > 0) {
+          const groupsData: GroupedSightingDisplay[] = data.groups.map((g) => ({
             ...g,
             count: Number(g.count),
-            species_count: Number(g.species_count),
+            speciesCount: Number(g.speciesCount),
           }));
           if (append) {
             setGroups((prev) => [...prev, ...groupsData]);
@@ -119,17 +122,17 @@ export function SightingsTable({
             setGroups(groupsData);
           }
           setSightings([]);
-        } else if (json.sightings) {
+        } else {
           if (append) {
-            setSightings((prev) => [...prev, ...json.sightings!]);
+            setSightings((prev) => [...prev, ...data.sightings]);
           } else {
-            setSightings(json.sightings);
+            setSightings(data.sightings);
           }
           setGroups([]);
         }
 
-        setTotal(Number(json.total));
-        setHasMore(pageNum < json.total_pages);
+        setTotal(Number(data.total));
+        setHasMore(pageNum < data.totalPages);
         pageRef.current = pageNum;
       } catch (e) {
         console.error("Failed to fetch sightings:", getErrorMessage(e, "Unknown error"));
@@ -289,7 +292,7 @@ export function SightingsTable({
                   <SortIcon field={"count" as SortField} />
                 </button>
               </div>
-              <div className="w-[100px] shrink-0 px-3 py-2">
+                    <div className="w-[100px] shrink-0 px-3 py-2">
                 <button
                   className="flex items-center hover:text-foreground transition-colors"
                   onClick={() => handleSort("species_count" as SortField)}
@@ -353,25 +356,25 @@ export function SightingsTable({
                   >
                     {groupBy.includes("country_code") && (
                       <div className="w-[140px] shrink-0 px-3 py-2">
-                        {group.country_code
-                          ? formatCountry(group.country_code)
+                        {group.countryCode
+                          ? formatCountry(group.countryCode)
                           : "—"}
                       </div>
                     )}
                     {groupBy.includes("scientific_name") && (
                       <div className="w-[200px] shrink-0 px-3 py-2 italic text-muted-foreground">
-                        {group.scientific_name || "—"}
+                        {group.scientificName || "—"}
                       </div>
                     )}
                     {groupBy.includes("common_name") && (
                       <div className="w-[200px] shrink-0 px-3 py-2 font-medium">
-                        {group.common_name || "—"}
+                        {group.commonName || "—"}
                       </div>
                     )}
                     {groupBy.includes("observed_at") && (
                       <div className="w-[120px] shrink-0 px-3 py-2">
-                        {group.observed_at
-                          ? formatDisplayDate(group.observed_at)
+                        {group.observedAt
+                          ? formatDisplayDate(group.observedAt)
                           : "—"}
                       </div>
                     )}
@@ -379,7 +382,7 @@ export function SightingsTable({
                       {group.count.toLocaleString()}
                     </div>
                     <div className="w-[100px] shrink-0 px-3 py-2 font-medium">
-                      {group.species_count.toLocaleString()}
+                      {group.speciesCount.toLocaleString()}
                     </div>
                     <div className="flex-1 px-3 py-2"></div>
                   </div>
@@ -418,10 +421,10 @@ export function SightingsTable({
                       ) : null}
                     </div>
                     <div className="w-[200px] shrink-0 px-3 py-2 font-medium">
-                      {sighting.common_name}
+                      {sighting.commonName}
                     </div>
                     <div className="w-[200px] shrink-0 px-3 py-2 italic text-muted-foreground">
-                      {sighting.scientific_name || "—"}
+                      {sighting.scientificName || "—"}
                     </div>
                     <div className="w-[80px] shrink-0 px-3 py-2">
                       {sighting.count !== null
@@ -429,15 +432,15 @@ export function SightingsTable({
                         : "—"}
                     </div>
                     <div className="w-[140px] shrink-0 px-3 py-2">
-                      {sighting.country_code
-                        ? formatCountry(sighting.country_code)
+                      {sighting.countryCode
+                        ? formatCountry(sighting.countryCode)
                         : "—"}
                     </div>
                     <div className="w-[140px] shrink-0 px-3 py-2">
-                      {formatRegion(sighting.region_code)}
+                      {formatRegion(sighting.regionCode)}
                     </div>
                     <div className="w-[120px] shrink-0 px-3 py-2">
-                      {formatDisplayDate(sighting.observed_at)}
+                      {formatDisplayDate(sighting.observedAt)}
                     </div>
                     <div className="flex-1 px-3 py-2"></div>
                   </div>

@@ -11,6 +11,8 @@ fn main() {
     let (repo_root, git_dir) = find_git_directories(&manifest_dir)
         .unwrap_or_else(|| panic!("Failed to find .git directory above {:?}", manifest_dir));
 
+    generate_protos(&repo_root);
+
     let build_version = capture_git_hash(&repo_root);
     println!("cargo:rustc-env=BUILD_VERSION={build_version}");
 
@@ -28,6 +30,15 @@ fn main() {
         "cargo:rerun-if-changed={}",
         git_dir.join("packed-refs").display()
     );
+}
+
+fn generate_protos(repo_root: &Path) {
+    let proto_dir = repo_root.join("proto");
+    let proto_file = proto_dir.join("redgrouse_api.proto");
+    println!("cargo:rerun-if-changed={}", proto_file.display());
+    prost_build::Config::new()
+        .compile_protos(&[proto_file], &[proto_dir])
+        .expect("Failed to compile protobufs");
 }
 
 fn capture_git_hash(repo_root: &Path) -> String {

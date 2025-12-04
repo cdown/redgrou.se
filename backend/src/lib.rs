@@ -5,6 +5,7 @@ pub mod error;
 pub mod filter;
 pub mod handlers;
 pub mod pipeline;
+pub mod proto;
 pub mod sightings;
 pub mod tiles;
 pub mod upload;

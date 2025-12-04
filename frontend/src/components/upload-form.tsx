@@ -6,16 +6,14 @@ import {
   apiFetch,
   checkApiResponse,
   getErrorMessage,
+  parseProtoResponse,
 } from "@/lib/api";
 import { setEditToken } from "@/lib/storage";
 import { UPLOAD_ROUTE } from "@/lib/generated/api_constants";
+import type { UploadResponse as UploadResponseMessage } from "@/lib/proto/redgrouse_api";
+import { UploadResponse as UploadResponseDecoder } from "@/lib/proto/redgrouse_api";
 
-interface UploadResult {
-  upload_id: string;
-  filename: string;
-  row_count: number;
-  edit_token: string;
-}
+type UploadResult = UploadResponseMessage;
 
 interface UploadFormProps {
   onUploadComplete: (result: UploadResult) => void;
@@ -47,8 +45,8 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
 
         await checkApiResponse(res, "Upload failed");
 
-        const result: UploadResult = await res.json();
-        setEditToken(result.upload_id, result.edit_token);
+        const result = await parseProtoResponse(res, UploadResponseDecoder);
+        setEditToken(result.uploadId, result.editToken);
         onUploadComplete(result);
       } catch (err) {
         setError(getErrorMessage(err, "Upload failed"));

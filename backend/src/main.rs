@@ -5,9 +5,9 @@ use axum::http::{header, HeaderValue, Request};
 use axum::middleware::{from_fn, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
-use axum::{BoxError, Json, Router};
+use axum::{BoxError, Router};
 use ipnet::IpNet;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
 use std::env;
@@ -24,13 +24,13 @@ use tower_http::trace::TraceLayer;
 use tower_http::{catch_panic::CatchPanicLayer, timeout::RequestBodyTimeoutLayer};
 use tracing::{info, warn, Span};
 use tracing_subscriber::EnvFilter;
-use ts_rs::TS;
 
 use redgrouse::api_constants;
 use redgrouse::config;
 use redgrouse::error::ApiError;
 use redgrouse::filter::{build_filter_clause, CountQuery};
 use redgrouse::handlers;
+use redgrouse::proto::{pb, Proto};
 use redgrouse::{db, sightings, tiles, upload};
 
 const BUILD_VERSION: &str = env!("BUILD_VERSION");
@@ -217,16 +217,8 @@ async fn health_check() -> &'static str {
     "OK"
 }
 
-#[derive(Serialize, TS)]
-#[ts(export)]
-struct VersionInfo {
-    git_hash: String,
-    build_date: String,
-    rustc_version: String,
-}
-
-async fn version_info() -> Json<VersionInfo> {
-    Json(VersionInfo {
+async fn version_info() -> Proto<pb::VersionInfo> {
+    Proto::new(pb::VersionInfo {
         git_hash: BUILD_VERSION.to_string(),
         build_date: BUILD_DATE.to_string(),
         rustc_version: RUSTC_VERSION.to_string(),
@@ -628,20 +620,11 @@ async fn fetch_cloudflare_proxies() -> anyhow::Result<Vec<IpNet>> {
     Ok(networks)
 }
 
-#[derive(Serialize, TS)]
-#[ts(export)]
-struct BboxResponse {
-    min_lng: f64,
-    min_lat: f64,
-    max_lng: f64,
-    max_lat: f64,
-}
-
 async fn get_bbox(
     State(pool): State<SqlitePool>,
     Path(upload_id): Path<String>,
     Query(query): Query<CountQuery>,
-) -> Result<Json<BboxResponse>, ApiError> {
+) -> Result<Proto<pb::BboxResponse>, ApiError> {
     let (filter_clause, params) = build_filter_clause(
         query.filter.as_ref(),
         query.lifers_only,
@@ -678,7 +661,7 @@ async fn get_bbox(
         return Err(ApiError::not_found("No sightings found"));
     }
 
-    Ok(Json(BboxResponse {
+    Ok(Proto::new(pb::BboxResponse {
         min_lng: min_lng.unwrap(),
         min_lat: min_lat.unwrap(),
         max_lng: max_lng.unwrap(),

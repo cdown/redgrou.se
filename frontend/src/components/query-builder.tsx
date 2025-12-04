@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
-import { apiFetch, buildApiUrl } from "@/lib/api";
+import { apiFetch, buildApiUrl, parseProtoResponse } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +39,10 @@ import {
   FIELDS_ROUTE,
   FIELD_VALUES_ROUTE,
 } from "@/lib/generated/api_constants";
+import {
+  FieldMetadataList,
+  FieldValues as FieldValuesDecoder,
+} from "@/lib/proto/redgrouse_api";
 import { formatDisplayDate } from "@/lib/utils";
 
 function toComboboxOptions(
@@ -71,7 +75,17 @@ export function QueryBuilder({
 
   useEffect(() => {
     apiFetch(FIELDS_ROUTE)
-      .then((res) => res.json())
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error("Failed to load metadata");
+        }
+        const data = await parseProtoResponse(res, FieldMetadataList);
+        return data.fields.map((field) => ({
+          name: field.name,
+          label: field.label,
+          field_type: field.fieldType as FieldMetadata["field_type"],
+        }));
+      })
       .then(setFields)
       .catch(console.error);
   }, []);
@@ -85,7 +99,10 @@ export function QueryBuilder({
           field,
         });
         const res = await apiFetch(url);
-        const data = await res.json();
+        if (!res.ok) {
+          return;
+        }
+        const data = await parseProtoResponse(res, FieldValuesDecoder);
         setFieldValues((prev) => ({ ...prev, [field]: data.values }));
       } catch (e) {
         console.error(e);

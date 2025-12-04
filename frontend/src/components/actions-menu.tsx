@@ -21,8 +21,10 @@ import {
   buildApiUrl,
   checkApiResponse,
   getErrorMessage,
+  parseProtoResponse,
 } from "@/lib/api";
 import { VERSION_ROUTE, UPLOAD_DETAILS_ROUTE } from "@/lib/generated/api_constants";
+import { VersionInfo as VersionInfoDecoder } from "@/lib/proto/redgrouse_api";
 import { FilterGroup } from "@/lib/filter-types";
 
 interface ActionsMenuProps {
@@ -57,9 +59,9 @@ export function ActionsMenu({
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [backendVersion, setBackendVersion] = useState<{
-    git_hash: string;
-    build_date: string;
-    rustc_version: string;
+    gitHash: string;
+    buildDate: string;
+    rustcVersion: string;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -266,13 +268,16 @@ export function ActionsMenu({
                 setMenuExpanded(false);
                 if (!backendVersion) {
                   apiFetch(buildApiUrl(VERSION_ROUTE))
-                    .then((res) => res.json())
+                    .then(async (res) => {
+                      await checkApiResponse(res, "Failed to load version");
+                      return parseProtoResponse(res, VersionInfoDecoder);
+                    })
                     .then((data) => setBackendVersion(data))
                     .catch(() => {
                       setBackendVersion({
-                        git_hash: "unknown",
-                        build_date: "unknown",
-                        rustc_version: "unknown",
+                        gitHash: "unknown",
+                        buildDate: "unknown",
+                        rustcVersion: "unknown",
                       });
                     });
                 }
@@ -397,19 +402,19 @@ export function ActionsMenu({
             <div className="mb-6 space-y-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-stone-500">Backend Git Hash:</span>
-                {backendVersion?.git_hash &&
-                backendVersion.git_hash !== "unknown" ? (
+                {backendVersion?.gitHash &&
+                backendVersion.gitHash !== "unknown" ? (
                   <a
-                    href={`https://github.com/cdown/redgrou.se/commit/${backendVersion.git_hash}`}
+                    href={`https://github.com/cdown/redgrou.se/commit/${backendVersion.gitHash}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="font-mono text-stone-900 underline hover:text-rose-600 transition-colors"
                   >
-                    {backendVersion.git_hash}
+                    {backendVersion.gitHash}
                   </a>
                 ) : (
                   <span className="font-mono text-stone-900">
-                    {backendVersion?.git_hash || "Loading..."}
+                    {backendVersion?.gitHash || "Loading..."}
                   </span>
                 )}
               </div>
@@ -434,7 +439,7 @@ export function ActionsMenu({
               <div className="flex justify-between">
                 <span className="text-stone-500">Build Date:</span>
                 <span className="font-mono text-stone-900">
-                  {backendVersion?.build_date ||
+                  {backendVersion?.buildDate ||
                     process.env.NEXT_PUBLIC_BUILD_DATE ||
                     "unknown"}
                 </span>
@@ -442,7 +447,7 @@ export function ActionsMenu({
               <div className="flex justify-between">
                 <span className="text-stone-500">Rustc Version:</span>
                 <span className="font-mono text-stone-900">
-                  {backendVersion?.rustc_version || "Loading..."}
+                  {backendVersion?.rustcVersion || "Loading..."}
                 </span>
               </div>
               <div className="flex justify-between">

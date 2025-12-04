@@ -4,10 +4,17 @@ import { useRef, useEffect } from "react";
 import { createRoot, Root } from "react-dom/client";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { getApiUrl, buildApiUrl, apiFetch, buildFilterParams } from "@/lib/api";
+import {
+  getApiUrl,
+  buildApiUrl,
+  apiFetch,
+  buildFilterParams,
+  parseProtoResponse,
+} from "@/lib/api";
 import { FilterGroup } from "@/lib/filter-types";
 import { fetchSpeciesInfo } from "@/lib/species-api";
 import { TILE_ROUTE, UPLOAD_BBOX_ROUTE } from "@/lib/generated/api_constants";
+import { BboxResponse } from "@/lib/proto/redgrouse_api";
 import { SpeciesPopup, SpeciesPopupLoading } from "@/components/species-popup";
 import {
   COLOUR_LIFER,
@@ -635,18 +642,18 @@ export function SightingsMap({
     const url = `${buildApiUrl(UPLOAD_BBOX_ROUTE, { upload_id: uploadId })}?${params}`;
 
     apiFetch(url)
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) {
           return null;
         }
-        return res.json();
+        return parseProtoResponse(res, BboxResponse);
       })
-      .then((bbox: { min_lng: number; min_lat: number; max_lng: number; max_lat: number } | null) => {
+      .then((bbox) => {
         if (bbox && map) {
           map.fitBounds(
             [
-              [bbox.min_lng, bbox.min_lat],
-              [bbox.max_lng, bbox.max_lat],
+              [bbox.minLng, bbox.minLat],
+              [bbox.maxLng, bbox.maxLat],
             ],
             {
               padding: { top: 50, bottom: 50, left: 50, right: 50 },

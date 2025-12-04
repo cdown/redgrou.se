@@ -35,9 +35,10 @@ This scales quite nicely and avoids sucking all the browser memory.
 
 ### Type sharing
 
-Rust structs with `#[derive(TS)]` are exported to TypeScript. This ensures the
-frontend and backend always agree on API shapes. See
-[HACKING.md](./HACKING.md#typescript-type-generation) for the workflow.
+All API payloads are defined once in `proto/redgrouse_api.proto`. The backend
+compiles the schema with `prost`, and the frontend consumes the exact same
+definitions via `ts-proto`. See [HACKING.md](./HACKING.md#shared-api-schema) for
+the regeneration workflow.
 
 ### Filter system
 

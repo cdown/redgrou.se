@@ -44,7 +44,7 @@ export default function Home() {
             </p>
             <UploadForm
               onUploadComplete={(result) =>
-                router.push(`/single/${result.upload_id}`)
+                router.push(`/single/${result.uploadId}`)
               }
             />
           </div>

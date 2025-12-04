@@ -3,18 +3,15 @@ use crate::error::ApiError;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::convert::TryFrom;
-use ts_rs::TS;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Combinator {
     And,
     Or,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Operator {
     Eq,
@@ -28,8 +25,7 @@ pub enum Operator {
     NotIn,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum FilterValue {
     String(String),
@@ -40,9 +36,8 @@ pub enum FilterValue {
 /// Type-safe representation of filterable field names.
 /// This enum ensures only valid fields can be used in filters,
 /// preventing SQL injection via field names at compile time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
 pub enum FilterField {
     CommonName,
     ScientificName,
@@ -69,24 +64,21 @@ impl FilterField {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Condition {
     pub field: FilterField,
     pub operator: Operator,
     pub value: FilterValue,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Rule {
     Condition(Condition),
     Group(FilterGroup),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilterGroup {
     pub combinator: Combinator,
     pub rules: Vec<Rule>,
@@ -263,8 +255,7 @@ fn validate_group(
     Ok(())
 }
 
-#[derive(Debug, Serialize, TS)]
-#[ts(export)]
+#[derive(Debug, Serialize)]
 pub struct FieldMetadata {
     pub name: String,
     pub label: String,
@@ -304,12 +295,6 @@ pub fn get_field_metadata() -> Vec<FieldMetadata> {
             field_type: "number".into(),
         },
     ]
-}
-
-#[derive(Debug, Serialize)]
-pub struct FieldValues {
-    pub field: String,
-    pub values: Vec<String>,
 }
 
 impl TryFrom<&str> for FilterGroup {

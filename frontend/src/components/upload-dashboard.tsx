@@ -22,6 +22,7 @@ import {
   buildApiUrl,
   buildFilterParams,
   checkApiResponse,
+  parseProtoResponse,
   getErrorMessage,
 } from "@/lib/api";
 import {
@@ -34,12 +35,14 @@ import {
   setEditToken as setStoredEditToken,
 } from "@/lib/storage";
 import { getCountryName } from "@/lib/countries";
+import type { UploadMetadata as UploadMetadataMessage } from "@/lib/proto/redgrouse_api";
+import {
+  CountResponse,
+  FieldValues as FieldValuesDecoder,
+  UploadMetadata as UploadMetadataDecoder,
+} from "@/lib/proto/redgrouse_api";
 
-export interface UploadMetadata {
-  upload_id: string;
-  filename: string;
-  row_count: number;
-}
+export type UploadMetadata = UploadMetadataMessage;
 
 interface UploadDashboardProps {
   initialUpload: UploadMetadata;
@@ -59,7 +62,7 @@ function getEditToken(uploadId: string): string | null {
 
 export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   const searchParams = useSearchParams();
-  const uploadId = initialUpload.upload_id;
+  const uploadId = initialUpload.uploadId;
 
   const [upload, setUpload] = useState<UploadMetadata>(initialUpload);
   const [filterString, setFilterString] = useQueryState(
@@ -141,13 +144,13 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
         field: "year",
       }),
     )
-      .then((res) => {
-        if (res.ok) {
-          return res.json();
+      .then(async (res) => {
+        if (!res.ok) {
+          return { values: [] };
         }
-        return { values: [] };
+        return parseProtoResponse(res, FieldValuesDecoder);
       })
-      .then((data: { values: string[] }) => {
+      .then((data) => {
         const years = data.values
           .map((y) => parseInt(y, 10))
           .filter((y) => !isNaN(y))
@@ -162,13 +165,13 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
         field: "country_code",
       }),
     )
-      .then((res) => {
-        if (res.ok) {
-          return res.json();
+      .then(async (res) => {
+        if (!res.ok) {
+          return { values: [] };
         }
-        return { values: [] };
+        return parseProtoResponse(res, FieldValuesDecoder);
       })
-      .then((data: { values: string[] }) => {
+      .then((data) => {
         const countries = data.values
           .filter((c) => c && c.trim() !== "")
           .sort((a, b) => {
@@ -190,9 +193,12 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
     const url = `${buildApiUrl(UPLOAD_COUNT_ROUTE, { upload_id: uploadId })}?${params}`;
 
     apiFetch(url)
-      .then((res) => res.json())
+      .then(async (res) => {
+        await checkApiResponse(res, "Failed to load filtered count");
+        return parseProtoResponse(res, CountResponse);
+      })
       .then((data) => {
-        if (!cancelled) setFilteredCount(data.count);
+        if (!cancelled) setFilteredCount(Number(data.count));
       })
       .catch(() => {
         if (!cancelled) setFilteredCount(null);
@@ -218,9 +224,9 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
     apiFetch(buildApiUrl(UPLOAD_DETAILS_ROUTE, { upload_id: uploadId }))
       .then(async (res) => {
         await checkApiResponse(res, "Failed to refresh");
-        return res.json();
+        return parseProtoResponse(res, UploadMetadataDecoder);
       })
-      .then((data: UploadMetadata) => {
+      .then((data) => {
         setUpload(data);
         setFilter(null);
         setFilteredCount(null);
@@ -233,13 +239,13 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   const showingFiltered =
     (filter || lifersOnly || yearTickYear !== null || countryTickCountry !== null) &&
     filteredCount !== null &&
-    filteredCount !== upload.row_count;
+    filteredCount !== upload.rowCount;
 
   return (
     <main className="fixed inset-0 overflow-hidden">
       <div className="absolute inset-0">
         <SightingsMap
-          uploadId={upload.upload_id}
+          uploadId={upload.uploadId}
           filter={filter}
           lifersOnly={lifersOnly}
           yearTickYear={yearTickYear}
@@ -261,8 +267,8 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
           <div className="flex items-center justify-between border-b px-4 py-3">
             <span className="font-medium text-stone-900">
               {showingFiltered
-                ? `${filteredCount?.toLocaleString()} of ${upload.row_count.toLocaleString()} sightings`
-                : `${upload.row_count.toLocaleString()} sightings`}
+                ? `${filteredCount?.toLocaleString()} of ${upload.rowCount.toLocaleString()} sightings`
+                : `${upload.rowCount.toLocaleString()} sightings`}
             </span>
             <button
               onClick={() => setViewMode("map")}
@@ -273,7 +279,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
           </div>
           <div className="relative flex-1 overflow-hidden">
             <SightingsTable
-              uploadId={upload.upload_id}
+              uploadId={upload.uploadId}
               filter={filter}
               lifersOnly={lifersOnly}
               yearTickYear={yearTickYear}
@@ -292,7 +298,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
         }`}
       >
         <QueryBuilder
-          uploadId={upload.upload_id}
+          uploadId={upload.uploadId}
           onFilterChange={setFilter}
           onClose={() => setFilterOpen(false)}
           isPanel
@@ -440,10 +446,10 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
           </button>
         </div>
 
-        <ActionsMenu
-          uploadId={upload.upload_id}
+              <ActionsMenu
+                uploadId={upload.uploadId}
           filename={upload.filename}
-          rowCount={upload.row_count}
+          rowCount={upload.rowCount}
           isFilterOpen={filterOpen}
           onToggleFilter={() => setFilterOpen((prev) => !prev)}
           filter={filter}

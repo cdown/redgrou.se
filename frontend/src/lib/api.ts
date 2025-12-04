@@ -1,14 +1,28 @@
 import { checkVersionHeader } from "./version-check";
 import { FilterGroup, filterToJson } from "./filter-types";
+import { ApiErrorBody } from "@/lib/proto/redgrouse_api";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const PROTO_CONTENT_TYPE = "application/x-protobuf";
 
 export async function apiFetch(
   path: string,
   init?: RequestInit
 ): Promise<Response> {
   const url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
-  const response = await fetch(url, init);
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Accept")) {
+    headers.set("Accept", PROTO_CONTENT_TYPE);
+  }
+  const response = await fetch(
+    url,
+    init
+      ? {
+          ...init,
+          headers,
+        }
+      : { headers }
+  );
   checkVersionHeader(response);
   return response;
 }
@@ -50,11 +64,6 @@ export function buildFilterParams(
   return params;
 }
 
-export interface ApiErrorBody {
-  error: string;
-  code?: string;
-}
-
 /**
  * Checks if a response is OK and throws an error with the API error message if not.
  * @param res - The fetch Response object
@@ -66,8 +75,17 @@ export async function checkApiResponse(
   defaultMessage: string
 ): Promise<void> {
   if (!res.ok) {
-    const data: ApiErrorBody = await res.json();
-    throw new Error(data.error || defaultMessage);
+    let message = defaultMessage;
+    try {
+      const buffer = await res.arrayBuffer();
+      if (buffer.byteLength > 0) {
+        const data = ApiErrorBody.decode(new Uint8Array(buffer));
+        message = data.error || defaultMessage;
+      }
+    } catch {
+      message = defaultMessage;
+    }
+    throw new Error(message);
   }
 }
 
@@ -79,4 +97,12 @@ export async function checkApiResponse(
  */
 export function getErrorMessage(err: unknown, defaultMessage: string): string {
   return err instanceof Error ? err.message : defaultMessage;
+}
+
+export async function parseProtoResponse<T>(
+  res: Response,
+  decoder: { decode: (input: Uint8Array) => T }
+): Promise<T> {
+  const buffer = await res.arrayBuffer();
+  return decoder.decode(new Uint8Array(buffer));
 }

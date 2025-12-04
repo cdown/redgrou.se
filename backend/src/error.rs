@@ -1,16 +1,8 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde::Serialize;
-use ts_rs::TS;
 
-#[derive(Debug, Serialize, TS)]
-#[ts(export)]
-pub struct ApiErrorBody {
-    pub error: String,
-    #[ts(optional)]
-    pub code: Option<String>,
-}
+pub use crate::proto::pb::ApiErrorBody;
+use crate::proto::Proto;
 
 pub struct ApiError {
     pub status: StatusCode,
@@ -73,6 +65,6 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.status, Json(self.body)).into_response()
+        (self.status, Proto::new(self.body)).into_response()
     }
 }

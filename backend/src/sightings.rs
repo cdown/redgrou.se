@@ -1,8 +1,6 @@
 use axum::extract::{Path, Query, State};
-use axum::Json;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sqlx::{FromRow, Row, SqlitePool};
-use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::api_constants;
@@ -10,9 +8,9 @@ use crate::bind_filter_params;
 use crate::db;
 use crate::error::ApiError;
 use crate::filter::build_filter_clause;
+use crate::proto::{pb, Proto};
 
-#[derive(Debug, Serialize, Deserialize, TS, Clone, Copy)]
-#[ts(export)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum SortField {
     CommonName,
@@ -36,6 +34,35 @@ impl SortField {
     }
 }
 
+impl From<Sighting> for pb::Sighting {
+    fn from(value: Sighting) -> Self {
+        Self {
+            id: value.id,
+            common_name: value.common_name,
+            scientific_name: value.scientific_name,
+            count: value.count,
+            latitude: value.latitude,
+            longitude: value.longitude,
+            country_code: value.country_code,
+            region_code: value.region_code,
+            observed_at: value.observed_at,
+        }
+    }
+}
+
+impl From<GroupedSighting> for pb::GroupedSighting {
+    fn from(value: GroupedSighting) -> Self {
+        Self {
+            common_name: value.common_name,
+            scientific_name: value.scientific_name,
+            country_code: value.country_code,
+            observed_at: value.observed_at,
+            count: value.count,
+            species_count: value.species_count,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SightingsQuery {
     filter: Option<String>,
@@ -49,8 +76,7 @@ pub struct SightingsQuery {
     country_tick_country: Option<String>,
 }
 
-#[derive(Debug, Serialize, TS, FromRow)]
-#[ts(export)]
+#[derive(Debug, FromRow)]
 pub struct Sighting {
     pub id: i64,
     pub common_name: String,
@@ -63,8 +89,7 @@ pub struct Sighting {
     pub observed_at: String,
 }
 
-#[derive(Debug, Serialize, TS)]
-#[ts(export)]
+#[derive(Debug)]
 pub struct GroupedSighting {
     pub common_name: Option<String>,
     pub scientific_name: Option<String>,
@@ -72,19 +97,6 @@ pub struct GroupedSighting {
     pub observed_at: Option<String>,
     pub count: i64,
     pub species_count: i64,
-}
-
-#[derive(Debug, Serialize, TS)]
-#[ts(export)]
-pub struct SightingsResponse {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sightings: Option<Vec<Sighting>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub groups: Option<Vec<GroupedSighting>>,
-    pub total: i64,
-    pub page: u32,
-    pub page_size: u32,
-    pub total_pages: u32,
 }
 
 fn parse_sort_direction(sort_dir: Option<&String>) -> &'static str {
@@ -123,7 +135,7 @@ pub async fn get_sightings(
     State(pool): State<SqlitePool>,
     Path(upload_id): Path<String>,
     Query(query): Query<SightingsQuery>,
-) -> Result<Json<SightingsResponse>, ApiError> {
+) -> Result<Proto<pb::SightingsResponse>, ApiError> {
     let upload_uuid = Uuid::parse_str(&upload_id)
         .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
     let page = query.page.unwrap_or(1).max(1);
@@ -302,9 +314,11 @@ pub async fn get_sightings(
 
         let total_pages = calculate_total_pages(total, page_size);
 
-        return Ok(Json(SightingsResponse {
-            sightings: None,
-            groups: Some(groups),
+        let groups_pb = groups.into_iter().map(pb::GroupedSighting::from).collect();
+
+        return Ok(Proto::new(pb::SightingsResponse {
+            sightings: Vec::new(),
+            groups: groups_pb,
             total,
             page,
             page_size,
@@ -359,9 +373,11 @@ pub async fn get_sightings(
 
     let total_pages = calculate_total_pages(total, page_size);
 
-    Ok(Json(SightingsResponse {
-        sightings: Some(sightings),
-        groups: None,
+    let sightings_pb = sightings.into_iter().map(pb::Sighting::from).collect();
+
+    Ok(Proto::new(pb::SightingsResponse {
+        sightings: sightings_pb,
+        groups: Vec::new(),
         total,
         page,
         page_size,
