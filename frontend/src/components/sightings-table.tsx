@@ -80,6 +80,7 @@ export function SightingsTable({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
   const pageRef = useRef(1);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   const fetchPage = useCallback(
     async (pageNum: number, append: boolean) => {
@@ -149,24 +150,28 @@ export function SightingsTable({
   }, [fetchPage]);
 
   useEffect(() => {
+    const sentinel = sentinelRef.current;
     const container = scrollContainerRef.current;
-    if (!container) return;
+    if (!sentinel || !container || !hasMore) return;
 
-    const handleScroll = () => {
-      if (loadingRef.current || !hasMore) return;
-
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const scrolledToBottom = scrollTop + clientHeight >= scrollHeight - 200;
-
-      if (scrolledToBottom) {
-        const nextPage = pageRef.current + 1;
-        fetchPage(nextPage, true);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting && !loadingRef.current && hasMore) {
+          const nextPage = pageRef.current + 1;
+          fetchPage(nextPage, true);
+        }
+      },
+      {
+        root: container,
+        rootMargin: "200px",
+        threshold: 0,
       }
-    };
+    );
 
-    container.addEventListener("scroll", handleScroll);
-    return () => container.removeEventListener("scroll", handleScroll);
-  }, [hasMore, fetchPage]);
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, fetchPage, sightings.length, groups.length]);
 
   const handleSort = (field: SortField) => {
     if (field === sortField) {
@@ -437,6 +442,8 @@ export function SightingsTable({
                     <div className="flex-1 px-3 py-2"></div>
                   </div>
                 ))}
+
+            <div ref={sentinelRef} className="h-1" />
 
             {loading && (
               <div className="flex justify-center py-4">
