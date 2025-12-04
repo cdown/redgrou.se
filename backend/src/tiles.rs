@@ -203,78 +203,109 @@ pub async fn get_tile(
         .await
         .map_err(|e| e.into_api_error("loading tile sightings", "Database error"))?;
 
-    let mut tile = Tile::new(TILE_EXTENT);
-    let mut layer = tile.create_layer("sightings");
-    let mut point_count = 0usize;
+    // Collect row data into a Vec to move into spawn_blocking
+    // This avoids holding async types across the blocking boundary
+    struct RowData {
+        id: i64,
+        latitude: f64,
+        longitude: f64,
+        common_name: String,
+        scientific_name: Option<String>,
+        count: i32,
+        observed_at: String,
+        lifer: i32,
+        year_tick: i32,
+        country_tick: i32,
+    }
 
+    let mut row_data = Vec::new();
     for row in rows {
-        let id: i64 = row.get("id");
-        let latitude: f64 = row.get("latitude");
-        let longitude: f64 = row.get("longitude");
-        let common_name: String = row.get("common_name");
-        let scientific_name: Option<String> = row.get("scientific_name");
-        let count: i32 = row.get("count");
-        let observed_at: String = row.get("observed_at");
-        let lifer: i32 = row.get("lifer");
-        let year_tick: i32 = row.get("year_tick");
-        let country_tick: i32 = row.get("country_tick");
-
-        let latlng = LatLng {
-            lat: latitude,
-            lng: longitude,
-        };
-        let tile_pos = TileCoordinates {
-            z: path.z,
-            x: path.x,
-            y,
-        };
-        let tile_coords = latlng_to_tile_coords(latlng, tile_pos);
-
-        let encoder = GeomEncoder::new(GeomType::Point);
-        let geom_data = match encoder
-            .point(tile_coords.tile_x, tile_coords.tile_y)
-            .and_then(mvt::GeomEncoder::encode)
-        {
-            Ok(data) => data,
-            Err(e) => {
-                error!("Failed to encode geometry: {}", e);
-                continue;
-            }
-        };
-
-        let mut feature = layer.into_feature(geom_data);
-        feature.set_id(u64::try_from(id).unwrap_or(0));
-        feature.add_tag_string("name", &common_name);
-        feature.add_tag_uint("count", u64::try_from(count.max(0)).unwrap_or(0));
-        if let Some(scientific_name) = scientific_name {
-            feature.add_tag_string("scientific_name", &scientific_name);
-        }
-        feature.add_tag_string("observed_at", &observed_at);
-        feature.add_tag_uint("lifer", u64::try_from(lifer.max(0)).unwrap_or(0));
-        feature.add_tag_uint("year_tick", u64::try_from(year_tick.max(0)).unwrap_or(0));
-        feature.add_tag_uint(
-            "country_tick",
-            u64::try_from(country_tick.max(0)).unwrap_or(0),
-        );
-
-        layer = feature.into_layer();
-        point_count += 1;
+        row_data.push(RowData {
+            id: row.get("id"),
+            latitude: row.get("latitude"),
+            longitude: row.get("longitude"),
+            common_name: row.get("common_name"),
+            scientific_name: row.get("scientific_name"),
+            count: row.get("count"),
+            observed_at: row.get("observed_at"),
+            lifer: row.get("lifer"),
+            year_tick: row.get("year_tick"),
+            country_tick: row.get("country_tick"),
+        });
     }
 
-    if let Err(e) = tile.add_layer(layer) {
-        error!("Failed to add layer to tile: {}", e);
-        return Err(ApiError::internal("Tile encoding error"));
-    }
-
-    let data = match tile.to_bytes() {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            error!("Failed to encode tile: {}", e);
-            return Err(ApiError::internal("Tile encoding error"));
-        }
+    let tile_pos = TileCoordinates {
+        z: path.z,
+        x: path.x,
+        y,
     };
 
-    debug!("Generated tile with {} points", point_count);
+    // Offload CPU-bound MVT encoding to a blocking thread pool
+    // This prevents geometry encoding from blocking the async executor
+    let data = tokio::task::spawn_blocking(move || {
+        let mut tile = Tile::new(TILE_EXTENT);
+        let mut layer = tile.create_layer("sightings");
+        let mut point_count = 0usize;
+
+        for row in row_data {
+            let latlng = LatLng {
+                lat: row.latitude,
+                lng: row.longitude,
+            };
+            let tile_coords = latlng_to_tile_coords(latlng, tile_pos);
+
+            let encoder = GeomEncoder::new(GeomType::Point);
+            let geom_data = match encoder
+                .point(tile_coords.tile_x, tile_coords.tile_y)
+                .and_then(mvt::GeomEncoder::encode)
+            {
+                Ok(data) => data,
+                Err(e) => {
+                    error!("Failed to encode geometry: {}", e);
+                    continue;
+                }
+            };
+
+            let mut feature = layer.into_feature(geom_data);
+            feature.set_id(u64::try_from(row.id).unwrap_or(0));
+            feature.add_tag_string("name", &row.common_name);
+            feature.add_tag_uint("count", u64::try_from(row.count.max(0)).unwrap_or(0));
+            if let Some(scientific_name) = row.scientific_name {
+                feature.add_tag_string("scientific_name", &scientific_name);
+            }
+            feature.add_tag_string("observed_at", &row.observed_at);
+            feature.add_tag_uint("lifer", u64::try_from(row.lifer.max(0)).unwrap_or(0));
+            feature.add_tag_uint(
+                "year_tick",
+                u64::try_from(row.year_tick.max(0)).unwrap_or(0),
+            );
+            feature.add_tag_uint(
+                "country_tick",
+                u64::try_from(row.country_tick.max(0)).unwrap_or(0),
+            );
+
+            layer = feature.into_layer();
+            point_count += 1;
+        }
+
+        if let Err(e) = tile.add_layer(layer) {
+            error!("Failed to add layer to tile: {}", e);
+            return Err(ApiError::internal("Tile encoding error"));
+        }
+
+        match tile.to_bytes() {
+            Ok(bytes) => {
+                debug!("Generated tile with {} points", point_count);
+                Ok(bytes)
+            }
+            Err(e) => {
+                error!("Failed to encode tile: {}", e);
+                Err(ApiError::internal("Tile encoding error"))
+            }
+        }
+    })
+    .await
+    .map_err(|_| ApiError::internal("Tile encoding task failed"))??;
 
     let response = Response::builder()
         .status(StatusCode::OK)
