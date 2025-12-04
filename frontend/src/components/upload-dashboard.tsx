@@ -29,6 +29,7 @@ import {
   UPLOAD_COUNT_ROUTE,
   UPLOAD_DETAILS_ROUTE,
   FIELD_VALUES_ROUTE,
+  UPLOAD_SIGHTINGS_ROUTE,
 } from "@/lib/generated/api_constants";
 import {
   getEditToken as getStoredEditToken,
@@ -36,10 +37,12 @@ import {
 } from "@/lib/storage";
 import { getCountryName } from "@/lib/countries";
 import type { UploadMetadata as UploadMetadataMessage } from "@/lib/proto/redgrouse_api";
+import type { Species } from "@/lib/proto/redgrouse_api";
 import {
   CountResponse,
   FieldValues as FieldValuesDecoder,
   UploadMetadata as UploadMetadataDecoder,
+  SightingsResponse as SightingsResponseDecoder,
 } from "@/lib/proto/redgrouse_api";
 
 export type UploadMetadata = UploadMetadataMessage;
@@ -58,6 +61,21 @@ function getEditToken(uploadId: string): string | null {
   if (urlToken) return urlToken;
 
   return getStoredEditToken(uploadId);
+}
+
+async function fetchNameIndex(uploadId: string): Promise<Species[]> {
+  const params = new URLSearchParams();
+  params.set("page", "1");
+  params.set("page_size", "1");
+
+  const url = `${buildApiUrl(UPLOAD_SIGHTINGS_ROUTE, {
+    upload_id: uploadId,
+  })}?${params}`;
+
+  const res = await apiFetch(url);
+  await checkApiResponse(res, "Failed to load name index");
+  const data = await parseProtoResponse(res, SightingsResponseDecoder);
+  return data.nameIndex;
 }
 
 export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
@@ -107,6 +125,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
     searchParamsCache.country_tick_country
   );
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
+  const [nameIndex, setNameIndex] = useState<Species[]>([]);
   const [editToken] = useState<string | null>(() => getEditToken(uploadId));
   const [tableTopOffset, setTableTopOffset] = useState(200);
   const navigateToLocationRef = useRef<
@@ -191,6 +210,16 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   useEffect(() => {
     if (!uploadId) return;
 
+    fetchNameIndex(uploadId)
+      .then((index) => {
+        setNameIndex(index);
+      })
+      .catch(() => {});
+  }, [uploadId]);
+
+  useEffect(() => {
+    if (!uploadId) return;
+
     let cancelled = false;
     const params = buildFilterParams(filterString, lifersOnly, yearTickYear, countryTickCountry);
 
@@ -238,6 +267,12 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
       .catch((err) => {
         console.error(getErrorMessage(err, "Failed to refresh"));
       });
+
+    fetchNameIndex(uploadId)
+      .then((index) => {
+        setNameIndex(index);
+      })
+      .catch(() => {});
   }, [uploadId, setFilter]);
 
   const showingFiltered =
@@ -288,6 +323,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
               lifersOnly={lifersOnly}
               yearTickYear={yearTickYear}
               countryTickCountry={countryTickCountry}
+              nameIndex={nameIndex}
               onNavigateToSighting={handleNavigateToSighting}
             />
           </div>

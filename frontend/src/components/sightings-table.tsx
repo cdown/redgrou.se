@@ -36,6 +36,7 @@ interface SightingsTableProps {
   lifersOnly: boolean;
   yearTickYear: number | null;
   countryTickCountry: string | null;
+  nameIndex: Species[];
   onNavigateToSighting?: (sightingId: number, lat: number, lng: number) => void;
 }
 
@@ -84,11 +85,11 @@ export function SightingsTable({
   lifersOnly,
   yearTickYear,
   countryTickCountry,
+  nameIndex,
   onNavigateToSighting,
 }: SightingsTableProps) {
   const [sightings, setSightings] = useState<SightingMessage[]>([]);
   const [groups, setGroups] = useState<GroupedSightingDisplay[]>([]);
-  const [nameIndex, setNameIndex] = useState<Species[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -131,8 +132,6 @@ export function SightingsTable({
         await checkApiResponse(res, "Failed to fetch sightings");
         const data = await parseProtoResponse(res, SightingsResponseDecoder);
 
-        setNameIndex(data.nameIndex);
-
         if (groupBy.length > 0) {
           const groupsData: GroupedSightingDisplay[] = data.groups.map((g) => ({
             ...g,
@@ -170,7 +169,6 @@ export function SightingsTable({
   useEffect(() => {
     setSightings([]);
     setGroups([]);
-    setNameIndex([]);
     pageRef.current = 1;
     setHasMore(true);
     fetchPage(1, false);
