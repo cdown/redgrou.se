@@ -64,10 +64,14 @@ export interface BboxResponse {
   maxLat: number;
 }
 
-export interface Sighting {
-  id: number;
+export interface Species {
   commonName: string;
   scientificName?: string | undefined;
+}
+
+export interface Sighting {
+  id: number;
+  commonNameIndex?: number | undefined;
   count?: number | undefined;
   latitude: number;
   longitude: number;
@@ -77,8 +81,7 @@ export interface Sighting {
 }
 
 export interface GroupedSighting {
-  commonName?: string | undefined;
-  scientificName?: string | undefined;
+  commonNameIndex?: number | undefined;
   countryCode?: string | undefined;
   observedAt?: string | undefined;
   count: number;
@@ -86,6 +89,7 @@ export interface GroupedSighting {
 }
 
 export interface SightingsResponse {
+  nameIndex: Species[];
   sightings: Sighting[];
   groups: GroupedSighting[];
   total: number;
@@ -704,11 +708,66 @@ export const BboxResponse = {
   },
 };
 
+function createBaseSpecies(): Species {
+  return { commonName: "", scientificName: undefined };
+}
+
+export const Species = {
+  encode(message: Species, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.commonName !== "") {
+      writer.uint32(10).string(message.commonName);
+    }
+    if (message.scientificName !== undefined) {
+      writer.uint32(18).string(message.scientificName);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): Species {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSpecies();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.commonName = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.scientificName = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  create<I extends Exact<DeepPartial<Species>, I>>(base?: I): Species {
+    return Species.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Species>, I>>(object: I): Species {
+    const message = createBaseSpecies();
+    message.commonName = object.commonName ?? "";
+    message.scientificName = object.scientificName ?? undefined;
+    return message;
+  },
+};
+
 function createBaseSighting(): Sighting {
   return {
     id: 0,
-    commonName: "",
-    scientificName: undefined,
+    commonNameIndex: undefined,
     count: undefined,
     latitude: 0,
     longitude: 0,
@@ -723,29 +782,26 @@ export const Sighting = {
     if (message.id !== 0) {
       writer.uint32(8).int64(message.id);
     }
-    if (message.commonName !== "") {
-      writer.uint32(18).string(message.commonName);
-    }
-    if (message.scientificName !== undefined) {
-      writer.uint32(26).string(message.scientificName);
+    if (message.commonNameIndex !== undefined) {
+      writer.uint32(16).uint32(message.commonNameIndex);
     }
     if (message.count !== undefined) {
-      writer.uint32(32).int64(message.count);
+      writer.uint32(24).int64(message.count);
     }
     if (message.latitude !== 0) {
-      writer.uint32(41).double(message.latitude);
+      writer.uint32(33).double(message.latitude);
     }
     if (message.longitude !== 0) {
-      writer.uint32(49).double(message.longitude);
+      writer.uint32(41).double(message.longitude);
     }
     if (message.countryCode !== undefined) {
-      writer.uint32(58).string(message.countryCode);
+      writer.uint32(50).string(message.countryCode);
     }
     if (message.regionCode !== undefined) {
-      writer.uint32(66).string(message.regionCode);
+      writer.uint32(58).string(message.regionCode);
     }
     if (message.observedAt !== "") {
-      writer.uint32(74).string(message.observedAt);
+      writer.uint32(66).string(message.observedAt);
     }
     return writer;
   },
@@ -765,56 +821,49 @@ export const Sighting = {
           message.id = longToNumber(reader.int64() as Long);
           continue;
         case 2:
-          if (tag !== 18) {
+          if (tag !== 16) {
             break;
           }
 
-          message.commonName = reader.string();
+          message.commonNameIndex = reader.uint32();
           continue;
         case 3:
-          if (tag !== 26) {
-            break;
-          }
-
-          message.scientificName = reader.string();
-          continue;
-        case 4:
-          if (tag !== 32) {
+          if (tag !== 24) {
             break;
           }
 
           message.count = longToNumber(reader.int64() as Long);
+          continue;
+        case 4:
+          if (tag !== 33) {
+            break;
+          }
+
+          message.latitude = reader.double();
           continue;
         case 5:
           if (tag !== 41) {
             break;
           }
 
-          message.latitude = reader.double();
+          message.longitude = reader.double();
           continue;
         case 6:
-          if (tag !== 49) {
+          if (tag !== 50) {
             break;
           }
 
-          message.longitude = reader.double();
+          message.countryCode = reader.string();
           continue;
         case 7:
           if (tag !== 58) {
             break;
           }
 
-          message.countryCode = reader.string();
+          message.regionCode = reader.string();
           continue;
         case 8:
           if (tag !== 66) {
-            break;
-          }
-
-          message.regionCode = reader.string();
-          continue;
-        case 9:
-          if (tag !== 74) {
             break;
           }
 
@@ -835,8 +884,7 @@ export const Sighting = {
   fromPartial<I extends Exact<DeepPartial<Sighting>, I>>(object: I): Sighting {
     const message = createBaseSighting();
     message.id = object.id ?? 0;
-    message.commonName = object.commonName ?? "";
-    message.scientificName = object.scientificName ?? undefined;
+    message.commonNameIndex = object.commonNameIndex ?? undefined;
     message.count = object.count ?? undefined;
     message.latitude = object.latitude ?? 0;
     message.longitude = object.longitude ?? 0;
@@ -848,35 +896,25 @@ export const Sighting = {
 };
 
 function createBaseGroupedSighting(): GroupedSighting {
-  return {
-    commonName: undefined,
-    scientificName: undefined,
-    countryCode: undefined,
-    observedAt: undefined,
-    count: 0,
-    speciesCount: 0,
-  };
+  return { commonNameIndex: undefined, countryCode: undefined, observedAt: undefined, count: 0, speciesCount: 0 };
 }
 
 export const GroupedSighting = {
   encode(message: GroupedSighting, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.commonName !== undefined) {
-      writer.uint32(10).string(message.commonName);
-    }
-    if (message.scientificName !== undefined) {
-      writer.uint32(18).string(message.scientificName);
+    if (message.commonNameIndex !== undefined) {
+      writer.uint32(8).uint32(message.commonNameIndex);
     }
     if (message.countryCode !== undefined) {
-      writer.uint32(26).string(message.countryCode);
+      writer.uint32(18).string(message.countryCode);
     }
     if (message.observedAt !== undefined) {
-      writer.uint32(34).string(message.observedAt);
+      writer.uint32(26).string(message.observedAt);
     }
     if (message.count !== 0) {
-      writer.uint32(40).int64(message.count);
+      writer.uint32(32).int64(message.count);
     }
     if (message.speciesCount !== 0) {
-      writer.uint32(48).int64(message.speciesCount);
+      writer.uint32(40).int64(message.speciesCount);
     }
     return writer;
   },
@@ -889,42 +927,35 @@ export const GroupedSighting = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
-          if (tag !== 10) {
+          if (tag !== 8) {
             break;
           }
 
-          message.commonName = reader.string();
+          message.commonNameIndex = reader.uint32();
           continue;
         case 2:
           if (tag !== 18) {
             break;
           }
 
-          message.scientificName = reader.string();
+          message.countryCode = reader.string();
           continue;
         case 3:
           if (tag !== 26) {
             break;
           }
 
-          message.countryCode = reader.string();
-          continue;
-        case 4:
-          if (tag !== 34) {
-            break;
-          }
-
           message.observedAt = reader.string();
           continue;
-        case 5:
-          if (tag !== 40) {
+        case 4:
+          if (tag !== 32) {
             break;
           }
 
           message.count = longToNumber(reader.int64() as Long);
           continue;
-        case 6:
-          if (tag !== 48) {
+        case 5:
+          if (tag !== 40) {
             break;
           }
 
@@ -944,8 +975,7 @@ export const GroupedSighting = {
   },
   fromPartial<I extends Exact<DeepPartial<GroupedSighting>, I>>(object: I): GroupedSighting {
     const message = createBaseGroupedSighting();
-    message.commonName = object.commonName ?? undefined;
-    message.scientificName = object.scientificName ?? undefined;
+    message.commonNameIndex = object.commonNameIndex ?? undefined;
     message.countryCode = object.countryCode ?? undefined;
     message.observedAt = object.observedAt ?? undefined;
     message.count = object.count ?? 0;
@@ -955,28 +985,31 @@ export const GroupedSighting = {
 };
 
 function createBaseSightingsResponse(): SightingsResponse {
-  return { sightings: [], groups: [], total: 0, page: 0, pageSize: 0, totalPages: 0 };
+  return { nameIndex: [], sightings: [], groups: [], total: 0, page: 0, pageSize: 0, totalPages: 0 };
 }
 
 export const SightingsResponse = {
   encode(message: SightingsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    for (const v of message.nameIndex) {
+      Species.encode(v!, writer.uint32(10).fork()).ldelim();
+    }
     for (const v of message.sightings) {
-      Sighting.encode(v!, writer.uint32(10).fork()).ldelim();
+      Sighting.encode(v!, writer.uint32(18).fork()).ldelim();
     }
     for (const v of message.groups) {
-      GroupedSighting.encode(v!, writer.uint32(18).fork()).ldelim();
+      GroupedSighting.encode(v!, writer.uint32(26).fork()).ldelim();
     }
     if (message.total !== 0) {
-      writer.uint32(24).int64(message.total);
+      writer.uint32(32).int64(message.total);
     }
     if (message.page !== 0) {
-      writer.uint32(32).uint32(message.page);
+      writer.uint32(40).uint32(message.page);
     }
     if (message.pageSize !== 0) {
-      writer.uint32(40).uint32(message.pageSize);
+      writer.uint32(48).uint32(message.pageSize);
     }
     if (message.totalPages !== 0) {
-      writer.uint32(48).uint32(message.totalPages);
+      writer.uint32(56).uint32(message.totalPages);
     }
     return writer;
   },
@@ -993,38 +1026,45 @@ export const SightingsResponse = {
             break;
           }
 
-          message.sightings.push(Sighting.decode(reader, reader.uint32()));
+          message.nameIndex.push(Species.decode(reader, reader.uint32()));
           continue;
         case 2:
           if (tag !== 18) {
             break;
           }
 
-          message.groups.push(GroupedSighting.decode(reader, reader.uint32()));
+          message.sightings.push(Sighting.decode(reader, reader.uint32()));
           continue;
         case 3:
-          if (tag !== 24) {
+          if (tag !== 26) {
             break;
           }
 
-          message.total = longToNumber(reader.int64() as Long);
+          message.groups.push(GroupedSighting.decode(reader, reader.uint32()));
           continue;
         case 4:
           if (tag !== 32) {
             break;
           }
 
-          message.page = reader.uint32();
+          message.total = longToNumber(reader.int64() as Long);
           continue;
         case 5:
           if (tag !== 40) {
             break;
           }
 
-          message.pageSize = reader.uint32();
+          message.page = reader.uint32();
           continue;
         case 6:
           if (tag !== 48) {
+            break;
+          }
+
+          message.pageSize = reader.uint32();
+          continue;
+        case 7:
+          if (tag !== 56) {
             break;
           }
 
@@ -1044,6 +1084,7 @@ export const SightingsResponse = {
   },
   fromPartial<I extends Exact<DeepPartial<SightingsResponse>, I>>(object: I): SightingsResponse {
     const message = createBaseSightingsResponse();
+    message.nameIndex = object.nameIndex?.map((e) => Species.fromPartial(e)) || [];
     message.sightings = object.sightings?.map((e) => Sighting.fromPartial(e)) || [];
     message.groups = object.groups?.map((e) => GroupedSighting.fromPartial(e)) || [];
     message.total = object.total ?? 0;

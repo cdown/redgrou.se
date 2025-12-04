@@ -34,31 +34,70 @@ impl SortField {
     }
 }
 
-impl From<Sighting> for pb::Sighting {
-    fn from(value: Sighting) -> Self {
-        Self {
-            id: value.id,
-            common_name: value.common_name,
-            scientific_name: value.scientific_name,
-            count: value.count,
-            latitude: value.latitude,
-            longitude: value.longitude,
-            country_code: value.country_code,
-            region_code: value.region_code,
-            observed_at: value.observed_at,
+async fn build_name_index(
+    pool: &SqlitePool,
+    upload_uuid: &[u8],
+) -> Result<(Vec<pb::Species>, std::collections::HashMap<i64, u32>), ApiError> {
+    let species_rows = db::query_with_timeout(
+        sqlx::query_as::<_, SpeciesRow>(
+            r"SELECT DISTINCT sp.id, sp.common_name, sp.scientific_name
+              FROM sightings s
+              JOIN species sp ON s.species_id = sp.id
+              WHERE s.upload_id = ?
+              ORDER BY sp.id",
+        )
+        .bind(upload_uuid)
+        .fetch_all(pool),
+    )
+    .await
+    .map_err(|e| e.into_api_error("loading species names", "Database error"))?;
+
+    let mut name_index = Vec::new();
+    let mut species_id_to_index = std::collections::HashMap::new();
+
+    for (idx, species) in species_rows.iter().enumerate() {
+        let index =
+            u32::try_from(idx).map_err(|_| ApiError::internal("Too many species for index"))?;
+        species_id_to_index.insert(species.id, index);
+        name_index.push(pb::Species {
+            common_name: species.common_name.clone(),
+            scientific_name: species.scientific_name.clone(),
+        });
+    }
+
+    Ok((name_index, species_id_to_index))
+}
+
+impl Sighting {
+    fn to_proto(self, species_id_to_index: &std::collections::HashMap<i64, u32>) -> pb::Sighting {
+        let common_name_index = species_id_to_index.get(&self.species_id).copied();
+        pb::Sighting {
+            id: self.id,
+            common_name_index,
+            count: self.count,
+            latitude: self.latitude,
+            longitude: self.longitude,
+            country_code: self.country_code,
+            region_code: self.region_code,
+            observed_at: self.observed_at,
         }
     }
 }
 
-impl From<GroupedSighting> for pb::GroupedSighting {
-    fn from(value: GroupedSighting) -> Self {
-        Self {
-            common_name: value.common_name,
-            scientific_name: value.scientific_name,
-            country_code: value.country_code,
-            observed_at: value.observed_at,
-            count: value.count,
-            species_count: value.species_count,
+impl GroupedSighting {
+    fn to_proto(
+        self,
+        species_id_to_index: &std::collections::HashMap<i64, u32>,
+    ) -> pb::GroupedSighting {
+        let common_name_index = self
+            .species_id
+            .and_then(|id| species_id_to_index.get(&id).copied());
+        pb::GroupedSighting {
+            common_name_index,
+            country_code: self.country_code,
+            observed_at: self.observed_at,
+            count: self.count,
+            species_count: self.species_count,
         }
     }
 }
@@ -79,8 +118,7 @@ pub struct SightingsQuery {
 #[derive(Debug, FromRow)]
 pub struct Sighting {
     pub id: i64,
-    pub common_name: String,
-    pub scientific_name: Option<String>,
+    pub species_id: i64,
     pub count: Option<i64>,
     pub latitude: f64,
     pub longitude: f64,
@@ -89,10 +127,16 @@ pub struct Sighting {
     pub observed_at: String,
 }
 
+#[derive(Debug, FromRow)]
+pub struct SpeciesRow {
+    pub id: i64,
+    pub common_name: String,
+    pub scientific_name: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct GroupedSighting {
-    pub common_name: Option<String>,
-    pub scientific_name: Option<String>,
+    pub species_id: Option<i64>,
     pub country_code: Option<String>,
     pub observed_at: Option<String>,
     pub count: i64,
@@ -173,10 +217,8 @@ pub async fn get_sightings(
             .map(|f| {
                 if f == "observed_at" {
                     "DATE(s.observed_at) as observed_at".to_string()
-                } else if f == "common_name" {
-                    "sp.common_name".to_string()
-                } else if f == "scientific_name" {
-                    "sp.scientific_name".to_string()
+                } else if f == "common_name" || f == "scientific_name" {
+                    "s.species_id as species_id".to_string()
                 } else if f == "country_code" {
                     "s.country_code".to_string()
                 } else {
@@ -191,10 +233,8 @@ pub async fn get_sightings(
             .map(|f| {
                 if f == "observed_at" {
                     "DATE(s.observed_at)".to_string()
-                } else if f == "common_name" {
-                    "sp.common_name".to_string()
-                } else if f == "scientific_name" {
-                    "sp.scientific_name".to_string()
+                } else if f == "common_name" || f == "scientific_name" {
+                    "s.species_id".to_string()
                 } else if f == "country_code" {
                     "s.country_code".to_string()
                 } else {
@@ -229,14 +269,16 @@ pub async fn get_sightings(
                 || col_base == "count"
                 || col_base == "species_count"
             {
-                col.to_string()
+                if col_base == "common_name" || col_base == "scientific_name" {
+                    "s.species_id".to_string()
+                } else {
+                    col.to_string()
+                }
             } else {
                 // Default to first validated field with proper alias
                 let first_field = validated_fields.first().unwrap();
-                if first_field == "common_name" {
-                    "sp.common_name".to_string()
-                } else if first_field == "scientific_name" {
-                    "sp.scientific_name".to_string()
+                if first_field == "common_name" || first_field == "scientific_name" {
+                    "s.species_id".to_string()
                 } else if first_field == "country_code" {
                     "s.country_code".to_string()
                 } else if first_field == "observed_at" {
@@ -282,11 +324,13 @@ pub async fn get_sightings(
             .await
             .map_err(|e| e.into_api_error("loading grouped sightings", "Database error"))?;
 
+        let (name_index, species_id_to_index) =
+            build_name_index(&pool, &upload_uuid.as_bytes()[..]).await?;
+
         let mut groups = Vec::new();
         for row in rows {
             let mut grouped = GroupedSighting {
-                common_name: None,
-                scientific_name: None,
+                species_id: None,
                 country_code: None,
                 observed_at: None,
                 count: 0,
@@ -294,12 +338,19 @@ pub async fn get_sightings(
             };
 
             for (i, field) in validated_fields.iter().enumerate() {
-                let value: Option<String> = row.try_get(i).ok();
                 match field.as_str() {
-                    "common_name" => grouped.common_name = value,
-                    "scientific_name" => grouped.scientific_name = value,
-                    "country_code" => grouped.country_code = value,
-                    "observed_at" => grouped.observed_at = value,
+                    "common_name" | "scientific_name" => {
+                        let species_id: Option<i64> = row.try_get(i).ok();
+                        grouped.species_id = species_id;
+                    }
+                    "country_code" => {
+                        let value: Option<String> = row.try_get(i).ok();
+                        grouped.country_code = value;
+                    }
+                    "observed_at" => {
+                        let value: Option<String> = row.try_get(i).ok();
+                        grouped.observed_at = value;
+                    }
                     _ => {}
                 }
             }
@@ -314,9 +365,13 @@ pub async fn get_sightings(
 
         let total_pages = calculate_total_pages(total, page_size);
 
-        let groups_pb = groups.into_iter().map(pb::GroupedSighting::from).collect();
+        let groups_pb = groups
+            .into_iter()
+            .map(|g| g.to_proto(&species_id_to_index))
+            .collect();
 
         return Ok(Proto::new(pb::SightingsResponse {
+            name_index,
             sightings: Vec::new(),
             groups: groups_pb,
             total,
@@ -349,14 +404,14 @@ pub async fn get_sightings(
         .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
     let select_sql = format!(
-        r"SELECT s.id, sp.common_name, sp.scientific_name, s.count, s.latitude, s.longitude,
+        r"SELECT s.id, s.species_id, s.count, s.latitude, s.longitude,
             s.country_code, s.region_code, s.observed_at
             FROM sightings s
             JOIN species sp ON s.species_id = sp.id
             WHERE s.upload_id = ?{}
             ORDER BY {} {}
             LIMIT ? OFFSET ?",
-        filter_clause_str, &sort_field, sort_dir
+        filter_clause_str, sort_field, sort_dir
     );
 
     let mut select_query = bind_filter_params!(
@@ -373,9 +428,16 @@ pub async fn get_sightings(
 
     let total_pages = calculate_total_pages(total, page_size);
 
-    let sightings_pb = sightings.into_iter().map(pb::Sighting::from).collect();
+    let (name_index, species_id_to_index) =
+        build_name_index(&pool, &upload_uuid.as_bytes()[..]).await?;
+
+    let sightings_pb = sightings
+        .into_iter()
+        .map(|s| s.to_proto(&species_id_to_index))
+        .collect();
 
     Ok(Proto::new(pb::SightingsResponse {
+        name_index,
         sightings: sightings_pb,
         groups: Vec::new(),
         total,

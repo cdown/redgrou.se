@@ -91,5 +91,11 @@ pub async fn field_values(
         .await
         .map_err(|e| e.into_api_error("loading field values", "Database error"))?;
 
+    tracing::debug!(
+        "Field values for {}: returning {} values",
+        field,
+        values.len()
+    );
+
     Ok(Proto::new(pb::FieldValues { field, values }))
 }

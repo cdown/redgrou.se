@@ -87,6 +87,7 @@ pub struct FilterGroup {
 const MAX_FILTER_DEPTH: usize = 5;
 const MAX_FILTER_RULES: usize = 100;
 const MAX_LIST_VALUES: usize = 50;
+const MAX_DISTINCT_FIELD_VALUES: usize = 20000;
 
 #[derive(Debug)]
 pub struct FilterValidationError {
@@ -436,11 +437,13 @@ pub async fn get_distinct_values(
 
     let query = if needs_join {
         format!(
-            "SELECT DISTINCT CAST({column} AS TEXT) FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ? AND {column} IS NOT NULL ORDER BY {column} LIMIT 500"
+            "SELECT DISTINCT CAST({column} AS TEXT) FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ? AND {column} IS NOT NULL ORDER BY {column} LIMIT {}",
+            MAX_DISTINCT_FIELD_VALUES
         )
     } else {
         format!(
-            "SELECT DISTINCT CAST({column} AS TEXT) FROM sightings s WHERE s.upload_id = ? AND {column} IS NOT NULL ORDER BY {column} LIMIT 500"
+            "SELECT DISTINCT CAST({column} AS TEXT) FROM sightings s WHERE s.upload_id = ? AND {column} IS NOT NULL ORDER BY {column} LIMIT {}",
+            MAX_DISTINCT_FIELD_VALUES
         )
     };
 

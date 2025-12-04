@@ -21,6 +21,7 @@ import { SortField } from "@/lib/sort-field";
 import type {
   Sighting as SightingMessage,
   GroupedSighting as GroupedSightingMessage,
+  Species,
 } from "@/lib/proto/redgrouse_api";
 import { SightingsResponse as SightingsResponseDecoder } from "@/lib/proto/redgrouse_api";
 import {
@@ -63,6 +64,20 @@ const GROUP_BY_OPTIONS: MultiComboboxOption[] = [
   { value: "observed_at", label: "Date" },
 ];
 
+function getNameFromIndex(
+  nameIndex: Species[],
+  index: number | undefined,
+): { commonName: string; scientificName?: string } | null {
+  if (index === undefined || index < 0 || index >= nameIndex.length) {
+    return null;
+  }
+  const species = nameIndex[index];
+  return {
+    commonName: species.commonName,
+    scientificName: species.scientificName,
+  };
+}
+
 export function SightingsTable({
   uploadId,
   filter,
@@ -73,6 +88,7 @@ export function SightingsTable({
 }: SightingsTableProps) {
   const [sightings, setSightings] = useState<SightingMessage[]>([]);
   const [groups, setGroups] = useState<GroupedSightingDisplay[]>([]);
+  const [nameIndex, setNameIndex] = useState<Species[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -109,6 +125,8 @@ export function SightingsTable({
         const res = await apiFetch(url);
         await checkApiResponse(res, "Failed to fetch sightings");
         const data = await parseProtoResponse(res, SightingsResponseDecoder);
+
+        setNameIndex(data.nameIndex);
 
         if (groupBy.length > 0) {
           const groupsData: GroupedSightingDisplay[] = data.groups.map((g) => ({
@@ -361,16 +379,22 @@ export function SightingsTable({
                           : "—"}
                       </div>
                     )}
-                    {groupBy.includes("scientific_name") && (
-                      <div className="w-[200px] shrink-0 px-3 py-2 italic text-muted-foreground">
-                        {group.scientificName || "—"}
-                      </div>
-                    )}
-                    {groupBy.includes("common_name") && (
-                      <div className="w-[200px] shrink-0 px-3 py-2 font-medium">
-                        {group.commonName || "—"}
-                      </div>
-                    )}
+                    {groupBy.includes("scientific_name") && (() => {
+                      const names = getNameFromIndex(nameIndex, group.commonNameIndex);
+                      return (
+                        <div className="w-[200px] shrink-0 px-3 py-2 italic text-muted-foreground">
+                          {names?.scientificName || "—"}
+                        </div>
+                      );
+                    })()}
+                    {groupBy.includes("common_name") && (() => {
+                      const names = getNameFromIndex(nameIndex, group.commonNameIndex);
+                      return (
+                        <div className="w-[200px] shrink-0 px-3 py-2 font-medium">
+                          {names?.commonName || "—"}
+                        </div>
+                      );
+                    })()}
                     {groupBy.includes("observed_at") && (
                       <div className="w-[120px] shrink-0 px-3 py-2">
                         {group.observedAt
@@ -420,12 +444,19 @@ export function SightingsTable({
                         </button>
                       ) : null}
                     </div>
-                    <div className="w-[200px] shrink-0 px-3 py-2 font-medium">
-                      {sighting.commonName}
-                    </div>
-                    <div className="w-[200px] shrink-0 px-3 py-2 italic text-muted-foreground">
-                      {sighting.scientificName || "—"}
-                    </div>
+                    {(() => {
+                      const names = getNameFromIndex(nameIndex, sighting.commonNameIndex);
+                      return (
+                        <>
+                          <div className="w-[200px] shrink-0 px-3 py-2 font-medium">
+                            {names?.commonName || "—"}
+                          </div>
+                          <div className="w-[200px] shrink-0 px-3 py-2 italic text-muted-foreground">
+                            {names?.scientificName || "—"}
+                          </div>
+                        </>
+                      );
+                    })()}
                     <div className="w-[80px] shrink-0 px-3 py-2">
                       {sighting.count !== null
                         ? Number(sighting.count).toLocaleString()
