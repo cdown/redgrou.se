@@ -34,10 +34,15 @@ impl SortField {
     }
 }
 
+struct NameIndexResult {
+    name_index: Vec<pb::Species>,
+    species_id_to_index: std::collections::HashMap<i64, u32>,
+}
+
 async fn build_name_index(
     pool: &SqlitePool,
     upload_uuid: &[u8],
-) -> Result<(Vec<pb::Species>, std::collections::HashMap<i64, u32>), ApiError> {
+) -> Result<NameIndexResult, ApiError> {
     let species_rows = db::query_with_timeout(
         sqlx::query_as::<_, SpeciesRow>(
             r"SELECT DISTINCT sp.id, sp.common_name, sp.scientific_name
@@ -65,11 +70,14 @@ async fn build_name_index(
         });
     }
 
-    Ok((name_index, species_id_to_index))
+    Ok(NameIndexResult {
+        name_index,
+        species_id_to_index,
+    })
 }
 
 impl Sighting {
-    fn to_proto(self, species_id_to_index: &std::collections::HashMap<i64, u32>) -> pb::Sighting {
+    fn into_proto(self, species_id_to_index: &std::collections::HashMap<i64, u32>) -> pb::Sighting {
         let common_name_index = species_id_to_index.get(&self.species_id).copied();
         pb::Sighting {
             id: self.id,
@@ -85,7 +93,7 @@ impl Sighting {
 }
 
 impl GroupedSighting {
-    fn to_proto(
+    fn into_proto(
         self,
         species_id_to_index: &std::collections::HashMap<i64, u32>,
     ) -> pb::GroupedSighting {
@@ -192,7 +200,7 @@ pub async fn get_sightings(
     let offset_i64 = i64::try_from(offset).unwrap_or(i64::MAX);
 
     // Collect filter params separately so upload_id stays first and field names remain enum-whitelisted.
-    let (filter_clause_str, filter_params) = build_filter_clause(
+    let filter_result = build_filter_clause(
         query.filter.as_ref(),
         query.lifers_only,
         query.year_tick_year,
@@ -246,13 +254,13 @@ pub async fn get_sightings(
 
         let count_sql = format!(
             "SELECT COUNT(*) FROM (SELECT {} FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ?{} GROUP BY {})",
-            select_clause_with_aliases_str, filter_clause_str, group_by_clause_with_aliases_str
+            select_clause_with_aliases_str, filter_result.filter_clause, group_by_clause_with_aliases_str
         );
 
         let count_query = bind_filter_params!(
             sqlx::query_scalar::<_, i64>(&count_sql),
             &upload_uuid.as_bytes()[..],
-            &filter_params
+            &filter_result.params
         );
 
         let total = db::query_with_timeout(count_query.fetch_one(&pool))
@@ -306,7 +314,7 @@ pub async fn get_sightings(
         let select_sql = format!(
             "SELECT {}, COUNT(*) as count, COUNT(DISTINCT sp.scientific_name) as species_count FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ?{} GROUP BY {} ORDER BY {} {} LIMIT ? OFFSET ?",
             select_clause_with_aliases_str,
-            filter_clause_str,
+            filter_result.filter_clause,
             group_by_clause_with_aliases_str,
             sort_field_with_alias,
             sort_dir
@@ -315,7 +323,7 @@ pub async fn get_sightings(
         let mut select_query = bind_filter_params!(
             sqlx::query(&select_sql),
             &upload_uuid.as_bytes()[..],
-            &filter_params
+            &filter_result.params
         );
         select_query = select_query.bind(i64::from(page_size));
         select_query = select_query.bind(offset_i64);
@@ -324,8 +332,7 @@ pub async fn get_sightings(
             .await
             .map_err(|e| e.into_api_error("loading grouped sightings", "Database error"))?;
 
-        let (name_index, species_id_to_index) =
-            build_name_index(&pool, &upload_uuid.as_bytes()[..]).await?;
+        let index_result = build_name_index(&pool, &upload_uuid.as_bytes()[..]).await?;
 
         let mut groups = Vec::new();
         for row in rows {
@@ -367,11 +374,11 @@ pub async fn get_sightings(
 
         let groups_pb = groups
             .into_iter()
-            .map(|g| g.to_proto(&species_id_to_index))
+            .map(|g| g.into_proto(&index_result.species_id_to_index))
             .collect();
 
         return Ok(Proto::new(pb::SightingsResponse {
-            name_index,
+            name_index: index_result.name_index,
             sightings: Vec::new(),
             groups: groups_pb,
             total,
@@ -391,12 +398,12 @@ pub async fn get_sightings(
 
     let count_sql = format!(
         "SELECT COUNT(*) FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ?{}",
-        filter_clause_str
+        filter_result.filter_clause
     );
     let count_query = bind_filter_params!(
         sqlx::query_scalar::<_, i64>(&count_sql),
         &upload_uuid.as_bytes()[..],
-        &filter_params
+        &filter_result.params
     );
 
     let total = db::query_with_timeout(count_query.fetch_one(&pool))
@@ -411,13 +418,13 @@ pub async fn get_sightings(
             WHERE s.upload_id = ?{}
             ORDER BY {} {}
             LIMIT ? OFFSET ?",
-        filter_clause_str, sort_field, sort_dir
+        filter_result.filter_clause, sort_field, sort_dir
     );
 
     let mut select_query = bind_filter_params!(
         sqlx::query_as::<_, Sighting>(&select_sql),
         &upload_uuid.as_bytes()[..],
-        &filter_params
+        &filter_result.params
     );
     select_query = select_query.bind(i64::from(page_size));
     select_query = select_query.bind(offset_i64);
@@ -428,16 +435,15 @@ pub async fn get_sightings(
 
     let total_pages = calculate_total_pages(total, page_size);
 
-    let (name_index, species_id_to_index) =
-        build_name_index(&pool, &upload_uuid.as_bytes()[..]).await?;
+    let index_result = build_name_index(&pool, &upload_uuid.as_bytes()[..]).await?;
 
     let sightings_pb = sightings
         .into_iter()
-        .map(|s| s.to_proto(&species_id_to_index))
+        .map(|s| s.into_proto(&index_result.species_id_to_index))
         .collect();
 
     Ok(Proto::new(pb::SightingsResponse {
-        name_index,
+        name_index: index_result.name_index,
         sightings: sightings_pb,
         groups: Vec::new(),
         total,

@@ -88,8 +88,13 @@ async fn setup_test_server() -> (axum::Router, TempDir, String) {
     (app, temp_dir, database_url)
 }
 
+struct UploadResult {
+    upload_id: String,
+    edit_token: String,
+}
+
 // Helper to upload CSV and get upload_id
-async fn upload_csv(app: &axum::Router, csv_data: &[u8]) -> (String, String) {
+async fn upload_csv(app: &axum::Router, csv_data: &[u8]) -> UploadResult {
     use axum::body::Body;
     use axum::http::{header, Request, StatusCode};
     use tower::ServiceExt;
@@ -142,7 +147,10 @@ async fn upload_csv(app: &axum::Router, csv_data: &[u8]) -> (String, String) {
     let upload_id = json["upload_id"].as_str().unwrap().to_string();
     let edit_token = json["edit_token"].as_str().unwrap().to_string();
 
-    (upload_id, edit_token)
+    UploadResult {
+        upload_id,
+        edit_token,
+    }
 }
 
 fn benchmark_upload(c: &mut Criterion) {
@@ -174,7 +182,7 @@ fn benchmark_tiles(c: &mut Criterion) {
     // Pre-upload data once
     let (app, _temp_dir, _db_url) = rt.block_on(setup_test_server());
     let csv_data = generate_csv(5000);
-    let (upload_id, _edit_token) = rt.block_on(upload_csv(&app, &csv_data));
+    let upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
     let mut group = c.benchmark_group("tiles");
     group.measurement_time(std::time::Duration::from_secs(30));
@@ -185,7 +193,7 @@ fn benchmark_tiles(c: &mut Criterion) {
 
         group.bench_with_input(
             BenchmarkId::new("get_tile", format!("z{}_x{}_y{}", zoom, x, y)),
-            &(upload_id.clone(), *zoom, x, y),
+            &(upload_result.upload_id.clone(), *zoom, x, y),
             |b, (upload_id, z, x, y)| {
                 b.to_async(&rt).iter(|| async {
                     use axum::body::Body;
@@ -216,7 +224,7 @@ fn benchmark_tiles_with_filter(c: &mut Criterion) {
 
     let (app, _temp_dir, _db_url) = rt.block_on(setup_test_server());
     let csv_data = generate_csv(5000);
-    let (upload_id, _edit_token) = rt.block_on(upload_csv(&app, &csv_data));
+    let upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
     // Create a filter: common_name contains "Blackbird"
     let filter = FilterGroup {
@@ -241,7 +249,7 @@ fn benchmark_tiles_with_filter(c: &mut Criterion) {
 
             let uri = format!(
                 "/api/tiles/{}/10/512/512.pbf?filter={}",
-                upload_id,
+                upload_result.upload_id,
                 urlencoding::encode(&filter_json)
             );
             let req = Request::builder()
@@ -265,7 +273,7 @@ fn benchmark_sightings(c: &mut Criterion) {
 
     let (app, _temp_dir, _db_url) = rt.block_on(setup_test_server());
     let csv_data = generate_csv(5000);
-    let (upload_id, _edit_token) = rt.block_on(upload_csv(&app, &csv_data));
+    let upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
     let mut group = c.benchmark_group("sightings");
     group.measurement_time(std::time::Duration::from_secs(30));
@@ -283,7 +291,7 @@ fn benchmark_sightings(c: &mut Criterion) {
 
                     let uri = format!(
                         "/api/uploads/{}/sightings?page=1&page_size={}",
-                        upload_id, page_size
+                        upload_result.upload_id, page_size
                     );
                     let req = Request::builder()
                         .method("GET")
@@ -324,7 +332,7 @@ fn benchmark_sightings(c: &mut Criterion) {
 
                     let uri = format!(
                         "/api/uploads/{}/sightings?sort_field={}&sort_dir=asc",
-                        upload_id, sort_field_str
+                        upload_result.upload_id, sort_field_str
                     );
                     let req = Request::builder()
                         .method("GET")
@@ -358,7 +366,7 @@ fn benchmark_sightings_with_filter(c: &mut Criterion) {
 
     let (app, _temp_dir, _db_url) = rt.block_on(setup_test_server());
     let csv_data = generate_csv(5000);
-    let (upload_id, _edit_token) = rt.block_on(upload_csv(&app, &csv_data));
+    let upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
     // Create a complex filter
     let filter = FilterGroup {
@@ -388,7 +396,7 @@ fn benchmark_sightings_with_filter(c: &mut Criterion) {
 
             let uri = format!(
                 "/api/uploads/{}/sightings?filter={}",
-                upload_id,
+                upload_result.upload_id,
                 urlencoding::encode(&filter_json)
             );
             let req = Request::builder()
@@ -412,7 +420,7 @@ fn benchmark_field_metadata(c: &mut Criterion) {
 
     let (app, _temp_dir, _db_url) = rt.block_on(setup_test_server());
     let csv_data = generate_csv(1000);
-    let (_upload_id, _edit_token) = rt.block_on(upload_csv(&app, &csv_data));
+    let _upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
     let mut group = c.benchmark_group("metadata");
     group.measurement_time(std::time::Duration::from_secs(30));
@@ -443,7 +451,7 @@ fn benchmark_field_values(c: &mut Criterion) {
 
     let (app, _temp_dir, _db_url) = rt.block_on(setup_test_server());
     let csv_data = generate_csv(5000);
-    let (upload_id, _edit_token) = rt.block_on(upload_csv(&app, &csv_data));
+    let upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
     let mut group = c.benchmark_group("field_values");
     group.measurement_time(std::time::Duration::from_secs(30));
@@ -454,7 +462,7 @@ fn benchmark_field_values(c: &mut Criterion) {
                 use axum::http::Request;
                 use tower::ServiceExt;
 
-                let uri = format!("/api/uploads/{}/fields/{}", upload_id, field);
+                let uri = format!("/api/uploads/{}/fields/{}", upload_result.upload_id, field);
                 let req = Request::builder()
                     .method("GET")
                     .uri(&uri)
@@ -477,7 +485,7 @@ fn benchmark_filtered_count(c: &mut Criterion) {
 
     let (app, _temp_dir, _db_url) = rt.block_on(setup_test_server());
     let csv_data = generate_csv(5000);
-    let (upload_id, _edit_token) = rt.block_on(upload_csv(&app, &csv_data));
+    let upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
     // Create a filter
     let filter = FilterGroup {
@@ -502,7 +510,7 @@ fn benchmark_filtered_count(c: &mut Criterion) {
 
             let uri = format!(
                 "/api/uploads/{}/count?filter={}",
-                upload_id,
+                upload_result.upload_id,
                 urlencoding::encode(&filter_json)
             );
             let req = Request::builder()

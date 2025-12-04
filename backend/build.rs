@@ -8,12 +8,14 @@ use std::process::Command;
 fn main() {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is not set"));
-    let (repo_root, git_dir) = find_git_directories(&manifest_dir)
+    let git_dirs = find_git_directories(&manifest_dir)
         .unwrap_or_else(|| panic!("Failed to find .git directory above {:?}", manifest_dir));
+    let repo_root = &git_dirs.repo_root;
+    let git_dir = &git_dirs.git_dir;
 
-    generate_protos(&repo_root);
+    generate_protos(repo_root);
 
-    let build_version = capture_git_hash(&repo_root);
+    let build_version = capture_git_hash(repo_root);
     println!("cargo:rustc-env=BUILD_VERSION={build_version}");
 
     let build_date = format_build_date();
@@ -23,7 +25,7 @@ fn main() {
     println!("cargo:rustc-env=RUSTC_VERSION={rustc_version}");
 
     println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
-    if let Some(current_ref) = resolve_head_reference(&git_dir) {
+    if let Some(current_ref) = resolve_head_reference(git_dir) {
         println!("cargo:rerun-if-changed={}", current_ref.display());
     }
     println!(
@@ -84,16 +86,27 @@ fn capture_rustc_version() -> String {
     }
 }
 
-fn find_git_directories(start: &Path) -> Option<(PathBuf, PathBuf)> {
+struct GitDirectories {
+    repo_root: PathBuf,
+    git_dir: PathBuf,
+}
+
+fn find_git_directories(start: &Path) -> Option<GitDirectories> {
     let mut current = Some(start);
 
     while let Some(dir) = current {
         let candidate = dir.join(".git");
         if candidate.exists() {
             if candidate.is_dir() {
-                return Some((dir.to_path_buf(), candidate));
+                return Some(GitDirectories {
+                    repo_root: dir.to_path_buf(),
+                    git_dir: candidate,
+                });
             } else if let Some(resolved) = resolve_git_file(&candidate) {
-                return Some((dir.to_path_buf(), resolved));
+                return Some(GitDirectories {
+                    repo_root: dir.to_path_buf(),
+                    git_dir: resolved,
+                });
             }
         }
 

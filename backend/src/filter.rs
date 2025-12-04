@@ -332,6 +332,11 @@ pub struct TickFilters {
     pub params: Vec<String>,
 }
 
+pub struct TickFiltersParts {
+    pub clauses: Vec<String>,
+    pub params: Vec<String>,
+}
+
 impl TickFilters {
     pub fn new() -> Self {
         Self {
@@ -360,8 +365,11 @@ impl TickFilters {
         ));
     }
 
-    pub fn into_parts(self) -> (Vec<String>, Vec<String>) {
-        (self.clauses, self.params)
+    pub fn into_parts(self) -> TickFiltersParts {
+        TickFiltersParts {
+            clauses: self.clauses,
+            params: self.params,
+        }
     }
 }
 
@@ -379,15 +387,20 @@ pub struct CountQuery {
     pub country_tick_country: Option<String>,
 }
 
+pub struct FilterClauseResult {
+    pub filter_clause: String,
+    pub params: Vec<String>,
+}
+
 /// Builds filter SQL clause and parameters from query options.
-/// Returns (filter_clause, params) where filter_clause is a string like " AND (...)" or empty string.
+/// Returns filter_clause (a string like " AND (...)" or empty string) and params.
 pub fn build_filter_clause(
     filter_json: Option<&String>,
     lifers_only: Option<bool>,
     year_tick_year: Option<i32>,
     country_tick_country: Option<&String>,
     table_prefix: Option<&str>,
-) -> Result<(String, Vec<String>), ApiError> {
+) -> Result<FilterClauseResult, ApiError> {
     let mut params: Vec<String> = Vec::new();
 
     let mut filter_clause = if let Some(filter_json) = filter_json {
@@ -407,17 +420,25 @@ pub fn build_filter_clause(
     if let Some(country) = country_tick_country {
         tick_filters.add_country_tick(country, table_prefix);
     }
-    let (clauses, tick_params) = tick_filters.into_parts();
-    params.extend(tick_params);
-    if !clauses.is_empty() {
-        let clause_str = format!(" {}", clauses.join(" "));
+    let tick_parts = tick_filters.into_parts();
+    params.extend(tick_parts.params);
+    if !tick_parts.clauses.is_empty() {
+        let clause_str = format!(" {}", tick_parts.clauses.join(" "));
         filter_clause = Some(match filter_clause {
             Some(existing) => format!("{existing}{clause_str}"),
             None => clause_str.trim_start_matches(" ").to_string(),
         });
     }
 
-    Ok((filter_clause.unwrap_or_default(), params))
+    Ok(FilterClauseResult {
+        filter_clause: filter_clause.unwrap_or_default(),
+        params,
+    })
+}
+
+struct FieldColumnInfo {
+    column: &'static str,
+    needs_join: bool,
 }
 
 pub async fn get_distinct_values(
@@ -425,30 +446,53 @@ pub async fn get_distinct_values(
     upload_id: &[u8],
     field: &str,
 ) -> Result<Vec<String>, DbQueryError> {
-    let (column, needs_join) = match field {
-        "common_name" => ("sp.common_name", true),
-        "scientific_name" => ("sp.scientific_name", true),
-        "country_code" => ("s.country_code", true),
-        "count" => ("s.count", false),
-        "observed_at" => ("s.observed_at", false),
-        "year" => ("s.year", false),
+    let field_info = match field {
+        "common_name" => FieldColumnInfo {
+            column: "sp.common_name",
+            needs_join: true,
+        },
+        "scientific_name" => FieldColumnInfo {
+            column: "sp.scientific_name",
+            needs_join: true,
+        },
+        "country_code" => FieldColumnInfo {
+            column: "s.country_code",
+            needs_join: false,
+        },
+        "count" => FieldColumnInfo {
+            column: "s.count",
+            needs_join: false,
+        },
+        "observed_at" => FieldColumnInfo {
+            column: "s.observed_at",
+            needs_join: false,
+        },
+        "year" => FieldColumnInfo {
+            column: "s.year",
+            needs_join: false,
+        },
         _ => return Ok(vec![]),
     };
 
-    let query = if needs_join {
+    #[derive(sqlx::FromRow)]
+    struct ValueRow {
+        value: String,
+    }
+
+    let query = if field_info.needs_join {
         format!(
-            "SELECT DISTINCT CAST({column} AS TEXT) FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ? AND {column} IS NOT NULL ORDER BY {column} LIMIT {}",
-            MAX_DISTINCT_FIELD_VALUES
+            "SELECT DISTINCT CAST({} AS TEXT) as value FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ? AND {} IS NOT NULL ORDER BY {} LIMIT {}",
+            field_info.column, field_info.column, field_info.column, MAX_DISTINCT_FIELD_VALUES
         )
     } else {
         format!(
-            "SELECT DISTINCT CAST({column} AS TEXT) FROM sightings s WHERE s.upload_id = ? AND {column} IS NOT NULL ORDER BY {column} LIMIT {}",
-            MAX_DISTINCT_FIELD_VALUES
+            "SELECT DISTINCT CAST({} AS TEXT) as value FROM sightings s WHERE s.upload_id = ? AND {} IS NOT NULL ORDER BY {} LIMIT {}",
+            field_info.column, field_info.column, field_info.column, MAX_DISTINCT_FIELD_VALUES
         )
     };
 
-    let rows: Vec<(String,)> =
+    let rows: Vec<ValueRow> =
         db::query_with_timeout(sqlx::query_as(&query).bind(upload_id).fetch_all(pool)).await?;
 
-    Ok(rows.into_iter().map(|(v,)| v).collect())
+    Ok(rows.into_iter().map(|row| row.value).collect())
 }

@@ -14,7 +14,14 @@ const TILE_EXTENT: u32 = 4096;
 // Maximum vis_rank value (0-10000). When threshold equals this, all points are included.
 const MAX_VIS_RANK: i32 = 10000;
 
-fn tile_to_bbox(z: u32, x: u32, y: u32) -> (f64, f64, f64, f64) {
+struct Bbox {
+    lon_min: f64,
+    lat_min: f64,
+    lon_max: f64,
+    lat_max: f64,
+}
+
+fn tile_to_bbox(z: u32, x: u32, y: u32) -> Bbox {
     let n = 2_f64.powi(i32::try_from(z).unwrap_or(i32::MAX));
 
     let lon_min = (f64::from(x) / n) * 360.0 - 180.0;
@@ -29,10 +36,20 @@ fn tile_to_bbox(z: u32, x: u32, y: u32) -> (f64, f64, f64, f64) {
         .atan()
         .to_degrees();
 
-    (lon_min, lat_min, lon_max, lat_max)
+    Bbox {
+        lon_min,
+        lat_min,
+        lon_max,
+        lat_max,
+    }
 }
 
-fn latlng_to_tile_coords(lat: f64, lng: f64, z: u32, x: u32, y: u32) -> (f64, f64) {
+struct TileCoords {
+    tile_x: f64,
+    tile_y: f64,
+}
+
+fn latlng_to_tile_coords(lat: f64, lng: f64, z: u32, x: u32, y: u32) -> TileCoords {
     let n = 2_f64.powi(i32::try_from(z).unwrap_or(i32::MAX));
 
     let world_x = (lng + 180.0) / 360.0 * n;
@@ -43,7 +60,7 @@ fn latlng_to_tile_coords(lat: f64, lng: f64, z: u32, x: u32, y: u32) -> (f64, f6
     let tile_x = (world_x - f64::from(x)) * f64::from(TILE_EXTENT);
     let tile_y = (world_y - f64::from(y)) * f64::from(TILE_EXTENT);
 
-    (tile_x, tile_y)
+    TileCoords { tile_x, tile_y }
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,28 +71,36 @@ pub struct TileQuery {
     country_tick_country: Option<String>,
 }
 
+#[derive(serde::Deserialize)]
+pub struct TilePath {
+    pub upload_id: String,
+    pub z: u32,
+    pub x: u32,
+    pub y: String,
+}
+
 pub async fn get_tile(
     State(pool): State<SqlitePool>,
-    Path((upload_id, z, x, y_str)): Path<(String, u32, u32, String)>,
+    Path(path): Path<TilePath>,
     Query(query): Query<TileQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let upload_uuid = uuid::Uuid::parse_str(&upload_id)
+    let upload_uuid = uuid::Uuid::parse_str(&path.upload_id)
         .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
-    let y: u32 = match y_str.trim_end_matches(".pbf").parse() {
+    let y: u32 = match path.y.trim_end_matches(".pbf").parse() {
         Ok(v) => v,
         Err(_) => {
             return Err(ApiError::bad_request("Invalid y coordinate"));
         }
     };
 
-    let (lon_min, lat_min, lon_max, lat_max) = tile_to_bbox(z, x, y);
+    let bbox = tile_to_bbox(path.z, path.x, y);
 
     debug!(
         "Tile request: z={} x={} y={} bbox=[{},{},{},{}]",
-        z, x, y, lon_min, lat_min, lon_max, lat_max
+        path.z, path.x, y, bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max
     );
 
-    let (filter_clause, filter_params) = build_filter_clause(
+    let filter_result = build_filter_clause(
         query.filter.as_ref(),
         query.lifers_only,
         query.year_tick_year,
@@ -92,7 +117,7 @@ pub async fn get_tile(
     // - Low zoom (z3-z4): vis_rank < 1000 (~10% of points)
     // - Mid zoom (z5-z7): vis_rank < 5000 (~50% of points)
     // - High zoom (z8+): MAX_VIS_RANK (all points, filter skipped for performance)
-    let vis_rank_threshold = match z {
+    let vis_rank_threshold = match path.z {
         0..=2 => 100,      // Very low zoom: ~1% of points
         3..=4 => 1000,     // Low zoom: ~10% of points
         5..=7 => 5000,     // Mid zoom: ~50% of points
@@ -100,7 +125,7 @@ pub async fn get_tile(
     };
 
     // Safety cap on rendered points.
-    let max_points = match z {
+    let max_points = match path.z {
         0..=2 => 5000,
         3..=4 => 10000,
         5..=7 => 25000,
@@ -138,7 +163,7 @@ pub async fn get_tile(
         {}
         LIMIT ?
         ",
-        vis_rank_clause, filter_clause
+        vis_rank_clause, filter_result.filter_clause
     );
 
     let mut db_query = sqlx::query(&sql).bind(&upload_uuid.as_bytes()[..]);
@@ -146,12 +171,12 @@ pub async fn get_tile(
         db_query = db_query.bind(vis_rank_threshold);
     }
     db_query = db_query
-        .bind(lat_min)
-        .bind(lat_max)
-        .bind(lon_min)
-        .bind(lon_max);
+        .bind(bbox.lat_min)
+        .bind(bbox.lat_max)
+        .bind(bbox.lon_min)
+        .bind(bbox.lon_max);
 
-    for param in &filter_params {
+    for param in &filter_result.params {
         db_query = db_query.bind(param);
     }
     db_query = db_query.bind(i64::from(max_points));
@@ -176,11 +201,11 @@ pub async fn get_tile(
         let year_tick: i32 = row.get("year_tick");
         let country_tick: i32 = row.get("country_tick");
 
-        let (tile_x, tile_y) = latlng_to_tile_coords(latitude, longitude, z, x, y);
+        let tile_coords = latlng_to_tile_coords(latitude, longitude, path.z, path.x, y);
 
         let encoder = GeomEncoder::new(GeomType::Point);
         let geom_data = match encoder
-            .point(tile_x, tile_y)
+            .point(tile_coords.tile_x, tile_coords.tile_y)
             .and_then(mvt::GeomEncoder::encode)
         {
             Ok(data) => data,

@@ -625,7 +625,7 @@ async fn get_bbox(
     Path(upload_id): Path<String>,
     Query(query): Query<CountQuery>,
 ) -> Result<Proto<pb::BboxResponse>, ApiError> {
-    let (filter_clause, params) = build_filter_clause(
+    let filter_result = build_filter_clause(
         query.filter.as_ref(),
         query.lifers_only,
         query.year_tick_year,
@@ -638,12 +638,12 @@ async fn get_bbox(
 
     let sql = format!(
         "SELECT MIN(longitude) as min_lng, MIN(latitude) as min_lat, MAX(longitude) as max_lng, MAX(latitude) as max_lat FROM sightings WHERE upload_id = ?{}",
-        filter_clause
+        filter_result.filter_clause
     );
 
     let mut db_query = sqlx::query(&sql);
     db_query = db_query.bind(&upload_uuid.as_bytes()[..]);
-    for param in &params {
+    for param in &filter_result.params {
         db_query = db_query.bind(param);
     }
 
