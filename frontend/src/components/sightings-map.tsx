@@ -11,7 +11,7 @@ import {
   buildFilterParams,
   parseProtoResponse,
 } from "@/lib/api";
-import { FilterGroup } from "@/lib/filter-types";
+import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { fetchSpeciesInfo } from "@/lib/species-api";
 import { TILE_ROUTE, UPLOAD_BBOX_ROUTE } from "@/lib/generated/api_constants";
 import { BboxResponse } from "@/lib/proto/redgrouse_api";
@@ -155,7 +155,12 @@ function buildTileUrl(
   yearTickYear: number | null,
   countryTickCountry: string | null,
 ): string {
-  const params = buildFilterParams(filter, lifersOnly, yearTickYear, countryTickCountry);
+  const params = buildFilterParams(
+    filter ? filterToJson(filter) : null,
+    lifersOnly,
+    yearTickYear,
+    countryTickCountry
+  );
   const queryString = params.toString();
   const filterParam = queryString ? `?${queryString}` : "";
 
@@ -637,7 +642,12 @@ export function SightingsMap({
       return;
     }
 
-    const params = buildFilterParams(filter, lifersOnly, yearTickYear, countryTickCountry);
+    const params = buildFilterParams(
+    filter ? filterToJson(filter) : null,
+    lifersOnly,
+    yearTickYear,
+    countryTickCountry
+  );
 
     const url = `${buildApiUrl(UPLOAD_BBOX_ROUTE, { upload_id: uploadId })}?${params}`;
 

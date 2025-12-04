@@ -1,5 +1,4 @@
 import { checkVersionHeader } from "./version-check";
-import { FilterGroup, filterToJson } from "./filter-types";
 import { ApiErrorBody } from "@/lib/proto/redgrouse_api";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
@@ -43,14 +42,14 @@ export function buildApiUrl(
 }
 
 export function buildFilterParams(
-  filter: FilterGroup | null,
+  filterString: string | null,
   lifersOnly: boolean,
   yearTickYear: number | null,
   countryTickCountry: string | null
 ): URLSearchParams {
   const params = new URLSearchParams();
-  if (filter) {
-    params.set("filter", filterToJson(filter));
+  if (filterString) {
+    params.set("filter", filterString);
   }
   if (lifersOnly) {
     params.set("lifers_only", "true");

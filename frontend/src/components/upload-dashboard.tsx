@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQueryState } from "nuqs";
 import { searchParamsCache } from "@/lib/search-params";
@@ -70,15 +70,19 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
     searchParamsCache.filter.withOptions({ history: "push" })
   );
 
-  const filter: FilterGroup | null = filterString
-    ? (() => {
-        try {
-          return JSON.parse(filterString) as FilterGroup;
-        } catch {
-          return null;
-        }
-      })()
-    : null;
+  const filter: FilterGroup | null = useMemo(
+    () =>
+      filterString
+        ? (() => {
+            try {
+              return JSON.parse(filterString) as FilterGroup;
+            } catch {
+              return null;
+            }
+          })()
+        : null,
+    [filterString]
+  );
 
   const setFilter = useCallback(
     (value: FilterGroup | null) => {
@@ -188,7 +192,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
     if (!uploadId) return;
 
     let cancelled = false;
-    const params = buildFilterParams(filter, lifersOnly, yearTickYear, countryTickCountry);
+    const params = buildFilterParams(filterString, lifersOnly, yearTickYear, countryTickCountry);
 
     const url = `${buildApiUrl(UPLOAD_COUNT_ROUTE, { upload_id: uploadId })}?${params}`;
 
@@ -208,7 +212,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
       cancelled = true;
       setFilteredCount(null);
     };
-  }, [uploadId, filter, lifersOnly, yearTickYear, countryTickCountry]);
+  }, [uploadId, filterString, lifersOnly, yearTickYear, countryTickCountry]);
 
   const handleNavigateToSighting = useCallback(
     (sightingId: number, lat: number, lng: number) => {

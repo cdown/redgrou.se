@@ -10,7 +10,7 @@ import {
   getErrorMessage,
   parseProtoResponse,
 } from "@/lib/api";
-import { FilterGroup } from "@/lib/filter-types";
+import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { formatCountry } from "@/lib/countries";
 import { formatRegion } from "@/lib/regions";
 import {
@@ -107,7 +107,12 @@ export function SightingsTable({
       loadingRef.current = true;
       setLoading(true);
 
-      const params = buildFilterParams(filter, lifersOnly, yearTickYear, countryTickCountry);
+      const params = buildFilterParams(
+        filter ? filterToJson(filter) : null,
+        lifersOnly,
+        yearTickYear,
+        countryTickCountry
+      );
       params.set("sort_field", sortField);
       params.set("sort_dir", sortDir);
       params.set("page", String(pageNum));
@@ -165,10 +170,12 @@ export function SightingsTable({
   useEffect(() => {
     setSightings([]);
     setGroups([]);
+    setNameIndex([]);
     pageRef.current = 1;
     setHasMore(true);
     fetchPage(1, false);
-  }, [fetchPage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadId, filter, sortField, sortDir, groupBy, lifersOnly, yearTickYear, countryTickCountry]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -192,7 +199,7 @@ export function SightingsTable({
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, fetchPage, sightings.length, groups.length]);
+  }, [hasMore, fetchPage]);
 
   const handleSort = (field: SortField) => {
     if (field === sortField) {
