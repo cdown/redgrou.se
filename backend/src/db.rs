@@ -39,6 +39,21 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+pub async fn vacuum_database(pool: &SqlitePool) {
+    info!("Running database vacuum");
+    let start = std::time::Instant::now();
+
+    match sqlx::query("VACUUM").execute(pool).await {
+        Ok(_) => {
+            let duration = start.elapsed();
+            info!("Database vacuum completed in {:?}", duration);
+        }
+        Err(err) => {
+            error!("Database vacuum failed: {}", err);
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum DbQueryError {
     Timeout,

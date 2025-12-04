@@ -86,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = db::init_pool(&database_url).await?;
     db::run_migrations(&pool).await?;
+    db::vacuum_database(&pool).await;
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
