@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/popover";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { MultiCombobox } from "@/components/ui/multi-combobox";
+import { ClientOnly } from "@/components/client-only";
 import {
   Condition,
   FilterGroup,
@@ -357,18 +358,20 @@ function GroupBuilder({
       className={`space-y-2 rounded-md p-2 ${bgColour} ${!isRoot ? "ml-2 border-l-2 border-muted" : ""}`}
     >
       <div className="flex items-center gap-2">
-        <Select
-          value={group.combinator}
-          onValueChange={(v) => setCombinator(path, v as "and" | "or")}
-        >
-          <SelectTrigger className="w-24 h-8">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="and">All of</SelectItem>
-            <SelectItem value="or">Any of</SelectItem>
-          </SelectContent>
-        </Select>
+        <ClientOnly>
+          <Select
+            value={group.combinator}
+            onValueChange={(v) => setCombinator(path, v as "and" | "or")}
+          >
+            <SelectTrigger className="w-24 h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="and">All of</SelectItem>
+              <SelectItem value="or">Any of</SelectItem>
+            </SelectContent>
+          </Select>
+        </ClientOnly>
       </div>
 
       {group.rules.map((rule, index) => (
@@ -463,64 +466,68 @@ function ConditionBuilder({
 
   return (
     <div className="flex flex-1 flex-wrap items-center gap-2">
-      <Select
-        value={condition.field}
-        onValueChange={(v) => {
-          fetchFieldValues(v);
-          const newField = fields.find((f) => f.name === v);
-          const newFieldType = newField?.field_type || "string";
-          let defaultOp: Operator = "eq";
-          let defaultValue: string | string[] | number = "";
-
-          if (newFieldType === "date") {
-            defaultOp = "gte";
-          } else if (newFieldType === "boolean") {
-            defaultOp = "eq";
-            defaultValue = 1;
-          }
-
-          updateRule(path, () => ({
-            ...condition,
-            field: v,
-            operator: defaultOp,
-            value: defaultValue,
-          }));
-        }}
-      >
-        <SelectTrigger className="w-36 h-8">
-          <SelectValue placeholder="Field..." />
-        </SelectTrigger>
-        <SelectContent>
-          {fields.map((f) => (
-            <SelectItem key={f.name} value={f.name}>
-              {f.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      {condition.field && !skipOperator && (
+      <ClientOnly>
         <Select
-          value={condition.operator}
-          onValueChange={(v) =>
+          value={condition.field}
+          onValueChange={(v) => {
+            fetchFieldValues(v);
+            const newField = fields.find((f) => f.name === v);
+            const newFieldType = newField?.field_type || "string";
+            let defaultOp: Operator = "eq";
+            let defaultValue: string | string[] | number = "";
+
+            if (newFieldType === "date") {
+              defaultOp = "gte";
+            } else if (newFieldType === "boolean") {
+              defaultOp = "eq";
+              defaultValue = 1;
+            }
+
             updateRule(path, () => ({
               ...condition,
-              operator: v as Operator,
-              value: v === "in" || v === "not_in" ? [] : "",
-            }))
-          }
+              field: v,
+              operator: defaultOp,
+              value: defaultValue,
+            }));
+          }}
         >
-          <SelectTrigger className="w-32 h-8">
-            <SelectValue />
+          <SelectTrigger className="w-36 h-8">
+            <SelectValue placeholder="Field..." />
           </SelectTrigger>
           <SelectContent>
-            {operators.map((op) => (
-              <SelectItem key={op} value={op}>
-                {getOperatorLabel(op, fieldType)}
+            {fields.map((f) => (
+              <SelectItem key={f.name} value={f.name}>
+                {f.label}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
+      </ClientOnly>
+
+      {condition.field && !skipOperator && (
+        <ClientOnly>
+          <Select
+            value={condition.operator}
+            onValueChange={(v) =>
+              updateRule(path, () => ({
+                ...condition,
+                operator: v as Operator,
+                value: v === "in" || v === "not_in" ? [] : "",
+              }))
+            }
+          >
+            <SelectTrigger className="w-32 h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {operators.map((op) => (
+                <SelectItem key={op} value={op}>
+                  {getOperatorLabel(op, fieldType)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </ClientOnly>
       )}
 
       {condition.field && isMultiValue ? (

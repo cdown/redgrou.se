@@ -44,7 +44,7 @@ export function MultiCombobox({
   className,
 }: MultiComboboxProps) {
   const [open, setOpen] = React.useState(false);
-  const listId = React.useId();
+  const uniqueId = React.useId();
 
   const selectedOptions = options.filter((opt) => values.includes(opt.value));
   const availableOptions = options.filter((opt) => !values.includes(opt.value));
@@ -68,7 +68,11 @@ export function MultiCombobox({
         <button
           role="combobox"
           aria-expanded={open}
-          aria-controls={listId}
+          aria-controls={uniqueId}
+          // Radix UI automatically manages aria-attributes and may generate internal IDs
+          // that differ between server and client. We suppress this specific warning
+          // because Radix correctly reconciles the attributes upon hydration.
+          suppressHydrationWarning
           className={cn(
             "flex min-h-8 w-full flex-wrap items-center gap-1 rounded-md border border-input bg-transparent px-2 py-1 text-sm ring-offset-background transition-colors",
             "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
@@ -105,12 +109,13 @@ export function MultiCombobox({
         </button>
       </PopoverTrigger>
       <PopoverContent
+        id={uniqueId}
         className="w-[--radix-popover-trigger-width] p-0"
         align="start"
       >
         <Command>
           <CommandInput placeholder={searchPlaceholder} />
-          <CommandList id={listId}>
+          <CommandList>
             <CommandEmpty>{emptyText}</CommandEmpty>
             <CommandGroup>
               {availableOptions.map((option) => (
