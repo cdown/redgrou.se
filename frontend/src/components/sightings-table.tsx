@@ -17,9 +17,8 @@ import {
   DEFAULT_PAGE_SIZE,
 } from "@/lib/generated/api_constants";
 import { SortField } from "@/lib/generated/SortField";
-import { SightingsResponse } from "@/lib/generated/SightingsResponse";
-import { GroupedSighting } from "@/lib/generated/GroupedSighting";
-import { Sighting } from "@/lib/generated/Sighting";
+import { SightingsResponseSchema } from "@/lib/schemas";
+import type { Sighting, GroupedSighting } from "@/lib/schemas";
 import {
   MultiCombobox,
   MultiComboboxOption,
@@ -105,7 +104,8 @@ export function SightingsTable({
 
         const res = await apiFetch(url);
         await checkApiResponse(res, "Failed to fetch sightings");
-        const json: SightingsResponse = await res.json();
+        const jsonData = await res.json();
+        const json = SightingsResponseSchema.parse(jsonData);
 
         if (groupBy.length > 0 && json.groups) {
           const groupsData: GroupedSightingDisplay[] = json.groups.map((g) => ({
