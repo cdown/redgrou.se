@@ -1,5 +1,5 @@
 use axum::extract::{Path, Query, State};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, SqlitePool};
 use uuid::Uuid;
 
@@ -10,7 +10,7 @@ use crate::error::ApiError;
 use crate::filter::build_filter_clause;
 use crate::proto::{pb, Proto};
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum SortField {
     CommonName,
@@ -30,6 +30,17 @@ impl SortField {
             Self::SpeciesCount => "species_count",
             Self::CountryCode => "s.country_code",
             Self::ObservedAt => "s.observed_at",
+        }
+    }
+
+    pub const fn as_query_param(&self) -> &'static str {
+        match self {
+            Self::CommonName => "common_name",
+            Self::ScientificName => "scientific_name",
+            Self::Count => "count",
+            Self::SpeciesCount => "species_count",
+            Self::CountryCode => "country_code",
+            Self::ObservedAt => "observed_at",
         }
     }
 }

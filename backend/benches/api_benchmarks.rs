@@ -315,11 +315,8 @@ fn benchmark_sightings(c: &mut Criterion) {
         SortField::ObservedAt,
         SortField::Count,
     ] {
-        // Serialize to snake_case for the API
-        let sort_field_str = serde_json::to_string(&sort_field)
-            .unwrap()
-            .trim_matches('"')
-            .to_string();
+        // Use the same serialization as query parameters (snake_case)
+        let sort_field_str = sort_field.as_query_param();
 
         group.bench_with_input(
             BenchmarkId::new("get_sightings_sorted", format!("{:?}", sort_field)),
