@@ -1,0 +1,89 @@
+#!/bin/bash
+
+red='\033[0;31m'
+no_colour='\033[0m'
+
+errors=0
+
+report_error() {
+    local file="$1"
+    local message="$2"
+    echo -e "${red}X${no_colour} $file: $message"
+    ((errors++))
+}
+
+check_migration_immutability() {
+    local file="$1"
+    if [[ "$file" =~ ^backend/migrations/.*\.sql$ ]]; then
+        if git cat-file -e "HEAD:$file" 2>/dev/null; then
+            report_error "$file" "Cannot modify existing migrations."
+            return 1
+        fi
+    fi
+    return 0
+}
+
+check_whitespace_only_changes() {
+    local file="$1"
+    # --quiet -w returns 0 (true) if there are NO changes when ignoring
+    # whitespace. Since the file is staged (changed), return 0 means the ONLY
+    # change is whitespace
+    if git diff --cached --quiet -w "$file"; then
+        report_error "$file" "Changes are whitespace-only."
+        return 1
+    fi
+    return 0
+}
+
+check_trailing_whitespace() {
+    local file="$1"
+    if git show ":$file" | grep -q '[[:space:]]$'; then
+        report_error "$file" "Contains trailing whitespace."
+        return 1
+    fi
+    return 0
+}
+
+check_eof_strictness() {
+    local file="$1"
+    local last_bytes
+    last_bytes=$(
+        git show ":$file" | tail -c 2 | od -An -tx1 | tr -d ' \n'
+    )
+
+    if [[ -n "$last_bytes" ]]; then
+        local last_byte="${last_bytes: -2}"
+
+        # There must be a newline...
+        if [[ "$last_byte" != "0a" ]]; then
+            report_error "$file" "Missing newline at EOF."
+            return 1
+
+        # ...but not more than one.
+        elif [[ "$last_bytes" == *"0a0a" ]]; then
+            report_error "$file" "Multiple newlines at EOF."
+            return 1
+        fi
+    fi
+    return 0
+}
+
+IFS=$'\n' read -r -d '' -a staged_files < <(
+    git diff --cached --name-only --diff-filter=ACM && printf '\0'
+)
+(( ${#staged_files[@]} == 0 )) && exit 0
+
+for file in "${staged_files[@]}"; do
+    check_migration_immutability "$file"
+    check_whitespace_only_changes "$file"
+    check_trailing_whitespace "$file"
+    check_eof_strictness "$file"
+done
+
+if (( errors > 0 )); then
+    echo -e "\n${red}Commit rejected: Found $errors error(s).${no_colour}"
+    echo "Please fix the issues above and try again."
+    exit 1
+fi
+
+exit 0

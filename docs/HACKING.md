@@ -48,6 +48,24 @@ cd frontend
 npm run lint:strict
 ```
 
+## Git hooks
+
+This repository includes pre-commit hooks to enforce code quality standards:
+
+- Migration immutability (existing migrations cannot be modified)
+- No trailing whitespace
+- Strict single EOF newlines
+
+### Installing hooks
+
+After cloning the repository, configure git to use hooks from `.githooks/`:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Hooks will be automatically updated when you pull changes.
+
 ## Type generation
 
 Rust structs shared with the frontend use
