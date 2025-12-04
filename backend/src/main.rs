@@ -316,6 +316,28 @@ struct UploadState {
     window_count: u64,
 }
 
+/// RAII guard that automatically releases an upload slot when dropped.
+/// Ensures slots are released even if the client disconnects or the request is cancelled.
+pub struct UploadGuard {
+    limiter: Arc<Mutex<HashMap<String, UploadState>>>,
+    key: String,
+}
+
+impl Drop for UploadGuard {
+    fn drop(&mut self) {
+        let limiter = Arc::clone(&self.limiter);
+        let key = self.key.clone();
+        // Spawn a task to decrement the counter asynchronously.
+        // This ensures cleanup happens even if the guard is dropped during cancellation.
+        tokio::spawn(async move {
+            let mut state = limiter.lock().await;
+            if let Some(entry) = state.get_mut(&key) {
+                entry.active = entry.active.saturating_sub(1);
+            }
+        });
+    }
+}
+
 impl UploadLimiter {
     fn new(max_concurrent: usize, rate_limit: u64, window: Duration) -> Self {
         Self {
@@ -326,7 +348,7 @@ impl UploadLimiter {
         }
     }
 
-    async fn try_start(&self, key: &str) -> Result<(), &'static str> {
+    async fn try_start(&self, key: &str) -> Result<UploadGuard, &'static str> {
         let mut state = self.state.lock().await;
         let entry = state.entry(key.to_string()).or_insert(UploadState {
             active: 0,
@@ -350,14 +372,10 @@ impl UploadLimiter {
 
         entry.active += 1;
         entry.window_count += 1;
-        Ok(())
-    }
-
-    async fn finish(&self, key: &str) {
-        let mut state = self.state.lock().await;
-        if let Some(entry) = state.get_mut(key) {
-            entry.active = entry.active.saturating_sub(1);
-        }
+        Ok(UploadGuard {
+            limiter: Arc::clone(&self.state),
+            key: key.to_string(),
+        })
     }
 }
 
@@ -383,15 +401,14 @@ async fn enforce_upload_limit(
 
         let client_key = extract_client_addr(&req, peer_addr, &trusted);
 
-        if let Err(msg) = limiter.try_start(&client_key).await {
-            return ApiError::service_unavailable(msg).into_response();
-        }
+        let _guard = match limiter.try_start(&client_key).await {
+            Ok(guard) => guard,
+            Err(msg) => return ApiError::service_unavailable(msg).into_response(),
+        };
 
-        let response = next.run(req).await;
-
-        limiter.finish(&client_key).await;
-
-        response
+        // Guard is automatically dropped when this function returns, releasing the slot.
+        // This ensures cleanup even if the client disconnects or the request is cancelled.
+        next.run(req).await
     }
 }
 
