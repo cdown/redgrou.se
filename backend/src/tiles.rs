@@ -14,6 +14,19 @@ const TILE_EXTENT: u32 = 4096;
 // Maximum vis_rank value (0-10000). When threshold equals this, all points are included.
 const MAX_VIS_RANK: i32 = 10000;
 
+#[derive(Debug, Clone, Copy)]
+pub struct LatLng {
+    pub lat: f64,
+    pub lng: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TileCoordinates {
+    pub z: u32,
+    pub x: u32,
+    pub y: u32,
+}
+
 struct Bbox {
     lon_min: f64,
     lat_min: f64,
@@ -21,17 +34,17 @@ struct Bbox {
     lat_max: f64,
 }
 
-fn tile_to_bbox(z: u32, x: u32, y: u32) -> Bbox {
-    let n = 2_f64.powi(i32::try_from(z).unwrap_or(i32::MAX));
+fn tile_to_bbox(coords: TileCoordinates) -> Bbox {
+    let n = 2_f64.powi(i32::try_from(coords.z).unwrap_or(i32::MAX));
 
-    let lon_min = (f64::from(x) / n) * 360.0 - 180.0;
-    let lon_max = (f64::from(x + 1) / n) * 360.0 - 180.0;
+    let lon_min = (f64::from(coords.x) / n) * 360.0 - 180.0;
+    let lon_max = (f64::from(coords.x + 1) / n) * 360.0 - 180.0;
 
-    let lat_max = (std::f64::consts::PI * (1.0 - 2.0 * f64::from(y) / n))
+    let lat_max = (std::f64::consts::PI * (1.0 - 2.0 * f64::from(coords.y) / n))
         .sinh()
         .atan()
         .to_degrees();
-    let lat_min = (std::f64::consts::PI * (1.0 - 2.0 * f64::from(y + 1) / n))
+    let lat_min = (std::f64::consts::PI * (1.0 - 2.0 * f64::from(coords.y + 1) / n))
         .sinh()
         .atan()
         .to_degrees();
@@ -49,16 +62,16 @@ struct TileCoords {
     tile_y: f64,
 }
 
-fn latlng_to_tile_coords(lat: f64, lng: f64, z: u32, x: u32, y: u32) -> TileCoords {
-    let n = 2_f64.powi(i32::try_from(z).unwrap_or(i32::MAX));
+fn latlng_to_tile_coords(latlng: LatLng, tile_coords: TileCoordinates) -> TileCoords {
+    let n = 2_f64.powi(i32::try_from(tile_coords.z).unwrap_or(i32::MAX));
 
-    let world_x = (lng + 180.0) / 360.0 * n;
-    let lat_rad = lat.to_radians();
+    let world_x = (latlng.lng + 180.0) / 360.0 * n;
+    let lat_rad = latlng.lat.to_radians();
     let world_y =
         (1.0 - (lat_rad.tan() + 1.0 / lat_rad.cos()).ln() / std::f64::consts::PI) / 2.0 * n;
 
-    let tile_x = (world_x - f64::from(x)) * f64::from(TILE_EXTENT);
-    let tile_y = (world_y - f64::from(y)) * f64::from(TILE_EXTENT);
+    let tile_x = (world_x - f64::from(tile_coords.x)) * f64::from(TILE_EXTENT);
+    let tile_y = (world_y - f64::from(tile_coords.y)) * f64::from(TILE_EXTENT);
 
     TileCoords { tile_x, tile_y }
 }
@@ -93,7 +106,12 @@ pub async fn get_tile(
         }
     };
 
-    let bbox = tile_to_bbox(path.z, path.x, y);
+    let tile_pos = TileCoordinates {
+        z: path.z,
+        x: path.x,
+        y,
+    };
+    let bbox = tile_to_bbox(tile_pos);
 
     debug!(
         "Tile request: z={} x={} y={} bbox=[{},{},{},{}]",
@@ -201,7 +219,16 @@ pub async fn get_tile(
         let year_tick: i32 = row.get("year_tick");
         let country_tick: i32 = row.get("country_tick");
 
-        let tile_coords = latlng_to_tile_coords(latitude, longitude, path.z, path.x, y);
+        let latlng = LatLng {
+            lat: latitude,
+            lng: longitude,
+        };
+        let tile_pos = TileCoordinates {
+            z: path.z,
+            x: path.x,
+            y,
+        };
+        let tile_coords = latlng_to_tile_coords(latlng, tile_pos);
 
         let encoder = GeomEncoder::new(GeomType::Point);
         let geom_data = match encoder

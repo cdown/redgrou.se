@@ -158,8 +158,32 @@ fn parse_sort_direction(sort_dir: Option<&String>) -> &'static str {
     }
 }
 
-fn calculate_total_pages(total: i64, page_size: u32) -> u32 {
-    ((total as f64) / (f64::from(page_size))).ceil() as u32
+#[derive(Debug, Clone, Copy)]
+struct TotalCount(i64);
+
+#[derive(Debug, Clone, Copy)]
+struct PageSize(u32);
+
+impl From<u32> for PageSize {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<PageSize> for u32 {
+    fn from(value: PageSize) -> Self {
+        value.0
+    }
+}
+
+impl From<i64> for TotalCount {
+    fn from(value: i64) -> Self {
+        Self(value)
+    }
+}
+
+fn calculate_total_pages(total: TotalCount, page_size: PageSize) -> u32 {
+    ((total.0 as f64) / (f64::from(page_size.0))).ceil() as u32
 }
 
 fn validate_group_by_fields(fields: &[String]) -> Result<Vec<String>, ApiError> {
@@ -370,7 +394,7 @@ pub async fn get_sightings(
             groups.push(grouped);
         }
 
-        let total_pages = calculate_total_pages(total, page_size);
+        let total_pages = calculate_total_pages(TotalCount(total), PageSize::from(page_size));
 
         let groups_pb = groups
             .into_iter()
@@ -433,7 +457,7 @@ pub async fn get_sightings(
         .await
         .map_err(|e| e.into_api_error("loading sightings", "Database error"))?;
 
-    let total_pages = calculate_total_pages(total, page_size);
+    let total_pages = calculate_total_pages(TotalCount(total), PageSize::from(page_size));
 
     let index_result = build_name_index(&pool, &upload_uuid.as_bytes()[..]).await?;
 

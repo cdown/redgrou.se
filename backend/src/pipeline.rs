@@ -1,5 +1,6 @@
 use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
+use crate::tiles::LatLng;
 use country_boundaries::{CountryBoundaries, LatLon, BOUNDARIES_ODBL_360X180};
 use csv_async::{ByteRecord, StringRecord};
 use once_cell::sync::Lazy;
@@ -199,17 +200,20 @@ impl Geocoder {
         &self,
         sightings: Vec<ParsedSighting>,
     ) -> Result<Vec<ProcessedSighting>, ApiError> {
-        let coords: Vec<(f64, f64)> = sightings
+        let coords: Vec<LatLng> = sightings
             .iter()
-            .map(|s| (s.latitude, s.longitude))
+            .map(|s| LatLng {
+                lat: s.latitude,
+                lng: s.longitude,
+            })
             .collect();
 
         let geocode_results = tokio::task::spawn_blocking(move || {
             coords
                 .into_iter()
-                .map(|(lat, lon)| {
-                    let country_code = get_country_code(lat, lon);
-                    let region_code = get_region_code(lat, lon);
+                .map(|latlng| {
+                    let country_code = get_country_code(latlng);
+                    let region_code = get_region_code(latlng);
                     (country_code, region_code)
                 })
                 .collect::<Vec<_>>()
@@ -584,8 +588,8 @@ fn extract_year(date_str: &str) -> i32 {
     date_str.get(0..4).and_then(|y| y.parse().ok()).unwrap_or(0)
 }
 
-fn get_country_code(lat: f64, lon: f64) -> SString {
-    let Ok(latlon) = LatLon::new(lat, lon) else {
+fn get_country_code(latlng: LatLng) -> SString {
+    let Ok(latlon) = LatLon::new(latlng.lat, latlng.lng) else {
         return "XX".into();
     };
 
@@ -597,8 +601,8 @@ fn get_country_code(lat: f64, lon: f64) -> SString {
         .map_or_else(|| "XX".into(), |s| (*s).into())
 }
 
-fn get_region_code(lat: f64, lon: f64) -> Option<SString> {
-    let Ok(latlon) = LatLon::new(lat, lon) else {
+fn get_region_code(latlng: LatLng) -> Option<SString> {
+    let Ok(latlon) = LatLon::new(latlng.lat, latlng.lng) else {
         return None;
     };
 
