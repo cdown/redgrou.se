@@ -2,6 +2,9 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
+import { useQueryState } from "nuqs";
+import { searchParamsCache } from "@/lib/search-params";
+import { FilterGroup } from "@/lib/filter-types";
 import {
   Sparkles,
   ChevronDown,
@@ -14,7 +17,6 @@ import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
 import { QueryBuilder } from "@/components/query-builder";
 import { ActionsMenu } from "@/components/actions-menu";
-import { FilterGroup } from "@/lib/filter-types";
 import {
   apiFetch,
   buildApiUrl,
@@ -60,14 +62,43 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   const uploadId = initialUpload.upload_id;
 
   const [upload, setUpload] = useState<UploadMetadata>(initialUpload);
-  const [filter, setFilter] = useState<FilterGroup | null>(null);
+  const [filterString, setFilterString] = useQueryState(
+    "filter",
+    searchParamsCache.filter.withOptions({ history: "push" })
+  );
+
+  const filter: FilterGroup | null = filterString
+    ? (() => {
+        try {
+          return JSON.parse(filterString) as FilterGroup;
+        } catch {
+          return null;
+        }
+      })()
+    : null;
+
+  const setFilter = useCallback(
+    (value: FilterGroup | null) => {
+      setFilterString(value ? JSON.stringify(value) : null);
+    },
+    [setFilterString]
+  );
   const [filteredCount, setFilteredCount] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("map");
   const [filterOpen, setFilterOpen] = useState(false);
-  const [lifersOnly, setLifersOnly] = useState(false);
-  const [yearTickYear, setYearTickYear] = useState<number | null>(null);
+  const [lifersOnly, setLifersOnly] = useQueryState(
+    "lifers_only",
+    searchParamsCache.lifers_only
+  );
+  const [yearTickYear, setYearTickYear] = useQueryState(
+    "year_tick_year",
+    searchParamsCache.year_tick_year
+  );
   const [availableYears, setAvailableYears] = useState<number[]>([]);
-  const [countryTickCountry, setCountryTickCountry] = useState<string | null>(null);
+  const [countryTickCountry, setCountryTickCountry] = useQueryState(
+    "country_tick_country",
+    searchParamsCache.country_tick_country
+  );
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
   const [editToken] = useState<string | null>(() => getEditToken(uploadId));
   const [tableTopOffset, setTableTopOffset] = useState(200);
@@ -197,7 +228,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
       .catch((err) => {
         console.error(getErrorMessage(err, "Failed to refresh"));
       });
-  }, [uploadId]);
+  }, [uploadId, setFilter]);
 
   const showingFiltered =
     (filter || lifersOnly || yearTickYear !== null || countryTickCountry !== null) &&

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { NuqsAdapter } from "nuqs/adapters/next/app";
 import "./globals.css";
 import { VersionBanner } from "@/components/version-banner";
 
@@ -35,8 +36,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <VersionBanner />
-        {children}
+        <NuqsAdapter>
+          <VersionBanner />
+          {children}
+        </NuqsAdapter>
       </body>
     </html>
   );
