@@ -40,6 +40,7 @@ encoding_rs = "0.8"
 urlencoding = "2"
 prost = "0.14"
 bytes = "1"
+dashmap = "5"
 
 [build-dependencies]
 chrono = "0.4"

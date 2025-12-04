@@ -6,6 +6,7 @@ use axum::middleware::{from_fn, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{BoxError, Router};
+use dashmap::DashMap;
 use ipnet::IpNet;
 use serde::Deserialize;
 use sqlx::{Row, SqlitePool};
@@ -255,7 +256,7 @@ impl TrustedProxyList {
 struct RequestRateLimiter {
     limit: u64,
     window: Duration,
-    buckets: Arc<Mutex<HashMap<String, RateWindow>>>,
+    buckets: Arc<DashMap<String, RateWindow>>,
 }
 
 struct RateWindow {
@@ -265,25 +266,32 @@ struct RateWindow {
 
 impl RequestRateLimiter {
     fn new(limit: u64, window: Duration) -> Self {
+        let buckets = Arc::new(DashMap::new());
+        let buckets_clone = Arc::clone(&buckets);
+        let window_clone = window;
+
+        // Background pruning task: removes expired entries every 5 minutes
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(300));
+            loop {
+                interval.tick().await;
+                let now = Instant::now();
+                let prune_before = now - window_clone * 2;
+                buckets_clone.retain(|_, state: &mut RateWindow| state.start > prune_before);
+            }
+        });
+
         Self {
             limit,
             window,
-            buckets: Arc::new(Mutex::new(HashMap::new())),
+            buckets,
         }
     }
 
-    async fn try_acquire(&self, key: &str) -> bool {
-        let mut buckets = self.buckets.lock().await;
+    fn try_acquire(&self, key: &str) -> bool {
         let now = Instant::now();
 
-        // Prune old entries periodically (every 1000 operations to avoid overhead)
-        // Remove entries whose window has expired by more than one window duration
-        if buckets.len() > 1000 {
-            let prune_before = now - self.window * 2;
-            buckets.retain(|_, state| state.start > prune_before);
-        }
-
-        let state = buckets.entry(key.to_string()).or_insert(RateWindow {
+        let mut state = self.buckets.entry(key.to_string()).or_insert(RateWindow {
             start: now,
             count: 0,
         });
@@ -427,7 +435,7 @@ async fn enforce_rate_limit(
     #[cfg(not(feature = "disable-rate-limits"))]
     {
         let client_key = extract_client_addr(&req, peer_addr, &trusted);
-        if limiter.try_acquire(&client_key).await {
+        if limiter.try_acquire(&client_key) {
             next.run(req).await
         } else {
             ApiError::service_unavailable("Too many requests").into_response()
