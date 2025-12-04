@@ -1,7 +1,9 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use prost::Message;
 use redgrouse::api_constants;
 use redgrouse::db;
 use redgrouse::filter::FilterGroup;
+use redgrouse::proto::pb;
 use redgrouse::sightings::SortField;
 use std::env;
 use std::io::Write;
@@ -143,9 +145,9 @@ async fn upload_csv(app: &axum::Router, csv_data: &[u8]) -> UploadResult {
     let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-    let upload_id = json["upload_id"].as_str().unwrap().to_string();
-    let edit_token = json["edit_token"].as_str().unwrap().to_string();
+    let upload_response = pb::UploadResponse::decode(&body_bytes[..]).unwrap();
+    let upload_id = upload_response.upload_id;
+    let edit_token = upload_response.edit_token;
 
     UploadResult {
         upload_id,
