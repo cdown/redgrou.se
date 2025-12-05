@@ -184,5 +184,6 @@ codes:
 - `429 Too Many Requests` - Rate limit exceeded
 - `503 Service Unavailable` - Request timeout
 
-Request timeouts are set to 30 seconds for all endpoints. Upload body timeouts
-are 60 seconds to accommodate slow connections.
+Request timeouts are set to 3 seconds for all endpoints except uploads.
+Upload requests have a 30 second timeout to accommodate large file uploads
+and processing.

@@ -39,9 +39,9 @@ const BUILD_DATE: &str = env!("BUILD_DATE");
 const RUSTC_VERSION: &str = env!("RUSTC_VERSION");
 
 /// Maximum time any request can take before being terminated.
-/// Applies to: All routes (tiles, sightings, uploads, metadata).
+/// Applies to: All routes except uploads (tiles, sightings, metadata).
 /// Heavy user estimate: N/A - this is a safety timeout, not a throughput limit.
-const GLOBAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const GLOBAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Maximum requests per IP address per minute.
 /// Applies to: All requests from a single IP (identified via CloudFront headers
@@ -65,8 +65,12 @@ const UPLOAD_RATE_PER_IP_PER_MINUTE: u64 = 3;
 
 /// Maximum time to receive the full request body for uploads.
 /// Applies to: POST /upload and PUT /single/{id} routes only.
-/// Heavy user estimate: A 200MB CSV over a slow connection might take 30-60s.
-const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(60);
+/// Heavy user estimate: A 200MB CSV over a slow connection might take 30s.
+const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Maximum time for upload requests (body + processing).
+/// Applies to: POST /upload and PUT /single/{id} routes only.
+const UPLOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Window duration for per-IP rate limiting (used with GLOBAL_RATE_LIMIT_PER_MINUTE).
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
@@ -101,8 +105,10 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let ingest_layer = ServiceBuilder::new()
+        .layer(HandleErrorLayer::new(handle_layer_error))
         .layer(RequestBodyLimitLayer::new(upload::MAX_UPLOAD_BODY_BYTES))
         .layer(RequestBodyTimeoutLayer::new(UPLOAD_BODY_TIMEOUT))
+        .timeout(UPLOAD_REQUEST_TIMEOUT)
         .into_inner();
 
     let upload_limiter = UploadLimiter::new(
