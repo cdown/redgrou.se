@@ -130,12 +130,12 @@ Returns paginated sightings. Default page size is 100, maximum is 500.
 ### Get vector tile
 
 ```
-GET /api/tiles/{upload_id}/{z}/{x}/{y}
+GET /api/tiles/{upload_id}/{z}/{x}/{y}[.pbf]
 ```
 
 Returns a Mapbox Vector Tile (MVT) in Protobuf format for the specified tile
-coordinates. Tiles are filtered based on query parameters (same as sightings
-endpoint).
+coordinates. The `.pbf` extension is optional. Tiles are filtered based on
+query parameters (same as sightings endpoint).
 
 **Response**: Binary Protobuf MVT data
 

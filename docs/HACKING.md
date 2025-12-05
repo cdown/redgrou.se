@@ -122,13 +122,13 @@ You can debug endpoints directly with curl:
 curl http://localhost:3001/health
 
 # Get upload metadata
-curl http://localhost:3001/api/single/{upload_id}
+curl http://localhost:3001/api/uploads/{upload_id}
 
 # Get sightings (paginated)
-curl "http://localhost:3001/api/single/{upload_id}/sightings?limit=10"
+curl "http://localhost:3001/api/uploads/{upload_id}/sightings?page=1&page_size=10"
 
 # Get filtered count
-curl "http://localhost:3001/api/single/{upload_id}/count?filter={json}"
+curl "http://localhost:3001/api/uploads/{upload_id}/count?filter={json}"
 
 # Get a tile
 curl http://localhost:3001/api/tiles/{upload_id}/5/16/12.pbf --output tile.pbf
