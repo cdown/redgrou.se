@@ -181,7 +181,8 @@ codes:
 - `401 Unauthorised` - Missing edit token
 - `403 Forbidden` - Invalid edit token
 - `404 Not Found` - Upload not found
-- `503 Service Unavailable` - Rate limit exceeded or request timeout
+- `429 Too Many Requests` - Rate limit exceeded
+- `503 Service Unavailable` - Request timeout
 
 Request timeouts are set to 30 seconds for all endpoints. Upload body timeouts
 are 60 seconds to accommodate slow connections.

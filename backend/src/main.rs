@@ -411,7 +411,7 @@ async fn enforce_upload_limit(
 
         let _guard = match limiter.try_start(&client_key).await {
             Ok(guard) => guard,
-            Err(msg) => return ApiError::service_unavailable(msg).into_response(),
+            Err(msg) => return ApiError::too_many_requests(msg).into_response(),
         };
 
         // Guard is automatically dropped when this function returns, releasing the slot.
@@ -438,7 +438,7 @@ async fn enforce_rate_limit(
         if limiter.try_acquire(&client_key) {
             next.run(req).await
         } else {
-            ApiError::service_unavailable("Too many requests").into_response()
+            ApiError::too_many_requests("Too many requests").into_response()
         }
     }
 }

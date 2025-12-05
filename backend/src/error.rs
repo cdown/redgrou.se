@@ -61,6 +61,10 @@ impl ApiError {
             "SERVICE_UNAVAILABLE",
         )
     }
+
+    pub fn too_many_requests(message: impl Into<String>) -> Self {
+        Self::with_code(StatusCode::TOO_MANY_REQUESTS, message, "TOO_MANY_REQUESTS")
+    }
 }
 
 impl IntoResponse for ApiError {
