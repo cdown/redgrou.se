@@ -29,7 +29,7 @@ recognised.
 - **Encoding**: UTF-8 or Windows-1252 (Excel CSV files are automatically
   handled)
 - **Headers**: First row must contain column names
-- **File size**: Maximum 200 MB
+- **File size**: Maximum 50 MB
 - **Row limit**: Maximum 250,000 rows per upload
 - **Column limit**: Maximum 256 columns per CSV
 - **Row size**: Maximum 8 KiB per row

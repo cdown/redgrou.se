@@ -57,7 +57,7 @@ and `edit_token`.
 
 **Rate limits**: 1 concurrent upload per IP, 3 uploads per minute per IP.
 
-**Size limits**: 200 MB maximum file size, 250,000 rows maximum.
+**Size limits**: 50 MB maximum file size, 250,000 rows maximum.
 
 ### Get upload metadata
 

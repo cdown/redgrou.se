@@ -65,7 +65,7 @@ const UPLOAD_RATE_PER_IP_PER_MINUTE: u64 = 3;
 
 /// Maximum time to receive the full request body for uploads.
 /// Applies to: POST /upload and PUT /single/{id} routes only.
-/// Heavy user estimate: A 200MB CSV over a slow connection might take 30s.
+/// Heavy user estimate: A 50MB CSV over a slow connection might take 30s.
 const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Maximum time for upload requests (body + processing).

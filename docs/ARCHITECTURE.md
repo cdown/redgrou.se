@@ -90,7 +90,7 @@ forwarding headers.
 
 ## Constraints
 
-- Maximum upload size is 200 MB, which is enforced at multipart parsing level
+- Maximum upload size is 50 MB, which is enforced at multipart parsing level
 - We also limit nesting depth and rule count to prevent DoS via expensive
   queries
 - There is no authentication, anyone with the upload URL can view things.

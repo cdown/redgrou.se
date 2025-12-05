@@ -20,7 +20,7 @@ use crate::error::ApiError;
 use crate::pipeline::{CsvParser, DbSink, Geocoder, BATCH_SIZE};
 use crate::proto::{pb, Proto};
 
-pub const MAX_UPLOAD_BYTES: usize = 200 * 1024 * 1024;
+pub const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 pub const MAX_UPLOAD_BODY_BYTES: usize = MAX_UPLOAD_BYTES + (2 * 1024 * 1024); // allow multipart overhead
 const UPLOAD_LIMIT_MB: usize = MAX_UPLOAD_BYTES / (1024 * 1024);
 

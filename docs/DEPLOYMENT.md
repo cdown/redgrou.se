@@ -124,6 +124,6 @@ your-domain.com {
 
 - Edit tokens are stored as SHA256 hashes in the database
 - Rate limiting prevents abuse without penalising legitimate users
-- Maximum upload size (200 MB) and row limits (250,000) prevent DoS attacks
+- Maximum upload size (50 MB) and row limits (250,000) prevent DoS attacks
 - Filter nesting depth is limited to prevent expensive queries
 - No authentication is required for viewing data (by design)
