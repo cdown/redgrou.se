@@ -473,14 +473,14 @@ fn benchmark_filtered_count(c: &mut Criterion) {
     let csv_data = generate_csv(5000);
     let upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
-    // Create a filter using country_code (doesn't require species JOIN)
+    // Create a filter: common_name contains "Robin"
     let filter = FilterGroup {
         combinator: redgrouse::filter::Combinator::And,
         rules: vec![redgrouse::filter::Rule::Condition(
             redgrouse::filter::Condition {
-                field: redgrouse::filter::FilterField::CountryCode,
-                operator: redgrouse::filter::Operator::Eq,
-                value: redgrouse::filter::FilterValue::String("GB".to_string()),
+                field: redgrouse::filter::FilterField::CommonName,
+                operator: redgrouse::filter::Operator::Contains,
+                value: redgrouse::filter::FilterValue::String("Robin".to_string()),
             },
         )],
     };
@@ -511,7 +511,10 @@ fn benchmark_filtered_count(c: &mut Criterion) {
                     .await
                     .unwrap();
                 let error_text = String::from_utf8_lossy(&body_bytes);
-                panic!("Count request failed with status {}: {}", status, error_text);
+                panic!(
+                    "Count request failed with status {}: {}",
+                    status, error_text
+                );
             }
             let _body = axum::body::to_bytes(response.into_body(), usize::MAX)
                 .await

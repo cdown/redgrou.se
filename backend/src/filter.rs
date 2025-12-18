@@ -117,6 +117,22 @@ impl FilterGroup {
         validate_group(self, 1, &mut stats)
     }
 
+    pub fn needs_species_join(&self) -> bool {
+        fn check_rule(rule: &Rule) -> bool {
+            match rule {
+                Rule::Condition(c) => {
+                    matches!(
+                        c.field,
+                        FilterField::CommonName | FilterField::ScientificName
+                    )
+                }
+                Rule::Group(g) => g.needs_species_join(),
+            }
+        }
+
+        self.rules.iter().any(check_rule)
+    }
+
     pub fn to_sql(&self, params: &mut Vec<String>) -> Option<String> {
         if self.rules.is_empty() {
             return None;
