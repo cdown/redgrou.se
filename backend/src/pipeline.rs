@@ -56,7 +56,7 @@ pub struct ProcessedSighting {
     pub sighting_uuid: Uuid,
     // Species names stored temporarily for lookup, then converted to species_id
     pub common_name: SString,
-    pub scientific_name: Option<SString>,
+    pub scientific_name: SString,
     // Species ID (looked up before insertion)
     pub species_id: Option<i64>,
     pub country_code: SString,
@@ -250,7 +250,7 @@ impl Geocoder {
                 ProcessedSighting {
                     sighting_uuid,
                     common_name: sighting.common_name.into(),
-                    scientific_name: sighting.scientific_name.map(Into::into),
+                    scientific_name: sighting.scientific_name.unwrap_or_default().into(),
                     species_id: None, // Will be looked up before insertion
                     count: sighting.count,
                     latitude: sighting.latitude,
@@ -333,11 +333,10 @@ impl DbSink {
             // and compute tick flags
             for sighting in &mut self.batch {
                 if sighting.species_id.is_none() {
-                    let scientific_name_str = sighting.scientific_name.as_deref();
                     match get_or_insert_species(
                         &mut *conn,
                         &sighting.common_name,
-                        scientific_name_str,
+                        &sighting.scientific_name,
                     )
                     .await
                     {
@@ -420,15 +419,14 @@ impl DbSink {
 async fn get_or_insert_species(
     executor: &mut sqlx::SqliteConnection,
     common_name: &str,
-    scientific_name: Option<&str>,
+    scientific_name: &str,
 ) -> Result<i64, DbQueryError> {
     // Try to get existing species first
     let existing_id: Option<i64> = db::query_with_timeout(
         sqlx::query_scalar::<_, i64>(
-            "SELECT id FROM species WHERE common_name = ? AND (scientific_name = ? OR (scientific_name IS NULL AND ? IS NULL))"
+            "SELECT id FROM species WHERE common_name = ? AND scientific_name = ?",
         )
         .bind(common_name)
-        .bind(scientific_name)
         .bind(scientific_name)
         .fetch_optional(&mut *executor),
     )
@@ -457,10 +455,9 @@ async fn get_or_insert_species(
             // Fall back to SELECT
             db::query_with_timeout(
                 sqlx::query_scalar::<_, i64>(
-                    "SELECT id FROM species WHERE common_name = ? AND (scientific_name = ? OR (scientific_name IS NULL AND ? IS NULL))"
+                    "SELECT id FROM species WHERE common_name = ? AND scientific_name = ?",
                 )
                 .bind(common_name)
-                .bind(scientific_name)
                 .bind(scientific_name)
                 .fetch_optional(&mut *executor),
             )
@@ -474,10 +471,9 @@ async fn get_or_insert_species(
             // Another thread inserted it, so fetch the existing one
             db::query_with_timeout(
                 sqlx::query_scalar::<_, i64>(
-                    "SELECT id FROM species WHERE common_name = ? AND (scientific_name = ? OR (scientific_name IS NULL AND ? IS NULL))"
+                    "SELECT id FROM species WHERE common_name = ? AND scientific_name = ?",
                 )
                 .bind(common_name)
-                .bind(scientific_name)
                 .bind(scientific_name)
                 .fetch_optional(&mut *executor),
             )

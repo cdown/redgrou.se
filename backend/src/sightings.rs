@@ -79,7 +79,7 @@ async fn build_name_index(
         species_id_to_index.insert(species.id, index);
         name_index.push(pb::Species {
             common_name: species.common_name.clone(),
-            scientific_name: species.scientific_name.clone(),
+            scientific_name: Some(species.scientific_name.clone()),
         });
     }
 
@@ -153,7 +153,7 @@ pub struct Sighting {
 pub struct SpeciesRow {
     pub id: i64,
     pub common_name: String,
-    pub scientific_name: Option<String>,
+    pub scientific_name: String,
 }
 
 #[derive(Debug)]
@@ -225,7 +225,8 @@ fn decode_cursor(cursor_str: &str) -> Result<Cursor, ApiError> {
 }
 
 fn wrap_nullable_sort_column(sort_field: &str) -> String {
-    if sort_field == "sp.scientific_name" || sort_field == "s.country_code" {
+    // country_code is still nullable, so wrap it in COALESCE for consistent NULL handling
+    if sort_field == "s.country_code" {
         format!("COALESCE({}, '')", sort_field)
     } else {
         sort_field.to_string()
@@ -528,7 +529,7 @@ pub async fn get_sightings(
     }
 
     // Always select sort_value to generate next_cursor, even for OFFSET pagination
-    // Wrap nullable columns in COALESCE to match cursor logic (NULL -> '')
+    // Wrap nullable columns (country_code) in COALESCE to match cursor logic (NULL -> '')
     let sort_field_for_select = wrap_nullable_sort_column(&sort_field);
     let sort_field_for_order = wrap_nullable_sort_column(&sort_field);
     let select_sql = if use_keyset {
