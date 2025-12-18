@@ -1,4 +1,5 @@
 use axum::extract::{Path, Query, State};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, SqlitePool};
 use uuid::Uuid;
@@ -133,6 +134,7 @@ pub struct SightingsQuery {
     lifers_only: Option<bool>,
     year_tick_year: Option<i32>,
     country_tick_country: Option<String>,
+    cursor: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -196,6 +198,38 @@ impl From<i64> for TotalCount {
 
 fn calculate_total_pages(total: TotalCount, page_size: PageSize) -> u32 {
     ((total.0 as f64) / (f64::from(page_size.0))).ceil() as u32
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Cursor {
+    sort_value: String,
+    id: i64,
+}
+
+fn encode_cursor(sort_value: &str, id: i64) -> String {
+    let cursor = Cursor {
+        sort_value: sort_value.to_string(),
+        id,
+    };
+    let json = serde_json::to_string(&cursor).unwrap();
+    URL_SAFE_NO_PAD.encode(json.as_bytes())
+}
+
+fn decode_cursor(cursor_str: &str) -> Result<Cursor, ApiError> {
+    let decoded = URL_SAFE_NO_PAD
+        .decode(cursor_str)
+        .map_err(|_| ApiError::bad_request("Invalid cursor format"))?;
+    let json =
+        String::from_utf8(decoded).map_err(|_| ApiError::bad_request("Invalid cursor encoding"))?;
+    serde_json::from_str(&json).map_err(|_| ApiError::bad_request("Invalid cursor data"))
+}
+
+fn wrap_nullable_sort_column(sort_field: &str) -> String {
+    if sort_field == "sp.scientific_name" || sort_field == "s.country_code" {
+        format!("COALESCE({}, '')", sort_field)
+    } else {
+        sort_field.to_string()
+    }
 }
 
 fn validate_group_by_fields(fields: &[String]) -> Result<Vec<String>, ApiError> {
@@ -442,6 +476,7 @@ pub async fn get_sightings(
             page,
             page_size,
             total_pages,
+            next_cursor: None,
         }));
     }
 
@@ -452,6 +487,7 @@ pub async fn get_sightings(
         .to_string();
 
     let sort_dir = parse_sort_direction(query.sort_dir.as_ref());
+    let is_asc = sort_dir == "ASC";
 
     let count_sql = format!(
         "SELECT COUNT(*) FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ?{}",
@@ -467,28 +503,102 @@ pub async fn get_sightings(
         .await
         .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
-    let select_sql = format!(
-        r"SELECT s.id, s.species_id, s.count, s.latitude, s.longitude,
-            s.country_code, s.region_code, s.observed_at
-            FROM sightings s
-            JOIN species sp ON s.species_id = sp.id
-            WHERE s.upload_id = ?{}
-            ORDER BY {} {}
-            LIMIT ? OFFSET ?",
-        filter_result.filter_clause, sort_field, sort_dir
-    );
+    let use_keyset = query.cursor.is_some();
+    let mut keyset_clause = String::new();
+    let mut cursor_value: Option<String> = None;
+    let mut cursor_id: Option<i64> = None;
+
+    if use_keyset {
+        let cursor = decode_cursor(
+            query
+                .cursor
+                .as_ref()
+                .expect("cursor should be Some if use_keyset is true"),
+        )?;
+        cursor_value = Some(cursor.sort_value);
+        cursor_id = Some(cursor.id);
+
+        let comparison_op = if is_asc { ">" } else { "<" };
+        let sort_field_sql = wrap_nullable_sort_column(&sort_field);
+        let sort_value_placeholder = format!("({}, s.id) {} (?, ?)", sort_field_sql, comparison_op);
+        keyset_clause = format!(" AND {}", sort_value_placeholder);
+    }
+
+    // Always select sort_value to generate next_cursor, even for OFFSET pagination
+    // Wrap nullable columns in COALESCE to match cursor logic (NULL -> '')
+    let sort_field_for_select = wrap_nullable_sort_column(&sort_field);
+    let sort_field_for_order = wrap_nullable_sort_column(&sort_field);
+    let select_sql = if use_keyset {
+        format!(
+            r"SELECT s.id, s.species_id, s.count, s.latitude, s.longitude,
+                s.country_code, s.region_code, s.observed_at, {} as sort_value
+                FROM sightings s
+                JOIN species sp ON s.species_id = sp.id
+                WHERE s.upload_id = ?{}{}
+                ORDER BY {} {}
+                LIMIT ?",
+            sort_field_for_select,
+            filter_result.filter_clause,
+            keyset_clause,
+            sort_field_for_order,
+            sort_dir
+        )
+    } else {
+        format!(
+            r"SELECT s.id, s.species_id, s.count, s.latitude, s.longitude,
+                s.country_code, s.region_code, s.observed_at, {} as sort_value
+                FROM sightings s
+                JOIN species sp ON s.species_id = sp.id
+                WHERE s.upload_id = ?{}
+                ORDER BY {} {}
+                LIMIT ? OFFSET ?",
+            sort_field_for_select, filter_result.filter_clause, sort_field_for_order, sort_dir
+        )
+    };
 
     let mut select_query = bind_filter_params!(
-        sqlx::query_as::<_, Sighting>(&select_sql),
+        sqlx::query(&select_sql),
         &upload_uuid.as_bytes()[..],
         &filter_result.params
     );
-    select_query = select_query.bind(i64::from(page_size));
-    select_query = select_query.bind(offset_i64);
 
-    let sightings = db::query_with_timeout(select_query.fetch_all(&pool))
+    if use_keyset {
+        let cursor_val = cursor_value.as_ref().expect("cursor_value should be set");
+        let cursor_id_val = cursor_id.expect("cursor_id should be set");
+        select_query = select_query.bind(cursor_val);
+        select_query = select_query.bind(cursor_id_val);
+        select_query = select_query.bind(i64::from(page_size));
+    } else {
+        select_query = select_query.bind(i64::from(page_size));
+        select_query = select_query.bind(offset_i64);
+    }
+
+    let rows = db::query_with_timeout(select_query.fetch_all(&pool))
         .await
         .map_err(|e| e.into_api_error("loading sightings", "Database error"))?;
+
+    let mut sightings = Vec::new();
+    let mut next_cursor: Option<String> = None;
+
+    for row in rows {
+        let sighting = Sighting {
+            id: row.get(0),
+            species_id: row.get(1),
+            count: row.get(2),
+            latitude: row.get(3),
+            longitude: row.get(4),
+            country_code: row.get(5),
+            region_code: row.get(6),
+            observed_at: row.get(7),
+        };
+        sightings.push(sighting);
+
+        // Always generate next_cursor from the last row
+        let sort_val: Option<String> = row.try_get(8).ok();
+        let id: i64 = row.get(0);
+        let sort_val_str = sort_val.unwrap_or_else(|| String::from(""));
+        next_cursor = Some(encode_cursor(&sort_val_str, id));
+    }
 
     let total_pages = calculate_total_pages(TotalCount(total), PageSize::from(page_size));
 
@@ -507,5 +617,6 @@ pub async fn get_sightings(
         page,
         page_size,
         total_pages,
+        next_cursor,
     }))
 }

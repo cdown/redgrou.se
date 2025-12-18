@@ -98,6 +98,7 @@ export interface SightingsResponse {
   page: number;
   pageSize: number;
   totalPages: number;
+  nextCursor?: string | undefined;
 }
 
 export interface VersionInfo {
@@ -1062,7 +1063,16 @@ export const GroupedSighting: MessageFns<GroupedSighting> = {
 };
 
 function createBaseSightingsResponse(): SightingsResponse {
-  return { nameIndex: [], sightings: [], groups: [], total: 0, page: 0, pageSize: 0, totalPages: 0 };
+  return {
+    nameIndex: [],
+    sightings: [],
+    groups: [],
+    total: 0,
+    page: 0,
+    pageSize: 0,
+    totalPages: 0,
+    nextCursor: undefined,
+  };
 }
 
 export const SightingsResponse: MessageFns<SightingsResponse> = {
@@ -1087,6 +1097,9 @@ export const SightingsResponse: MessageFns<SightingsResponse> = {
     }
     if (message.totalPages !== 0) {
       writer.uint32(56).uint32(message.totalPages);
+    }
+    if (message.nextCursor !== undefined) {
+      writer.uint32(66).string(message.nextCursor);
     }
     return writer;
   },
@@ -1154,6 +1167,14 @@ export const SightingsResponse: MessageFns<SightingsResponse> = {
           message.totalPages = reader.uint32();
           continue;
         }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.nextCursor = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1175,6 +1196,7 @@ export const SightingsResponse: MessageFns<SightingsResponse> = {
     message.page = object.page ?? 0;
     message.pageSize = object.pageSize ?? 0;
     message.totalPages = object.totalPages ?? 0;
+    message.nextCursor = object.nextCursor ?? undefined;
     return message;
   },
 };

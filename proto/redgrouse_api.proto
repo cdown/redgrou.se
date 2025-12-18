@@ -91,6 +91,7 @@ message SightingsResponse {
   uint32 page = 5;
   uint32 page_size = 6;
   uint32 total_pages = 7;
+  optional string next_cursor = 8;
 }
 
 message VersionInfo {

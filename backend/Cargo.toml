@@ -41,6 +41,7 @@ urlencoding = "2"
 prost = "0.14"
 bytes = "1"
 dashmap = "6"
+base64 = "0.22"
 
 [build-dependencies]
 chrono = "0.4"
