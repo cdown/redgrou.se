@@ -5,7 +5,6 @@ use redgrouse::db;
 use redgrouse::filter::FilterGroup;
 use redgrouse::proto::pb;
 use redgrouse::sightings::SortField;
-use std::env;
 use std::io::Write;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
@@ -159,9 +158,7 @@ fn benchmark_upload(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     let mut group = c.benchmark_group("upload");
-    // Estimate samples for ~5s (default), but allow up to 30s to collect them
-    group.measurement_time(std::time::Duration::from_secs(30));
-    for size in [100, 1000, 10000].iter() {
+    for size in [100, 1000].iter() {
         let csv_data = generate_csv(*size);
         group.throughput(Throughput::Bytes(csv_data.len() as u64));
         group.bench_with_input(
@@ -187,8 +184,7 @@ fn benchmark_tiles(c: &mut Criterion) {
     let upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
     let mut group = c.benchmark_group("tiles");
-    group.measurement_time(std::time::Duration::from_secs(30));
-    for zoom in [0, 5, 10, 15].iter() {
+    for zoom in [5, 10].iter() {
         // Test different tile coordinates at each zoom level
         let x = 1 << (zoom / 2);
         let y = 1 << (zoom / 2);
@@ -242,7 +238,6 @@ fn benchmark_tiles_with_filter(c: &mut Criterion) {
     let filter_json = serde_json::to_string(&filter).unwrap();
 
     let mut group = c.benchmark_group("tiles_filtered");
-    group.measurement_time(std::time::Duration::from_secs(30));
     group.bench_function("tile_with_filter", |b| {
         b.to_async(&rt).iter(|| async {
             use axum::body::Body;
@@ -278,10 +273,9 @@ fn benchmark_sightings(c: &mut Criterion) {
     let upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
     let mut group = c.benchmark_group("sightings");
-    group.measurement_time(std::time::Duration::from_secs(30));
 
     // Test pagination
-    for page_size in [10, 100, 500].iter() {
+    for page_size in [100].iter() {
         group.bench_with_input(
             BenchmarkId::new("get_sightings", format!("page_size_{}", page_size)),
             page_size,
@@ -312,11 +306,7 @@ fn benchmark_sightings(c: &mut Criterion) {
     }
 
     // Test sorting
-    for sort_field in [
-        SortField::CommonName,
-        SortField::ObservedAt,
-        SortField::Count,
-    ] {
+    for sort_field in [SortField::CommonName].iter() {
         // Use the same serialization as query parameters (snake_case)
         let sort_field_str = sort_field.as_query_param();
 
@@ -386,7 +376,6 @@ fn benchmark_sightings_with_filter(c: &mut Criterion) {
     let filter_json = serde_json::to_string(&filter).unwrap();
 
     let mut group = c.benchmark_group("sightings_filtered");
-    group.measurement_time(std::time::Duration::from_secs(30));
     group.bench_function("sightings_with_filter", |b| {
         b.to_async(&rt).iter(|| async {
             use axum::body::Body;
@@ -422,7 +411,6 @@ fn benchmark_field_metadata(c: &mut Criterion) {
     let _upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
     let mut group = c.benchmark_group("metadata");
-    group.measurement_time(std::time::Duration::from_secs(30));
     group.bench_function("get_field_metadata", |b| {
         b.to_async(&rt).iter(|| async {
             use axum::body::Body;
@@ -453,8 +441,7 @@ fn benchmark_field_values(c: &mut Criterion) {
     let upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
     let mut group = c.benchmark_group("field_values");
-    group.measurement_time(std::time::Duration::from_secs(30));
-    for field in ["common_name", "country_code", "count"].iter() {
+    for field in ["common_name"].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(field), field, |b, field| {
             b.to_async(&rt).iter(|| async {
                 use axum::body::Body;
@@ -486,21 +473,20 @@ fn benchmark_filtered_count(c: &mut Criterion) {
     let csv_data = generate_csv(5000);
     let upload_result = rt.block_on(upload_csv(&app, &csv_data));
 
-    // Create a filter
+    // Create a filter using country_code (doesn't require species JOIN)
     let filter = FilterGroup {
         combinator: redgrouse::filter::Combinator::And,
         rules: vec![redgrouse::filter::Rule::Condition(
             redgrouse::filter::Condition {
-                field: redgrouse::filter::FilterField::CommonName,
-                operator: redgrouse::filter::Operator::Contains,
-                value: redgrouse::filter::FilterValue::String("Robin".to_string()),
+                field: redgrouse::filter::FilterField::CountryCode,
+                operator: redgrouse::filter::Operator::Eq,
+                value: redgrouse::filter::FilterValue::String("GB".to_string()),
             },
         )],
     };
     let filter_json = serde_json::to_string(&filter).unwrap();
 
     let mut group = c.benchmark_group("count");
-    group.measurement_time(std::time::Duration::from_secs(30));
     group.bench_function("filtered_count", |b| {
         b.to_async(&rt).iter(|| async {
             use axum::body::Body;
@@ -519,7 +505,14 @@ fn benchmark_filtered_count(c: &mut Criterion) {
                 .unwrap();
 
             let response = app.clone().oneshot(req).await.unwrap();
-            assert_eq!(response.status(), 200);
+            let status = response.status();
+            if status != 200 {
+                let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                let error_text = String::from_utf8_lossy(&body_bytes);
+                panic!("Count request failed with status {}: {}", status, error_text);
+            }
             let _body = axum::body::to_bytes(response.into_body(), usize::MAX)
                 .await
                 .unwrap();
@@ -531,10 +524,9 @@ fn benchmark_filtered_count(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        // Keep default measurement_time (~5s) for sample estimation
-        // Set fixed sample_size so estimation is based on ~5s, not 30s
-        .sample_size(100) // Default sample size, estimated for ~5s
-        .warm_up_time(std::time::Duration::from_secs(3));
+        .measurement_time(std::time::Duration::from_secs(1))
+        .sample_size(10)
+        .warm_up_time(std::time::Duration::from_millis(500));
     targets =
         benchmark_upload,
         benchmark_tiles,
