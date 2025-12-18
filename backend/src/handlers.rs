@@ -70,12 +70,15 @@ pub async fn get_filtered_count(
     };
 
     let filter_result = build_filter_clause(
+        Some(&pool),
+        Some(&upload_uuid.as_bytes()[..]),
         query.filter.as_ref(),
         query.lifers_only,
         query.year_tick_year,
         query.country_tick_country.as_ref(),
         None,
-    )?;
+    )
+    .await?;
 
     let mut filter_clause = filter_result.filter_clause;
     if needs_join {

@@ -630,6 +630,68 @@ fn benchmark_filtered_count(c: &mut Criterion) {
     group.finish();
 }
 
+fn benchmark_tick_filtering(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    let (app, _temp_dir, _db_url) = rt.block_on(setup_test_server());
+    let csv_data = generate_csv(5000);
+    let upload_result = rt.block_on(upload_csv(&app, &csv_data));
+
+    let mut group = c.benchmark_group("tick_filtering");
+
+    // Benchmark lifers_only filter
+    group.bench_function("lifers_only", |b| {
+        b.to_async(&rt).iter(|| async {
+            use axum::body::Body;
+            use axum::http::Request;
+            use tower::ServiceExt;
+
+            let uri = format!(
+                "/api/uploads/{}/count?lifers_only=true",
+                upload_result.upload_id
+            );
+            let req = Request::builder()
+                .method("GET")
+                .uri(&uri)
+                .body(Body::empty())
+                .unwrap();
+
+            let response = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(response.status(), 200);
+            let _body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+        });
+    });
+
+    // Benchmark year_tick filter
+    group.bench_function("year_tick", |b| {
+        b.to_async(&rt).iter(|| async {
+            use axum::body::Body;
+            use axum::http::Request;
+            use tower::ServiceExt;
+
+            let uri = format!(
+                "/api/uploads/{}/count?year_tick_year=2024",
+                upload_result.upload_id
+            );
+            let req = Request::builder()
+                .method("GET")
+                .uri(&uri)
+                .body(Body::empty())
+                .unwrap();
+
+            let response = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(response.status(), 200);
+            let _body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+        });
+    });
+
+    group.finish();
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default()
@@ -644,6 +706,7 @@ criterion_group! {
         benchmark_sightings_with_filter,
         benchmark_field_metadata,
         benchmark_field_values,
-        benchmark_filtered_count
+        benchmark_filtered_count,
+        benchmark_tick_filtering
 }
 criterion_main!(benches);

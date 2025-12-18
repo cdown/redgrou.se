@@ -658,16 +658,19 @@ async fn get_bbox(
     Path(upload_id): Path<String>,
     Query(query): Query<CountQuery>,
 ) -> Result<Proto<pb::BboxResponse>, ApiError> {
+    let upload_uuid = uuid::Uuid::parse_str(&upload_id)
+        .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
+
     let filter_result = build_filter_clause(
+        Some(&pool),
+        Some(&upload_uuid.as_bytes()[..]),
         query.filter.as_ref(),
         query.lifers_only,
         query.year_tick_year,
         query.country_tick_country.as_ref(),
         None,
-    )?;
-
-    let upload_uuid = uuid::Uuid::parse_str(&upload_id)
-        .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
+    )
+    .await?;
 
     let sql = format!(
         "SELECT MIN(longitude) as min_lng, MIN(latitude) as min_lat, MAX(longitude) as max_lng, MAX(latitude) as max_lat FROM sightings WHERE upload_id = ?{}",

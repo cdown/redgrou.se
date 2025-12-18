@@ -1,5 +1,7 @@
+use crate::bitmaps;
 use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
+use roaring::RoaringBitmap;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::convert::TryFrom;
@@ -410,7 +412,10 @@ pub struct FilterClauseResult {
 
 /// Builds filter SQL clause and parameters from query options.
 /// Returns filter_clause (a string like " AND (...)" or empty string) and params.
-pub fn build_filter_clause(
+/// If pool and upload_id are provided, uses Roaring bitmaps for tick filtering when available.
+pub async fn build_filter_clause(
+    pool: Option<&SqlitePool>,
+    upload_id_blob: Option<&[u8]>,
     filter_json: Option<&String>,
     lifers_only: Option<bool>,
     year_tick_year: Option<i32>,
@@ -426,24 +431,129 @@ pub fn build_filter_clause(
         None
     };
 
-    let mut tick_filters = TickFilters::new();
-    if lifers_only == Some(true) {
-        tick_filters.add_lifers_only(table_prefix);
+    // Try to use bitmaps if available, otherwise fall back to SQL clauses
+    // Load all relevant bitmaps and intersect them for combined filters
+    let mut final_bitmap: Option<RoaringBitmap> = None;
+    let mut use_bitmap_optimization = false;
+
+    if let (Some(p), Some(upload_id)) = (pool, upload_id_blob) {
+        // 1. Load lifer bitmap if requested
+        if lifers_only == Some(true) {
+            if let Ok(Some(bitmap)) = bitmaps::load_bitmap(p, upload_id, "lifer", None).await {
+                final_bitmap = Some(bitmap);
+                use_bitmap_optimization = true;
+            } else {
+                // Bitmap missing but requested - fall back to SQL for consistency
+                use_bitmap_optimization = false;
+            }
+        }
+
+        // 2. Load year tick bitmap if requested and intersect with existing bitmap
+        if let Some(year) = year_tick_year {
+            if let Ok(Some(bitmap)) =
+                bitmaps::load_bitmap(p, upload_id, "year_tick", Some(&year.to_string())).await
+            {
+                match final_bitmap {
+                    Some(ref mut existing) => {
+                        *existing &= bitmap; // Intersect bitmaps
+                        use_bitmap_optimization = true;
+                    }
+                    None => {
+                        final_bitmap = Some(bitmap);
+                        use_bitmap_optimization = true;
+                    }
+                }
+            } else if use_bitmap_optimization {
+                // Year tick requested but bitmap missing - abort optimization
+                use_bitmap_optimization = false;
+                final_bitmap = None;
+            }
+        }
+
+        // 3. Load country tick bitmap if requested and intersect with existing bitmap
+        if let Some(country) = country_tick_country {
+            if let Ok(Some(bitmap)) =
+                bitmaps::load_bitmap(p, upload_id, "country_tick", Some(country)).await
+            {
+                match final_bitmap {
+                    Some(ref mut existing) => {
+                        *existing &= bitmap; // Intersect bitmaps
+                        use_bitmap_optimization = true;
+                    }
+                    None => {
+                        final_bitmap = Some(bitmap);
+                        use_bitmap_optimization = true;
+                    }
+                }
+            } else if use_bitmap_optimization {
+                // Country tick requested but bitmap missing - abort optimization
+                use_bitmap_optimization = false;
+                final_bitmap = None;
+            }
+        }
     }
-    if let Some(year) = year_tick_year {
-        tick_filters.add_year_tick(year, table_prefix);
+
+    // Use bitmap optimization only if we have a bitmap and it's not too large for SQLite
+    // SQLite has a limit on bind parameters (SQLITE_MAX_VARIABLE_NUMBER, typically 32,766)
+    // We use a conservative limit of 30,000 to be safe
+    const SQLITE_SAFE_PARAM_LIMIT: u64 = 30_000;
+
+    if use_bitmap_optimization {
+        if let Some(bitmap) = final_bitmap {
+            let bitmap_len = bitmap.len();
+            if bitmap_len < SQLITE_SAFE_PARAM_LIMIT {
+                // Use bitmap: extract IDs and use SQL IN clause
+                let ids: Vec<u32> = bitmap.iter().collect();
+                if !ids.is_empty() {
+                    let prefix = table_prefix.map(|p| format!("{p}.")).unwrap_or_default();
+                    let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
+                    let clause = format!(" AND {prefix}id IN ({})", placeholders.join(", "));
+                    for id in ids {
+                        params.push(id.to_string());
+                    }
+                    filter_clause = Some(match filter_clause {
+                        Some(existing) => format!("{existing}{clause}"),
+                        None => clause.trim_start_matches(" AND ").to_string(),
+                    });
+                } else {
+                    // Empty bitmap means no matches - add impossible condition
+                    let prefix = table_prefix.map(|p| format!("{p}.")).unwrap_or_default();
+                    let clause = format!(" AND {prefix}id IS NULL"); // Always false
+                    filter_clause = Some(match filter_clause {
+                        Some(existing) => format!("{existing}{clause}"),
+                        None => clause.trim_start_matches(" AND ").to_string(),
+                    });
+                }
+            } else {
+                // Bitmap too large for SQLite IN clause - fall back to SQL
+                use_bitmap_optimization = false;
+            }
+        } else {
+            use_bitmap_optimization = false;
+        }
     }
-    if let Some(country) = country_tick_country {
-        tick_filters.add_country_tick(country, table_prefix);
-    }
-    let tick_parts = tick_filters.into_parts();
-    params.extend(tick_parts.params);
-    if !tick_parts.clauses.is_empty() {
-        let clause_str = format!(" {}", tick_parts.clauses.join(" "));
-        filter_clause = Some(match filter_clause {
-            Some(existing) => format!("{existing}{clause_str}"),
-            None => clause_str.trim_start_matches(" ").to_string(),
-        });
+
+    if !use_bitmap_optimization {
+        // Fall back to SQL clauses (bitmap not available or not using bitmaps)
+        let mut tick_filters = TickFilters::new();
+        if lifers_only == Some(true) {
+            tick_filters.add_lifers_only(table_prefix);
+        }
+        if let Some(year) = year_tick_year {
+            tick_filters.add_year_tick(year, table_prefix);
+        }
+        if let Some(country) = country_tick_country {
+            tick_filters.add_country_tick(country, table_prefix);
+        }
+        let tick_parts = tick_filters.into_parts();
+        params.extend(tick_parts.params);
+        if !tick_parts.clauses.is_empty() {
+            let clause_str = format!(" {}", tick_parts.clauses.join(" "));
+            filter_clause = Some(match filter_clause {
+                Some(existing) => format!("{existing}{clause_str}"),
+                None => clause_str.trim_start_matches(" ").to_string(),
+            });
+        }
     }
 
     Ok(FilterClauseResult {

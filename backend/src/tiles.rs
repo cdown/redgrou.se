@@ -193,12 +193,15 @@ pub async fn get_tile(
     }
 
     let filter_result = build_filter_clause(
+        Some(&pool),
+        Some(&upload_uuid.as_bytes()[..]),
         query.filter.as_ref(),
         query.lifers_only,
         query.year_tick_year,
         query.country_tick_country.as_ref(),
         Some("s"),
-    )?;
+    )
+    .await?;
 
     // Use vis_rank-based sampling for efficient tile generation.
     // vis_rank is assigned at ingest time (0-MAX_VIS_RANK, where 0 = highest priority for lifers/year_ticks).

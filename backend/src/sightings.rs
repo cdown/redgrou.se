@@ -271,12 +271,15 @@ pub async fn get_sightings(
 
     // Collect filter params separately so upload_id stays first and field names remain enum-whitelisted.
     let filter_result = build_filter_clause(
+        Some(&pool),
+        Some(&upload_uuid.as_bytes()[..]),
         query.filter.as_ref(),
         query.lifers_only,
         query.year_tick_year,
         query.country_tick_country.as_ref(),
         None,
-    )?;
+    )
+    .await?;
 
     if let Some(group_by_str) = &query.group_by {
         let group_by_fields: Vec<String> =

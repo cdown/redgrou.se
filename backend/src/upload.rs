@@ -304,6 +304,12 @@ pub async fn upload_csv(
             e.log("computing grid cell visibility");
         }
 
+        // Compute and store Roaring bitmaps for efficient tick filtering
+        if let Err(e) = crate::bitmaps::compute_and_store_bitmaps(&pool, &upload_id_blob[..]).await
+        {
+            error!("Failed to compute tick bitmaps: {}", e.body.error);
+        }
+
         info!(
             "Upload complete: {} rows from {} (upload_id: {})",
             total_rows, filename, upload_id
@@ -508,6 +514,12 @@ pub async fn update_csv(
 
         if let Err(e) = compute_grid_cell_visibility(&pool, &upload_id_blob[..]).await {
             e.log("computing grid cell visibility");
+        }
+
+        // Compute and store Roaring bitmaps for efficient tick filtering
+        if let Err(e) = crate::bitmaps::compute_and_store_bitmaps(&pool, &upload_id_blob[..]).await
+        {
+            error!("Failed to compute tick bitmaps: {}", e.body.error);
         }
 
         invalidate_upload_cache(&upload_id).await;
