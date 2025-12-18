@@ -62,9 +62,11 @@ mode disallows `DATETIME`). In practice that's not a problem.
 
 The key tables are:
 
-- uploads - Metadata for each CSV upload (id, filename, row_count)
+- uploads - Metadata for each CSV upload (id, filename, row_count, display_name)
 - sightings - Individual bird sightings with location, taxonomy, and metadata
 - sightings_geo - R-tree virtual table for spatial queries
+- species - Species lookup table (common_name, scientific_name)
+- tick_bitmaps - Roaring Bitmap storage for efficient tick filtering
 
 Indices are tuned for tile generation (we have a covering index on upload_id +
 coordinates) and filtering (we have a lookup index on common fields).

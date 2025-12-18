@@ -17,7 +17,7 @@ Your CSV must include these columns (case-sensitive):
 
 These columns are recognised but not required:
 
-- `scientificName` - Scientific name of the species
+- `scientificName` - Scientific name of the species (defaults to empty string if missing)
 - `count` - Number of individuals observed (defaults to 1 if missing)
 
 Any other columns in your CSV are ignored. The parser is case-sensitive, so
