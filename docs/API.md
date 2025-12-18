@@ -65,9 +65,23 @@ and `edit_token`.
 GET /api/uploads/{upload_id}
 ```
 
-Returns metadata for a specific upload including filename and row count.
+Returns metadata for a specific upload including filename, row count, and display name.
 
-**Response**: `UploadMetadata`
+**Response**: `UploadMetadata` containing `upload_id`, `filename`, `row_count`, and `title` (display name or filename if no display name is set).
+
+### Rename upload
+
+```
+PATCH /api/uploads/{upload_id}
+Authorization: Bearer <edit_token>
+Content-Type: application/json
+```
+
+Updates the display name for an upload. Requires the edit token.
+
+**Request body**: JSON object with `display_name` field (string, 1-128 characters).
+
+**Response**: `UploadMetadata` containing updated metadata including the new title.
 
 ### Update upload
 
