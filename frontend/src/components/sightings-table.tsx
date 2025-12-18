@@ -29,6 +29,7 @@ import {
   MultiComboboxOption,
 } from "@/components/ui/multi-combobox";
 import { formatDisplayDate } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 interface SightingsTableProps {
   uploadId: string;
@@ -88,6 +89,7 @@ export function SightingsTable({
   nameIndex,
   onNavigateToSighting,
 }: SightingsTableProps) {
+  const { showToast } = useToast();
   const [sightings, setSightings] = useState<SightingMessage[]>([]);
   const [groups, setGroups] = useState<GroupedSightingDisplay[]>([]);
   const [total, setTotal] = useState(0);
@@ -162,13 +164,24 @@ export function SightingsTable({
         hasMoreRef.current = newHasMore;
         pageRef.current = pageNum;
       } catch (e) {
-        console.error("Failed to fetch sightings:", getErrorMessage(e, "Unknown error"));
+        console.error("Failed to fetch sightings:", e);
+        showToast(getErrorMessage(e, "Failed to fetch sightings"), "error");
       } finally {
         loadingRef.current = false;
         setLoading(false);
       }
     },
-    [uploadId, filter, sortField, sortDir, groupBy, lifersOnly, yearTickYear, countryTickCountry],
+    [
+      uploadId,
+      filter,
+      sortField,
+      sortDir,
+      groupBy,
+      lifersOnly,
+      yearTickYear,
+      countryTickCountry,
+      showToast,
+    ],
   );
 
   useEffect(() => {

@@ -100,7 +100,8 @@ export async function fetchSpeciesInfo(
 
     cache.set(cacheKey, info);
     return info;
-  } catch {
+  } catch (err) {
+    console.error("Failed to fetch species info:", err, speciesName);
     return null;
   }
 }

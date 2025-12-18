@@ -3,7 +3,8 @@ const displayNames = new Intl.DisplayNames(["en"], { type: "region" });
 export function getCountryName(code: string): string {
   try {
     return displayNames.of(code.toUpperCase()) || code;
-  } catch {
+  } catch (err) {
+    console.error("Failed to get country name for code:", code, err);
     return code;
   }
 }

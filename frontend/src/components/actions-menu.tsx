@@ -17,6 +17,7 @@ import {
   Type,
 } from "lucide-react";
 import { removeEditToken } from "@/lib/storage";
+import { useToast } from "@/components/ui/toast";
 import {
   apiFetch,
   buildApiUrl,
@@ -59,6 +60,7 @@ export function ActionsMenu({
   onRenameComplete,
 }: ActionsMenuProps) {
   const router = useRouter();
+  const { showToast } = useToast();
   const [menuExpanded, setMenuExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedEditLink, setCopiedEditLink] = useState(false);
@@ -126,12 +128,13 @@ export function ActionsMenu({
       removeEditToken(uploadId);
       router.push("/");
     } catch (err) {
-      console.error(getErrorMessage(err, "Delete failed"));
-      setShowDeleteConfirm(false);
+      const message = getErrorMessage(err, "Delete failed");
+      console.error(message);
+      showToast(message, "error");
     } finally {
       setIsDeleting(false);
     }
-  }, [editToken, uploadId, router]);
+  }, [editToken, uploadId, router, showToast]);
 
   const handleUpdate = useCallback(
     async (file: File) => {
@@ -348,7 +351,10 @@ export function ActionsMenu({
                       return parseProtoResponse(res, VersionInfoDecoder);
                     })
                     .then((data) => setBackendVersion(data))
-                    .catch(() => {
+                    .catch((err) => {
+                      const message = getErrorMessage(err, "Failed to load version info");
+                      console.error("Failed to fetch version info:", err);
+                      showToast(message, "error");
                       setBackendVersion({
                         gitHash: "unknown",
                         buildDate: "unknown",

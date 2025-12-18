@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
-import { apiFetch, buildApiUrl, parseProtoResponse } from "@/lib/api";
+import {
+  apiFetch,
+  buildApiUrl,
+  checkApiResponse,
+  getErrorMessage,
+  parseProtoResponse,
+} from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +51,7 @@ import {
   FieldValues as FieldValuesDecoder,
 } from "@/lib/proto/redgrouse_api";
 import { formatDisplayDate } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 function toComboboxOptions(
   values: string[],
@@ -69,6 +76,7 @@ export function QueryBuilder({
   onClose,
   isPanel,
 }: QueryBuilderProps) {
+  const { showToast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
   const [fields, setFields] = useState<FieldMetadata[]>([]);
   const [filter, setFilter] = useState<FilterGroup>(createGroup());
@@ -77,9 +85,7 @@ export function QueryBuilder({
   useEffect(() => {
     apiFetch(FIELDS_ROUTE)
       .then(async (res) => {
-        if (!res.ok) {
-          throw new Error("Failed to load metadata");
-        }
+        await checkApiResponse(res, "Failed to load field metadata");
         const data = await parseProtoResponse(res, FieldMetadataList);
         return data.fields.map((field) => ({
           name: field.name,
@@ -88,8 +94,11 @@ export function QueryBuilder({
         }));
       })
       .then(setFields)
-      .catch(console.error);
-  }, []);
+      .catch((err) => {
+        console.error("Failed to fetch field metadata:", err);
+        showToast(getErrorMessage(err, "Failed to load field metadata"), "error");
+      });
+  }, [showToast]);
 
   const fetchFieldValues = useCallback(
     async (field: string) => {
@@ -101,15 +110,18 @@ export function QueryBuilder({
         });
         const res = await apiFetch(url);
         if (!res.ok) {
+          const readableName = field.split("_").join(" ");
+          showToast(`Failed to load values for ${readableName}`, "error");
           return;
         }
         const data = await parseProtoResponse(res, FieldValuesDecoder);
         setFieldValues((prev) => ({ ...prev, [field]: data.values }));
       } catch (e) {
-        console.error(e);
+        console.error("Failed to fetch field values:", e);
+        showToast(getErrorMessage(e, "Failed to load field values"), "error");
       }
     },
-    [uploadId, fieldValues],
+    [uploadId, fieldValues, showToast],
   );
 
   const updateRule = useCallback(

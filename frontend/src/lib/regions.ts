@@ -15,7 +15,8 @@ export function formatRegion(code: string | null | undefined): string {
       const name = subdivision.name.split(",")[0].trim();
       return name;
     }
-  } catch {
+  } catch (err) {
+    console.error("Failed to format region code:", err, code);
     // Package might not have the code, fall through to fallback
   }
 

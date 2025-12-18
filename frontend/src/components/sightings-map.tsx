@@ -12,6 +12,8 @@ import {
   apiFetch,
   buildFilterParams,
   parseProtoResponse,
+  checkApiResponse,
+  getErrorMessage,
 } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { fetchSpeciesInfo } from "@/lib/species-api";
@@ -27,6 +29,7 @@ import {
   COLOUR_NORMAL_SIGHTING,
   COLOUR_WHITE,
 } from "@/lib/colours";
+import { useToast } from "@/components/ui/toast";
 
 interface SightingsMapProps {
   uploadId: string;
@@ -422,6 +425,7 @@ export function SightingsMap({
   countryTickCountry,
   onMapReady,
 }: SightingsMapProps) {
+  const { showToast } = useToast();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
@@ -798,9 +802,10 @@ export function SightingsMap({
 
     apiFetch(url)
       .then(async (res) => {
-        if (!res.ok) {
+        if (res.status === 404) {
           return null;
         }
+        await checkApiResponse(res, "Failed to load map bounds");
         return parseProtoResponse(res, BboxResponse);
       })
       .then((bbox) => {
@@ -817,8 +822,11 @@ export function SightingsMap({
           );
         }
       })
-      .catch(() => {});
-  }, [uploadId, countryTickCountry, filter, lifersOnly, yearTickYear]);
+      .catch((err) => {
+        console.error("Failed to fetch bounding box:", err);
+        showToast(getErrorMessage(err, "Failed to load map bounds"), "error");
+      });
+  }, [uploadId, countryTickCountry, filter, lifersOnly, yearTickYear, showToast]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
@@ -1046,7 +1054,11 @@ function setupOverlapClusters(
     while (sightings.length < total) {
       const leaves = await source
         .getClusterLeaves(clusterId, pageSize, offset)
-        .catch(() => null);
+        .catch((err) => {
+          console.error("Failed to get cluster leaves:", err);
+          showToast("Failed to load cluster sightings", "error");
+          return null;
+        });
       const normalizedLeaves = leaves as
         | Array<maplibregl.MapGeoJSONFeature | Feature<Point, GeoJsonProperties>>
         | null;
@@ -1101,7 +1113,10 @@ function setupOverlapClusters(
             zoom: Math.min(targetZoom, maxZoom),
           });
         })
-        .catch(() => {});
+        .catch((err) => {
+          console.error("Failed to get cluster expansion zoom:", err);
+          showToast("Failed to zoom to cluster", "error");
+        });
       return;
     }
 
@@ -1111,7 +1126,10 @@ function setupOverlapClusters(
           openClusterPopup(coordinates, sightings);
         }
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("Failed to get cluster sightings:", err);
+        showToast("Failed to load cluster details", "error");
+      });
   };
 
   const handleUnclusteredClick = (event: maplibregl.MapLayerMouseEvent) => {

@@ -3,6 +3,7 @@ use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bytes::BytesMut;
 use prost::Message;
+use tracing::error;
 
 pub mod pb {
     include!(concat!(env!("OUT_DIR"), "/redgrouse.api.rs"));
@@ -19,9 +20,20 @@ impl<T> Proto<T> {
 impl<T: Message> IntoResponse for Proto<T> {
     fn into_response(self) -> Response {
         let mut buf = BytesMut::with_capacity(self.0.encoded_len());
-        self.0
-            .encode(&mut buf)
-            .expect("failed to encode protobuf message");
+        if let Err(err) = self.0.encode(&mut buf) {
+            error!("Failed to encode protobuf message: {}", err);
+            return Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from("Internal server error"))
+                .unwrap_or_else(|_| {
+                    // If building an error response fails, we're in a critical state
+                    // This should never happen, but we need to return something
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::empty())
+                        .expect("Failed to build error response (critical failure)")
+                });
+        }
         Response::builder()
             .status(StatusCode::OK)
             .header(
@@ -29,6 +41,14 @@ impl<T: Message> IntoResponse for Proto<T> {
                 HeaderValue::from_static("application/x-protobuf"),
             )
             .body(Body::from(buf.freeze()))
-            .expect("failed to build protobuf response")
+            .unwrap_or_else(|err| {
+                error!("Failed to build protobuf response: {}", err);
+                // If building an error response fails, we're in a critical state
+                // This should never happen, but we need to return something
+                Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from("Internal server error"))
+                    .expect("Failed to build error response (critical failure)")
+            })
     }
 }

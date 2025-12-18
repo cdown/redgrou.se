@@ -9,6 +9,7 @@ use crate::db;
 use crate::error::ApiError;
 use crate::filter::build_filter_clause;
 use crate::proto::{pb, Proto};
+use tracing::warn;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
@@ -319,7 +320,10 @@ pub async fn get_sightings(
                 }
             } else {
                 // Default to first validated field with proper alias
-                let first_field = validated_fields.first().unwrap();
+                // validated_fields is guaranteed to be non-empty (checked above)
+                let first_field = validated_fields
+                    .first()
+                    .expect("validated_fields should not be empty");
                 if first_field == "common_name" || first_field == "scientific_name" {
                     "s.species_id".to_string()
                 } else if first_field == "country_code" {
@@ -382,15 +386,33 @@ pub async fn get_sightings(
             for (i, field) in validated_fields.iter().enumerate() {
                 match field.as_str() {
                     "common_name" | "scientific_name" => {
-                        let species_id: Option<i64> = row.try_get(i).ok();
+                        let species_id: Option<i64> = match row.try_get(i) {
+                            Ok(id) => Some(id),
+                            Err(err) => {
+                                warn!("Failed to get species_id from field {}: {}", field, err);
+                                None
+                            }
+                        };
                         grouped.species_id = species_id;
                     }
                     "country_code" => {
-                        let value: Option<String> = row.try_get(i).ok();
+                        let value: Option<String> = match row.try_get(i) {
+                            Ok(v) => Some(v),
+                            Err(err) => {
+                                warn!("Failed to get country_code from field {}: {}", field, err);
+                                None
+                            }
+                        };
                         grouped.country_code = value;
                     }
                     "observed_at" => {
-                        let value: Option<String> = row.try_get(i).ok();
+                        let value: Option<String> = match row.try_get(i) {
+                            Ok(v) => Some(v),
+                            Err(err) => {
+                                warn!("Failed to get observed_at from field {}: {}", field, err);
+                                None
+                            }
+                        };
                         grouped.observed_at = value;
                     }
                     _ => {}

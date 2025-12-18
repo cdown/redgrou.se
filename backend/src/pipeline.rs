@@ -14,8 +14,10 @@ use uuid::Uuid;
 // Uses point-in-polygon testing with OpenStreetMap boundaries data.
 static BOUNDARIES: Lazy<CountryBoundaries> = Lazy::new(|| {
     tracing::info!("Initialising country boundaries");
-    CountryBoundaries::from_reader(BOUNDARIES_ODBL_360X180)
-        .expect("Failed to load country boundaries data")
+    CountryBoundaries::from_reader(BOUNDARIES_ODBL_360X180).unwrap_or_else(|err| {
+        error!("Failed to load country boundaries data: {}", err);
+        panic!("Country boundaries data is required for geocoding. Application cannot start without it.");
+    })
 });
 
 pub const BATCH_SIZE: usize = 1000;
@@ -229,8 +231,11 @@ impl Geocoder {
             .zip(geocode_results)
             .map(|(sighting, (country_code, region_code))| {
                 let year = extract_year(&sighting.observed_at);
-                let sighting_uuid = Uuid::parse_str(&sighting.sighting_uuid)
-                    .expect("Invalid UUID format (should be caught during CSV parsing)");
+                let sighting_uuid = Uuid::parse_str(&sighting.sighting_uuid).unwrap_or_else(|err| {
+                    error!("Invalid UUID format in processed sighting (should be caught during CSV parsing): {} - {}", sighting.sighting_uuid, err);
+                    // Generate a new UUID as fallback - this should never happen in practice
+                    Uuid::new_v4()
+                });
                 ProcessedSighting {
                     sighting_uuid,
                     common_name: sighting.common_name.into(),
@@ -585,7 +590,13 @@ fn get_field(
 
 fn extract_year(date_str: &str) -> i32 {
     // ISO 8601 format: 2020-02-14T09:34:18.584Z
-    date_str.get(0..4).and_then(|y| y.parse().ok()).unwrap_or(0)
+    date_str
+        .get(0..4)
+        .and_then(|y| y.parse().ok())
+        .unwrap_or_else(|| {
+            tracing::warn!("Failed to extract year from date string: {}", date_str);
+            0
+        })
 }
 
 fn get_country_code(latlng: LatLng) -> SString {

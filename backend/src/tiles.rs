@@ -312,7 +312,10 @@ pub async fn get_tile(
         .header(header::CONTENT_TYPE, "application/x-protobuf")
         .header(header::CACHE_CONTROL, "public, max-age=3600")
         .body(axum::body::Body::from(data))
-        .unwrap();
+        .map_err(|err| {
+            error!("Failed to build tile response: {}", err);
+            ApiError::internal("Failed to build response")
+        })?;
 
     Ok(response)
 }

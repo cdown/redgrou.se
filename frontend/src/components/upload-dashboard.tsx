@@ -25,6 +25,7 @@ import {
   parseProtoResponse,
   getErrorMessage,
 } from "@/lib/api";
+import { useToast } from "@/components/ui/toast";
 import {
   UPLOAD_COUNT_ROUTE,
   UPLOAD_DETAILS_ROUTE,
@@ -80,6 +81,7 @@ async function fetchNameIndex(uploadId: string): Promise<Species[]> {
 }
 
 export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
+  const { showToast } = useToast();
   const searchParams = useSearchParams();
   const uploadId = initialUpload.uploadId;
 
@@ -95,7 +97,8 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
         ? (() => {
             try {
               return JSON.parse(filterString) as FilterGroup;
-            } catch {
+            } catch (err) {
+              console.error("Failed to parse filter string:", err, filterString);
               return null;
             }
           })()
@@ -182,9 +185,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
       }),
     )
       .then(async (res) => {
-        if (!res.ok) {
-          return { values: [] };
-        }
+        await checkApiResponse(res, "Failed to load available years");
         return parseProtoResponse(res, FieldValuesDecoder);
       })
       .then((data) => {
@@ -194,7 +195,10 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
           .sort((a, b) => b - a);
         setAvailableYears(years);
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("Failed to fetch year field values:", err);
+        showToast(getErrorMessage(err, "Failed to load available years"), "error");
+      });
 
     apiFetch(
       buildApiUrl(FIELD_VALUES_ROUTE, {
@@ -203,9 +207,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
       }),
     )
       .then(async (res) => {
-        if (!res.ok) {
-          return { values: [] };
-        }
+        await checkApiResponse(res, "Failed to load available countries");
         return parseProtoResponse(res, FieldValuesDecoder);
       })
       .then((data) => {
@@ -218,8 +220,11 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
           });
         setAvailableCountries(countries);
       })
-      .catch(() => {});
-  }, [uploadId]);
+      .catch((err) => {
+        console.error("Failed to fetch country field values:", err);
+        showToast(getErrorMessage(err, "Failed to load available countries"), "error");
+      });
+  }, [uploadId, showToast]);
 
   useEffect(() => {
     if (!uploadId) return;
@@ -228,8 +233,11 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
       .then((index) => {
         setNameIndex(index);
       })
-      .catch(() => {});
-  }, [uploadId]);
+      .catch((err) => {
+        console.error("Failed to fetch name index:", err);
+        showToast(getErrorMessage(err, "Failed to load species names"), "error");
+      });
+  }, [uploadId, showToast]);
 
   useEffect(() => {
     if (!uploadId) return;
@@ -247,15 +255,19 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
       .then((data) => {
         if (!cancelled) setFilteredCount(Number(data.count));
       })
-      .catch(() => {
-        if (!cancelled) setFilteredCount(null);
+      .catch((err) => {
+        console.error("Failed to fetch filtered count:", err);
+        if (!cancelled) {
+          setFilteredCount(null);
+          showToast(getErrorMessage(err, "Failed to load filtered count"), "error");
+        }
       });
 
     return () => {
       cancelled = true;
       setFilteredCount(null);
     };
-  }, [uploadId, filterString, lifersOnly, yearTickYear, countryTickCountry]);
+  }, [uploadId, filterString, lifersOnly, yearTickYear, countryTickCountry, showToast]);
 
   const handleNavigateToSighting = useCallback(
     (sightingId: number, lat: number, lng: number) => {
@@ -279,15 +291,19 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
         setFilteredCount(null);
       })
       .catch((err) => {
-        console.error(getErrorMessage(err, "Failed to refresh"));
+        console.error("Failed to refresh upload:", err);
+        showToast(getErrorMessage(err, "Failed to refresh upload"), "error");
       });
 
     fetchNameIndex(uploadId)
       .then((index) => {
         setNameIndex(index);
       })
-      .catch(() => {});
-  }, [uploadId, setFilter]);
+      .catch((err) => {
+        console.error("Failed to fetch name index after update:", err);
+        showToast(getErrorMessage(err, "Failed to reload species names"), "error");
+      });
+  }, [uploadId, setFilter, showToast]);
 
   const handleRenameComplete = useCallback((metadata: UploadMetadata) => {
     setUpload(metadata);

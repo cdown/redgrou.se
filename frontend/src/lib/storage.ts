@@ -53,14 +53,19 @@ function loadStorage(): StorageData {
     }
 
     return getDefaultData();
-  } catch {
+  } catch (err) {
+    console.error("Failed to load storage data:", err);
     return getDefaultData();
   }
 }
 
 function saveStorage(data: StorageData): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (err) {
+    console.error("Failed to save storage data:", err);
+  }
 }
 
 export function getEditToken(uploadId: string): string | null {

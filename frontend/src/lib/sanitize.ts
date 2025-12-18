@@ -26,7 +26,8 @@ export function sanitizeUrl(
     if (url.protocol === "http:" || url.protocol === "https:") {
       return url.toString();
     }
-  } catch {
+  } catch (err) {
+    console.error("Failed to sanitize URL:", err, value);
     return null;
   }
 

@@ -26,7 +26,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     return {
       title: `${title} | redgrou.se`,
     };
-  } catch {
+  } catch (error) {
+    console.error("Failed to generate metadata for upload:", uploadId, error);
     return {
       title: "redgrou.se",
     };
