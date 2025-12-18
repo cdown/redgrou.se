@@ -20,6 +20,7 @@ use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
 use crate::pipeline::{CsvParser, DbSink, Geocoder, BATCH_SIZE};
 use crate::proto::{pb, Proto};
+use crate::tiles::invalidate_upload_cache;
 use serde::Deserialize;
 
 pub const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
@@ -509,6 +510,8 @@ pub async fn update_csv(
             e.log("computing grid cell visibility");
         }
 
+        invalidate_upload_cache(&upload_id).await;
+
         info!(
             "Update complete: {} rows from {} (upload_id: {})",
             total_rows, filename, upload_id
@@ -557,6 +560,8 @@ pub async fn delete_upload(
     .await
     {
         Ok(_) => {
+            invalidate_upload_cache(&upload_id).await;
+
             info!("Deleted upload: {}", upload_id);
             (
                 axum::http::StatusCode::OK,

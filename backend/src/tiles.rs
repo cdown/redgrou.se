@@ -1,8 +1,11 @@
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
+use moka::future::Cache;
 use mvt::{GeomEncoder, GeomType, Tile};
+use once_cell::sync::Lazy;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use sqlx::{Row, SqlitePool};
 use tracing::{debug, error};
 
@@ -13,6 +16,19 @@ use crate::filter::build_filter_clause;
 const TILE_EXTENT: u32 = 4096;
 // Maximum vis_rank value (0-10000). When threshold equals this, all points are included.
 const MAX_VIS_RANK: i32 = 10000;
+// Tile cache size limit: ~50MB (assuming average tile size of ~10KB, cache ~5000 tiles)
+const TILE_CACHE_SIZE: u64 = 50 * 1024 * 1024;
+
+// LRU cache for tiles: key is (upload_id, z, x, y, filter_hash), value is encoded MVT bytes
+static TILE_CACHE: Lazy<Cache<String, Vec<u8>>> = Lazy::new(|| {
+    Cache::builder()
+        .max_capacity(TILE_CACHE_SIZE)
+        .weigher(|_key: &String, value: &Vec<u8>| -> u32 {
+            // Return size in bytes as weight (moka uses u32, so cap at u32::MAX)
+            value.len().min(u32::MAX as usize) as u32
+        })
+        .build()
+});
 
 #[derive(Debug, Clone, Copy)]
 pub struct LatLng {
@@ -92,6 +108,39 @@ pub struct TilePath {
     pub y: String,
 }
 
+fn compute_filter_hash(
+    filter: Option<&String>,
+    lifers_only: Option<bool>,
+    year_tick_year: Option<i32>,
+    country_tick_country: Option<&String>,
+) -> String {
+    let mut hasher = Sha256::new();
+    if let Some(f) = filter {
+        hasher.update(f.as_bytes());
+    }
+    if let Some(lo) = lifers_only {
+        hasher.update(&[if lo { 1 } else { 0 }]);
+    }
+    if let Some(yt) = year_tick_year {
+        hasher.update(&yt.to_le_bytes());
+    }
+    if let Some(ct) = country_tick_country {
+        hasher.update(ct.as_bytes());
+    }
+    hex::encode(hasher.finalize())
+}
+
+pub async fn invalidate_upload_cache(upload_id: &str) {
+    let prefix = format!("{}:", upload_id);
+    match TILE_CACHE.invalidate_entries_if(move |k, _v| k.starts_with(&prefix)) {
+        Ok(count) => debug!(
+            "Invalidated {} cache entries for upload: {}",
+            count, upload_id
+        ),
+        Err(e) => error!("Failed to invalidate cache for upload {}: {}", upload_id, e),
+    }
+}
+
 pub async fn get_tile(
     State(pool): State<SqlitePool>,
     Path(path): Path<TilePath>,
@@ -117,6 +166,31 @@ pub async fn get_tile(
         "Tile request: z={} x={} y={} bbox=[{},{},{},{}]",
         path.z, path.x, y, bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max
     );
+
+    let filter_hash = compute_filter_hash(
+        query.filter.as_ref(),
+        query.lifers_only,
+        query.year_tick_year,
+        query.country_tick_country.as_ref(),
+    );
+    let cache_key = format!(
+        "{}:{}:{}:{}:{}",
+        path.upload_id, path.z, path.x, y, filter_hash
+    );
+
+    if let Some(cached_data) = TILE_CACHE.get(&cache_key).await {
+        debug!("Tile cache hit: {}", cache_key);
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/x-protobuf")
+            .header(header::CACHE_CONTROL, "public, max-age=3600")
+            .body(axum::body::Body::from(cached_data))
+            .map_err(|err| {
+                error!("Failed to build cached tile response: {}", err);
+                ApiError::internal("Failed to build response")
+            })?;
+        return Ok(response);
+    }
 
     let filter_result = build_filter_clause(
         query.filter.as_ref(),
@@ -306,6 +380,10 @@ pub async fn get_tile(
     })
     .await
     .map_err(|_| ApiError::internal("Tile encoding task failed"))??;
+
+    let cached_data = data.clone();
+    TILE_CACHE.insert(cache_key.clone(), cached_data).await;
+    debug!("Tile cached: {}", cache_key);
 
     let response = Response::builder()
         .status(StatusCode::OK)
