@@ -79,7 +79,7 @@ async fn build_name_index(
         species_id_to_index.insert(species.id, index);
         name_index.push(pb::Species {
             common_name: species.common_name.clone(),
-            scientific_name: Some(species.scientific_name.clone()),
+            scientific_name: species.scientific_name.clone(),
         });
     }
 
@@ -170,34 +170,6 @@ fn parse_sort_direction(sort_dir: Option<&String>) -> &'static str {
         Some(dir) if dir == "asc" => "ASC",
         _ => "DESC",
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct TotalCount(i64);
-
-#[derive(Debug, Clone, Copy)]
-struct PageSize(u32);
-
-impl From<u32> for PageSize {
-    fn from(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<PageSize> for u32 {
-    fn from(value: PageSize) -> Self {
-        value.0
-    }
-}
-
-impl From<i64> for TotalCount {
-    fn from(value: i64) -> Self {
-        Self(value)
-    }
-}
-
-fn calculate_total_pages(total: TotalCount, page_size: PageSize) -> u32 {
-    ((total.0 as f64) / (f64::from(page_size.0))).ceil() as u32
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -465,8 +437,6 @@ pub async fn get_sightings(
             groups.push(grouped);
         }
 
-        let total_pages = calculate_total_pages(TotalCount(total), PageSize::from(page_size));
-
         let groups_pb = groups
             .into_iter()
             .map(|g| g.into_proto(&index_result.species_id_to_index))
@@ -477,9 +447,6 @@ pub async fn get_sightings(
             sightings: Vec::new(),
             groups: groups_pb,
             total,
-            page,
-            page_size,
-            total_pages,
             next_cursor: None,
         }));
     }
@@ -583,9 +550,6 @@ pub async fn get_sightings(
         next_cursor = Some(encode_cursor(&sort_val_str, id));
     }
 
-    let total_pages = calculate_total_pages(TotalCount(total), PageSize::from(page_size));
-    let response_page = 1;
-
     let index_result = build_name_index(&pool, &upload_uuid.as_bytes()[..]).await?;
 
     let sightings_pb = sightings
@@ -598,9 +562,6 @@ pub async fn get_sightings(
         sightings: sightings_pb,
         groups: Vec::new(),
         total,
-        page: response_page,
-        page_size,
-        total_pages,
         next_cursor,
     }))
 }

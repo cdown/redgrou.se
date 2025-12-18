@@ -145,7 +145,7 @@ response falls back to page/offset pagination, so `page` must be supplied in
 those requests.
 
 **Response**: `SightingsResponse` containing `sightings`, `groups`, `total`,
-`page`, `page_size`, `total_pages`, and `next_cursor` (for cursor-based pagination).
+`total` and `next_cursor` (for cursor-based pagination).
 
 ### Get vector tile
 

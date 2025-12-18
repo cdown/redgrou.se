@@ -68,7 +68,7 @@ export interface BboxResponse {
 
 export interface Species {
   commonName: string;
-  scientificName?: string | undefined;
+  scientificName: string;
 }
 
 export interface Sighting {
@@ -95,9 +95,6 @@ export interface SightingsResponse {
   sightings: Sighting[];
   groups: GroupedSighting[];
   total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
   nextCursor?: string | undefined;
 }
 
@@ -772,7 +769,7 @@ export const BboxResponse: MessageFns<BboxResponse> = {
 };
 
 function createBaseSpecies(): Species {
-  return { commonName: "", scientificName: undefined };
+  return { commonName: "", scientificName: "" };
 }
 
 export const Species: MessageFns<Species> = {
@@ -780,7 +777,7 @@ export const Species: MessageFns<Species> = {
     if (message.commonName !== "") {
       writer.uint32(10).string(message.commonName);
     }
-    if (message.scientificName !== undefined) {
+    if (message.scientificName !== "") {
       writer.uint32(18).string(message.scientificName);
     }
     return writer;
@@ -824,7 +821,7 @@ export const Species: MessageFns<Species> = {
   fromPartial<I extends Exact<DeepPartial<Species>, I>>(object: I): Species {
     const message = createBaseSpecies();
     message.commonName = object.commonName ?? "";
-    message.scientificName = object.scientificName ?? undefined;
+    message.scientificName = object.scientificName ?? "";
     return message;
   },
 };
@@ -1063,16 +1060,7 @@ export const GroupedSighting: MessageFns<GroupedSighting> = {
 };
 
 function createBaseSightingsResponse(): SightingsResponse {
-  return {
-    nameIndex: [],
-    sightings: [],
-    groups: [],
-    total: 0,
-    page: 0,
-    pageSize: 0,
-    totalPages: 0,
-    nextCursor: undefined,
-  };
+  return { nameIndex: [], sightings: [], groups: [], total: 0, nextCursor: undefined };
 }
 
 export const SightingsResponse: MessageFns<SightingsResponse> = {
@@ -1088,15 +1076,6 @@ export const SightingsResponse: MessageFns<SightingsResponse> = {
     }
     if (message.total !== 0) {
       writer.uint32(32).int64(message.total);
-    }
-    if (message.page !== 0) {
-      writer.uint32(40).uint32(message.page);
-    }
-    if (message.pageSize !== 0) {
-      writer.uint32(48).uint32(message.pageSize);
-    }
-    if (message.totalPages !== 0) {
-      writer.uint32(56).uint32(message.totalPages);
     }
     if (message.nextCursor !== undefined) {
       writer.uint32(66).string(message.nextCursor);
@@ -1143,30 +1122,6 @@ export const SightingsResponse: MessageFns<SightingsResponse> = {
           message.total = longToNumber(reader.int64());
           continue;
         }
-        case 5: {
-          if (tag !== 40) {
-            break;
-          }
-
-          message.page = reader.uint32();
-          continue;
-        }
-        case 6: {
-          if (tag !== 48) {
-            break;
-          }
-
-          message.pageSize = reader.uint32();
-          continue;
-        }
-        case 7: {
-          if (tag !== 56) {
-            break;
-          }
-
-          message.totalPages = reader.uint32();
-          continue;
-        }
         case 8: {
           if (tag !== 66) {
             break;
@@ -1193,9 +1148,6 @@ export const SightingsResponse: MessageFns<SightingsResponse> = {
     message.sightings = object.sightings?.map((e) => Sighting.fromPartial(e)) || [];
     message.groups = object.groups?.map((e) => GroupedSighting.fromPartial(e)) || [];
     message.total = object.total ?? 0;
-    message.page = object.page ?? 0;
-    message.pageSize = object.pageSize ?? 0;
-    message.totalPages = object.totalPages ?? 0;
     message.nextCursor = object.nextCursor ?? undefined;
     return message;
   },

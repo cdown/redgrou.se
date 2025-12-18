@@ -61,7 +61,7 @@ message BboxResponse {
 
 message Species {
   string common_name = 1;
-  optional string scientific_name = 2;
+  string scientific_name = 2;
 }
 
 message Sighting {
@@ -88,9 +88,6 @@ message SightingsResponse {
   repeated Sighting sightings = 2;
   repeated GroupedSighting groups = 3;
   int64 total = 4;
-  uint32 page = 5;
-  uint32 page_size = 6;
-  uint32 total_pages = 7;
   optional string next_cursor = 8;
 }
 

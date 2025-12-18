@@ -167,7 +167,9 @@ export function SightingsTable({
 
         setTotal(Number(data.total));
         if (isGrouped) {
-          const newHasMore = pageNum < data.totalPages;
+          const groupedTotal = Number(data.total);
+          const loadedItems = pageNum * DEFAULT_PAGE_SIZE;
+          const newHasMore = loadedItems < groupedTotal;
           setHasMore(newHasMore);
           hasMoreRef.current = newHasMore;
           pageRef.current = pageNum;
