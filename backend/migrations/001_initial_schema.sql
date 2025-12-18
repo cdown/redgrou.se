@@ -3,6 +3,7 @@
 CREATE TABLE IF NOT EXISTS uploads (
     id BLOB PRIMARY KEY,
     filename TEXT NOT NULL,
+    display_name TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     row_count INTEGER DEFAULT 0,
     edit_token_hash TEXT
@@ -13,12 +14,15 @@ CREATE TABLE IF NOT EXISTS uploads (
 CREATE TABLE IF NOT EXISTS species (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     common_name TEXT NOT NULL,
-    scientific_name TEXT,
+    scientific_name TEXT NOT NULL DEFAULT '',
     UNIQUE(common_name, scientific_name)
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_species_names
     ON species(common_name, scientific_name);
+
+CREATE INDEX IF NOT EXISTS idx_species_scientific_name
+    ON species(scientific_name);
 
 -- Sightings table
 
@@ -103,3 +107,17 @@ CREATE INDEX IF NOT EXISTS idx_sightings_year
 -- only needs to support the filter criteria, not the lat/lon coordinates.
 CREATE INDEX IF NOT EXISTS idx_sightings_vis_rank
     ON sightings(upload_id, vis_rank);
+
+-- Tick bitmap storage for efficient lifer/year/country filtering
+
+CREATE TABLE IF NOT EXISTS tick_bitmaps (
+    upload_id BLOB NOT NULL,
+    bitmap_type TEXT NOT NULL, -- 'lifer', 'year_tick', 'country_tick'
+    bitmap_key TEXT, -- '' for lifer, year (e.g., '2023') for year_tick, country_code for country_tick
+    bitmap_data BLOB NOT NULL, -- Serialized Roaring bitmap
+    PRIMARY KEY (upload_id, bitmap_type, bitmap_key),
+    FOREIGN KEY(upload_id) REFERENCES uploads(id) ON DELETE CASCADE
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_tick_bitmaps_upload
+    ON tick_bitmaps(upload_id);
