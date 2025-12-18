@@ -222,6 +222,7 @@ function buildTileUrl(
 function handleSightingFeature(
   map: maplibregl.Map,
   feature: maplibregl.MapGeoJSONFeature,
+  overrideLocation?: { lat: number; lng: number },
 ): void {
   const name = feature.properties?.name || "Unknown";
   const scientificName = feature.properties?.scientific_name;
@@ -239,15 +240,25 @@ function handleSightingFeature(
 
   // Use feature's geometry coordinates (center of icon) instead of click position
   const geometry = feature.geometry;
-  if (geometry.type !== "Point" || !geometry.coordinates) {
+  let lngFromFeature: number | undefined;
+  let latFromFeature: number | undefined;
+  if (geometry.type === "Point" && geometry.coordinates) {
+    [lngFromFeature, latFromFeature] = geometry.coordinates;
+  }
+
+  const finalLat =
+    typeof overrideLocation?.lat === "number" ? overrideLocation.lat : latFromFeature;
+  const finalLng =
+    typeof overrideLocation?.lng === "number" ? overrideLocation.lng : lngFromFeature;
+
+  if (typeof finalLat !== "number" || typeof finalLng !== "number") {
     return;
   }
-  const [lng, lat] = geometry.coordinates;
 
   showSpeciesPopup(
     map,
-    lat,
-    lng,
+    finalLat,
+    finalLng,
     name,
     count,
     scientificName,
@@ -266,10 +277,15 @@ function showPopupBySightingId(
   featuresById: Map<number, maplibregl.MapGeoJSONFeature>,
 ): void {
   const feature = featuresById.get(sightingId);
-
-  if (feature) {
-    handleSightingFeature(map, feature);
+  if (!feature) {
+    return;
   }
+  const hasOverride = Number.isFinite(lat) && Number.isFinite(lng);
+  const overrideLocation =
+    hasOverride && typeof lat === "number" && typeof lng === "number"
+      ? { lat, lng }
+      : undefined;
+  handleSightingFeature(map, feature, overrideLocation);
 }
 
 function addSightingsLayer(
@@ -926,7 +942,10 @@ function setupOverlapClusters(
     }, 120);
   };
 
-  const openClusterPopup = (coordinates: [number, number], sightings: ClusterPopupSighting[]) => {
+  const openClusterPopup = (
+    coordinates: [number, number],
+    sightings: ClusterPopupSighting[],
+  ) => {
     if (!sightings.length) {
       return;
     }
@@ -939,7 +958,7 @@ function setupOverlapClusters(
         sightings={sightings}
         onSelect={(selected) => {
           clearClusterPopup();
-          showPopupById(selected.id, selected.lat, selected.lng);
+          showPopupById(selected.id, coordinates[1], coordinates[0]);
         }}
       />,
     );
