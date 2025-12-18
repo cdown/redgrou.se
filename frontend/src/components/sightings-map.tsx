@@ -80,6 +80,28 @@ const CLUSTER_AGGREGATE_PROPERTIES: Record<string, ClusterPropertyDefinition> = 
   hasCountryTick: booleanClusterProperty("isCountryTick"),
 };
 
+const TILE_SIGHTING_SORT_KEY: ExpressionSpecification = [
+  "case",
+  [">", ["get", "lifer"], 0],
+  3,
+  [">", ["get", "year_tick"], 0],
+  2,
+  [">", ["get", "country_tick"], 0],
+  1,
+  0,
+];
+
+const GEOJSON_SIGHTING_SORT_KEY: ExpressionSpecification = [
+  "case",
+  ["boolean", ["get", "isLifer"], false],
+  3,
+  ["boolean", ["get", "isYearTick"], false],
+  2,
+  ["boolean", ["get", "isCountryTick"], false],
+  1,
+  0,
+];
+
 function createPopupContent(
   name: string,
   count: number,
@@ -315,6 +337,9 @@ function addSightingsLayer(
     type: "circle",
     source: "sightings",
     "source-layer": "sightings",
+    layout: {
+      "circle-sort-key": TILE_SIGHTING_SORT_KEY,
+    },
     paint: {
       "circle-radius": 6,
       "circle-color": [
@@ -846,7 +871,10 @@ function setupOverlapClusters(
       id: CLUSTER_POINTS_LAYER_ID,
       type: "circle",
       source: CLUSTER_SOURCE_ID,
-      layout: { visibility: "none" },
+      layout: {
+        visibility: "none",
+        "circle-sort-key": GEOJSON_SIGHTING_SORT_KEY,
+      },
       filter: ["!", ["has", "point_count"]],
       paint: {
         "circle-radius": 6,
