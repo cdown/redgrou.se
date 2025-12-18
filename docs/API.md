@@ -133,13 +133,17 @@ matching the filter criteria.
 ### Get sightings
 
 ```
-GET /api/uploads/{upload_id}/sightings?page={int}&page_size={int}&filter={json}&sort={string}&lifers_only={bool}&year_tick_year={int}&country_tick_country={string}
+GET /api/uploads/{upload_id}/sightings?page={int}&page_size={int}&cursor={string}&filter={json}&sort={string}&lifers_only={bool}&year_tick_year={int}&country_tick_country={string}
 ```
 
 Returns paginated sightings. Default page size is 100, maximum is 500.
 
+**Pagination**: Supports both page-based and cursor-based (keyset) pagination:
+- **Page-based**: Use `page` parameter (1-indexed). For deep pages, this uses OFFSET which can be slower.
+- **Cursor-based**: Use `cursor` parameter from the `next_cursor` field in the previous response. This provides O(log N) performance for deep page access and is recommended for pages beyond the first few.
+
 **Response**: `SightingsResponse` containing `sightings`, `groups`, `total`,
-`page`, `page_size`, and `total_pages`.
+`page`, `page_size`, `total_pages`, and `next_cursor` (for cursor-based pagination).
 
 ### Get vector tile
 
