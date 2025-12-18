@@ -272,8 +272,8 @@ pub async fn get_sightings(
 
     // Collect filter params separately so upload_id stays first and field names remain enum-whitelisted.
     let filter_result = build_filter_clause(
-        Some(&pool),
-        Some(&upload_uuid.as_bytes()[..]),
+        &pool,
+        &upload_uuid.as_bytes()[..],
         query.filter.as_ref(),
         query.lifers_only,
         query.year_tick_year,
@@ -507,58 +507,42 @@ pub async fn get_sightings(
         .await
         .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
-    let use_keyset = query.cursor.is_some();
-    let mut keyset_clause = String::new();
-    let mut cursor_value: Option<String> = None;
-    let mut cursor_id: Option<i64> = None;
+    let cursor = if let Some(cursor_str) = &query.cursor {
+        Some(decode_cursor(cursor_str)?)
+    } else {
+        None
+    };
 
-    if use_keyset {
-        let cursor = decode_cursor(
-            query
-                .cursor
-                .as_ref()
-                .expect("cursor should be Some if use_keyset is true"),
-        )?;
-        cursor_value = Some(cursor.sort_value);
-        cursor_id = Some(cursor.id);
-
-        let comparison_op = if is_asc { ">" } else { "<" };
-        let sort_field_sql = wrap_nullable_sort_column(&sort_field);
-        let sort_value_placeholder = format!("({}, s.id) {} (?, ?)", sort_field_sql, comparison_op);
-        keyset_clause = format!(" AND {}", sort_value_placeholder);
-    }
-
-    // Always select sort_value to generate next_cursor, even for OFFSET pagination
-    // Wrap nullable columns (country_code) in COALESCE to match cursor logic (NULL -> '')
+    // Always select sort_value to generate next_cursor.
+    // Wrap nullable columns (country_code) in COALESCE to match cursor logic (NULL -> '').
     let sort_field_for_select = wrap_nullable_sort_column(&sort_field);
-    let sort_field_for_order = wrap_nullable_sort_column(&sort_field);
-    let select_sql = if use_keyset {
+    let sort_field_for_order = sort_field_for_select.clone();
+    let sort_field_for_keyset = sort_field_for_order.clone();
+
+    let keyset_clause = if cursor.is_some() {
+        let comparison_op = if is_asc { ">" } else { "<" };
         format!(
-            r"SELECT s.id, s.species_id, s.count, s.latitude, s.longitude,
-                s.country_code, s.region_code, s.observed_at, {} as sort_value
-                FROM sightings s
-                JOIN species sp ON s.species_id = sp.id
-                WHERE s.upload_id = ?{}{}
-                ORDER BY {} {}
-                LIMIT ?",
-            sort_field_for_select,
-            filter_result.filter_clause,
-            keyset_clause,
-            sort_field_for_order,
-            sort_dir
+            " AND (({}), s.id) {} (?, ?)",
+            sort_field_for_keyset, comparison_op
         )
     } else {
-        format!(
-            r"SELECT s.id, s.species_id, s.count, s.latitude, s.longitude,
-                s.country_code, s.region_code, s.observed_at, {} as sort_value
-                FROM sightings s
-                JOIN species sp ON s.species_id = sp.id
-                WHERE s.upload_id = ?{}
-                ORDER BY {} {}
-                LIMIT ? OFFSET ?",
-            sort_field_for_select, filter_result.filter_clause, sort_field_for_order, sort_dir
-        )
+        String::new()
     };
+
+    let select_sql = format!(
+        r"SELECT s.id, s.species_id, s.count, s.latitude, s.longitude,
+            s.country_code, s.region_code, s.observed_at, {} as sort_value
+            FROM sightings s
+            JOIN species sp ON s.species_id = sp.id
+            WHERE s.upload_id = ?{}{}
+            ORDER BY {} {}
+            LIMIT ?",
+        sort_field_for_select,
+        filter_result.filter_clause,
+        keyset_clause,
+        sort_field_for_order,
+        sort_dir
+    );
 
     let mut select_query = bind_filter_params!(
         sqlx::query(&select_sql),
@@ -566,16 +550,11 @@ pub async fn get_sightings(
         &filter_result.params
     );
 
-    if use_keyset {
-        let cursor_val = cursor_value.as_ref().expect("cursor_value should be set");
-        let cursor_id_val = cursor_id.expect("cursor_id should be set");
-        select_query = select_query.bind(cursor_val);
-        select_query = select_query.bind(cursor_id_val);
-        select_query = select_query.bind(i64::from(page_size));
-    } else {
-        select_query = select_query.bind(i64::from(page_size));
-        select_query = select_query.bind(offset_i64);
+    if let Some(cursor_data) = &cursor {
+        select_query = select_query.bind(&cursor_data.sort_value);
+        select_query = select_query.bind(cursor_data.id);
     }
+    select_query = select_query.bind(i64::from(page_size));
 
     let rows = db::query_with_timeout(select_query.fetch_all(&pool))
         .await
@@ -605,6 +584,7 @@ pub async fn get_sightings(
     }
 
     let total_pages = calculate_total_pages(TotalCount(total), PageSize::from(page_size));
+    let response_page = 1;
 
     let index_result = build_name_index(&pool, &upload_uuid.as_bytes()[..]).await?;
 
@@ -618,7 +598,7 @@ pub async fn get_sightings(
         sightings: sightings_pb,
         groups: Vec::new(),
         total,
-        page,
+        page: response_page,
         page_size,
         total_pages,
         next_cursor,

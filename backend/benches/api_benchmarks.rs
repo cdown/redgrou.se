@@ -286,7 +286,7 @@ fn benchmark_sightings(c: &mut Criterion) {
                     use tower::ServiceExt;
 
                     let uri = format!(
-                        "/api/uploads/{}/sightings?page=1&page_size={}",
+                        "/api/uploads/{}/sightings?page_size={}",
                         upload_result.upload_id, page_size
                     );
                     let req = Request::builder()
@@ -305,31 +305,6 @@ fn benchmark_sightings(c: &mut Criterion) {
         );
     }
 
-    // Test deep pagination with OFFSET (page 50)
-    group.bench_function("get_sightings_deep_page_offset", |b| {
-        b.to_async(&rt).iter(|| async {
-            use axum::body::Body;
-            use axum::http::Request;
-            use tower::ServiceExt;
-
-            let uri = format!(
-                "/api/uploads/{}/sightings?page=50&page_size=100",
-                upload_result.upload_id
-            );
-            let req = Request::builder()
-                .method("GET")
-                .uri(&uri)
-                .body(Body::empty())
-                .unwrap();
-
-            let response = app.clone().oneshot(req).await.unwrap();
-            assert_eq!(response.status(), 200);
-            let _body = axum::body::to_bytes(response.into_body(), usize::MAX)
-                .await
-                .unwrap();
-        });
-    });
-
     // Test keyset pagination (cursor-based) for deep pages
     // Pre-compute a cursor for page 49, then benchmark accessing page 50 with that cursor
     let upload_id = upload_result.upload_id.clone();
@@ -338,8 +313,8 @@ fn benchmark_sightings(c: &mut Criterion) {
         use axum::http::Request;
         use tower::ServiceExt;
 
-        // Start with page 1 to get initial cursor
-        let first_uri = format!("/api/uploads/{}/sightings?page=1&page_size=100", upload_id);
+        // Start with the first chunk (no cursor) to get the initial cursor
+        let first_uri = format!("/api/uploads/{}/sightings?page_size=100", upload_id);
         let first_req = Request::builder()
             .method("GET")
             .uri(&first_uri)

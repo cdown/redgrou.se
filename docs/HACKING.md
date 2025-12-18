@@ -125,7 +125,7 @@ curl http://localhost:3001/health
 curl http://localhost:3001/api/uploads/{upload_id}
 
 # Get sightings (paginated)
-curl "http://localhost:3001/api/uploads/{upload_id}/sightings?page=1&page_size=10"
+curl "http://localhost:3001/api/uploads/{upload_id}/sightings?page_size=10"
 
 # Get filtered count
 curl "http://localhost:3001/api/uploads/{upload_id}/count?filter={json}"

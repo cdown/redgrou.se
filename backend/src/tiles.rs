@@ -193,8 +193,8 @@ pub async fn get_tile(
     }
 
     let filter_result = build_filter_clause(
-        Some(&pool),
-        Some(&upload_uuid.as_bytes()[..]),
+        &pool,
+        &upload_uuid.as_bytes()[..],
         query.filter.as_ref(),
         query.lifers_only,
         query.year_tick_year,

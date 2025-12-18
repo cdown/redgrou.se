@@ -67,7 +67,6 @@ function getEditToken(uploadId: string): string | null {
 
 async function fetchNameIndex(uploadId: string): Promise<Species[]> {
   const params = new URLSearchParams();
-  params.set("page", "1");
   params.set("page_size", "1");
 
   const url = `${buildApiUrl(UPLOAD_SIGHTINGS_ROUTE, {

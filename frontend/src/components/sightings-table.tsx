@@ -102,6 +102,7 @@ export function SightingsTable({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
   const pageRef = useRef(1);
+  const cursorRef = useRef<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const hasMoreRef = useRef(true);
   const fetchPageRef = useRef<((pageNum: number, append: boolean) => Promise<void>) | null>(null);
@@ -121,8 +122,14 @@ export function SightingsTable({
       );
       params.set("sort_field", sortField);
       params.set("sort_dir", sortDir);
-      params.set("page", String(pageNum));
       params.set("page_size", String(DEFAULT_PAGE_SIZE));
+
+      const isGrouped = groupBy.length > 0;
+      if (isGrouped) {
+        params.set("page", String(pageNum));
+      } else if (cursorRef.current) {
+        params.set("cursor", cursorRef.current);
+      }
 
       if (groupBy.length > 0) {
         params.set("group_by", groupBy.join(","));
@@ -137,7 +144,7 @@ export function SightingsTable({
         await checkApiResponse(res, "Failed to fetch sightings");
         const data = await parseProtoResponse(res, SightingsResponseDecoder);
 
-        if (groupBy.length > 0) {
+        if (isGrouped) {
           const groupsData: GroupedSightingDisplay[] = data.groups.map((g) => ({
             ...g,
             count: Number(g.count),
@@ -159,10 +166,20 @@ export function SightingsTable({
         }
 
         setTotal(Number(data.total));
-        const newHasMore = pageNum < data.totalPages;
-        setHasMore(newHasMore);
-        hasMoreRef.current = newHasMore;
-        pageRef.current = pageNum;
+        if (isGrouped) {
+          const newHasMore = pageNum < data.totalPages;
+          setHasMore(newHasMore);
+          hasMoreRef.current = newHasMore;
+          pageRef.current = pageNum;
+        } else {
+          const nextCursor =
+            data.nextCursor && data.nextCursor.length > 0 ? data.nextCursor : null;
+          cursorRef.current = nextCursor;
+          const newHasMore = Boolean(nextCursor);
+          setHasMore(newHasMore);
+          hasMoreRef.current = newHasMore;
+          pageRef.current = pageNum;
+        }
       } catch (e) {
         console.error("Failed to fetch sightings:", e);
         showToast(getErrorMessage(e, "Failed to fetch sightings"), "error");
@@ -192,6 +209,7 @@ export function SightingsTable({
     setSightings([]);
     setGroups([]);
     pageRef.current = 1;
+    cursorRef.current = null;
     setHasMore(true);
     hasMoreRef.current = true;
     fetchPage(1, false);

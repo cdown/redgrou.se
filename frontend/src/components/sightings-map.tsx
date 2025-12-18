@@ -642,6 +642,7 @@ export function SightingsMap({
         showPopupById: (sightingId, lat, lng) => {
           showPopupBySightingId(map, sightingId, lat, lng, featuresByIdRef.current);
         },
+        showToast,
       });
 
       // Pre-cache all features as tiles load for O(1) lookup
@@ -836,9 +837,11 @@ function setupOverlapClusters(
   {
     clusterModeRef,
     showPopupById,
+    showToast,
   }: {
     clusterModeRef: MutableRefObject<boolean>;
     showPopupById: (sightingId: number, lat: number, lng: number) => void;
+    showToast: (message: string, type?: "error" | "success" | "info") => void;
   },
 ): ClusterController {
   const configuredMaxZoom = map.getMaxZoom();
