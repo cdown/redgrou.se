@@ -1,9 +1,11 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, MutableRefObject } from "react";
 import { createRoot, Root } from "react-dom/client";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import type { Feature, FeatureCollection, GeoJsonProperties, Point } from "geojson";
+import type { ExpressionSpecification } from "@maplibre/maplibre-gl-style-spec";
 import {
   getApiUrl,
   buildApiUrl,
@@ -16,6 +18,8 @@ import { fetchSpeciesInfo } from "@/lib/species-api";
 import { TILE_ROUTE, UPLOAD_BBOX_ROUTE } from "@/lib/generated/api_constants";
 import { BboxResponse } from "@/lib/proto/redgrouse_api";
 import { SpeciesPopup, SpeciesPopupLoading } from "@/components/species-popup";
+import { ClusterPopup } from "@/components/cluster-popup";
+import type { ClusterPopupSighting } from "@/components/cluster-popup";
 import {
   COLOUR_LIFER,
   COLOUR_YEAR_TICK,
@@ -32,6 +36,49 @@ interface SightingsMapProps {
   countryTickCountry: string | null;
   onMapReady?: (navigateToSighting: (sightingId: number, lat: number, lng: number) => void) => void;
 }
+
+interface OverlapFeatureProperties {
+  sightingId: number;
+  name: string;
+  scientificName?: string;
+  count: number;
+  observedAt?: string;
+  isLifer: boolean;
+  isYearTick: boolean;
+  isCountryTick: boolean;
+}
+
+type OverlapFeature = Feature<Point, OverlapFeatureProperties>;
+
+interface ClusterController {
+  destroy: () => void;
+  applyCurrentMode: () => void;
+  clearData: () => void;
+}
+
+const CLUSTER_SOURCE_ID = "sightings-overlap";
+const CLUSTER_LAYER_ID = "sightings-overlap-clusters";
+const CLUSTER_COUNT_LAYER_ID = "sightings-overlap-cluster-count";
+const CLUSTER_POINTS_LAYER_ID = "sightings-overlap-unclustered";
+const CLUSTER_PIXEL_RADIUS = 1;
+
+type ClusterPropertyDefinition = [ExpressionSpecification | string, ExpressionSpecification];
+
+function booleanClusterProperty(property: string): ClusterPropertyDefinition {
+  const mapExpression: ExpressionSpecification = [
+    "case",
+    ["boolean", ["get", property], false],
+    1,
+    0,
+  ];
+  return ["max", mapExpression];
+}
+
+const CLUSTER_AGGREGATE_PROPERTIES: Record<string, ClusterPropertyDefinition> = {
+  hasLifer: booleanClusterProperty("isLifer"),
+  hasYearTick: booleanClusterProperty("isYearTick"),
+  hasCountryTick: booleanClusterProperty("isCountryTick"),
+};
 
 function createPopupContent(
   name: string,
@@ -228,6 +275,7 @@ function showPopupBySightingId(
 function addSightingsLayer(
   map: maplibregl.Map,
   featuresById: Map<number, maplibregl.MapGeoJSONFeature>,
+  options?: { isClickEnabled?: () => boolean },
 ): void {
   if (map.getLayer("sightings-circles")) {
     return;
@@ -269,6 +317,9 @@ function addSightingsLayer(
   });
 
   map.on("click", "sightings-circles-hit", (e) => {
+    if (options?.isClickEnabled && !options.isClickEnabled()) {
+      return;
+    }
     if (!e.features?.length) return;
     const feature = e.features[0];
     const featureId = feature.id;
@@ -307,6 +358,8 @@ export function SightingsMap({
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const onMapReadyRef = useRef(onMapReady);
   const featuresByIdRef = useRef<Map<number, maplibregl.MapGeoJSONFeature>>(new Map());
+  const clusterModeRef = useRef(false);
+  const clusterControllerRef = useRef<ClusterController | null>(null);
 
   useEffect(() => {
     onMapReadyRef.current = onMapReady;
@@ -316,6 +369,9 @@ export function SightingsMap({
     if (!containerRef.current) return;
 
     if (mapRef.current) {
+      clusterControllerRef.current?.destroy();
+      clusterControllerRef.current = null;
+      clusterModeRef.current = false;
       abortControllersRef.current.forEach((controller) => {
         controller.abort();
       });
@@ -323,6 +379,8 @@ export function SightingsMap({
       mapRef.current.remove();
       mapRef.current = null;
     }
+
+    clusterModeRef.current = false;
 
     // Use 1.5x supersampling for smoother 3D building edges on high-DPI displays
     const pixelRatio =
@@ -501,7 +559,17 @@ export function SightingsMap({
         tiles: [tileUrl],
       });
 
-      addSightingsLayer(map, featuresByIdRef.current);
+      addSightingsLayer(map, featuresByIdRef.current, {
+        isClickEnabled: () => !clusterModeRef.current,
+      });
+
+      clusterControllerRef.current?.destroy();
+      clusterControllerRef.current = setupOverlapClusters(map, {
+        clusterModeRef,
+        showPopupById: (sightingId, lat, lng) => {
+          showPopupBySightingId(map, sightingId, lat, lng, featuresByIdRef.current);
+        },
+      });
 
       // Pre-cache all features as tiles load for O(1) lookup
       // Must be after layers are added so the layer exists when querying
@@ -542,6 +610,9 @@ export function SightingsMap({
     mapRef.current = map;
 
     return () => {
+      clusterControllerRef.current?.destroy();
+      clusterControllerRef.current = null;
+      clusterModeRef.current = false;
       attributionObserver.disconnect();
       controllersMap.forEach((controller) => {
         controller.abort();
@@ -597,7 +668,12 @@ export function SightingsMap({
       tiles: [tileUrl],
     });
 
-    addSightingsLayer(map, featuresByIdRef.current);
+    addSightingsLayer(map, featuresByIdRef.current, {
+      isClickEnabled: () => !clusterModeRef.current,
+    });
+
+    clusterControllerRef.current?.clearData();
+    clusterControllerRef.current?.applyCurrentMode();
 
     const newSource = map.getSource("sightings") as maplibregl.VectorTileSource;
     if (newSource) {
@@ -676,4 +752,525 @@ export function SightingsMap({
   }, [uploadId, countryTickCountry, filter, lifersOnly, yearTickYear]);
 
   return <div ref={containerRef} className="h-full w-full" />;
+}
+
+function setupOverlapClusters(
+  map: maplibregl.Map,
+  {
+    clusterModeRef,
+    showPopupById,
+  }: {
+    clusterModeRef: MutableRefObject<boolean>;
+    showPopupById: (sightingId: number, lat: number, lng: number) => void;
+  },
+): ClusterController {
+  const configuredMaxZoom = map.getMaxZoom();
+  const maxZoom = Number.isFinite(configuredMaxZoom) ? configuredMaxZoom : 22;
+  const activationZoom = Math.max(maxZoom - 1, 0);
+  let clusterPopup: maplibregl.Popup | null = null;
+  let clusterPopupRoot: Root | null = null;
+  let dataUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+
+  if (!map.getSource(CLUSTER_SOURCE_ID)) {
+    map.addSource(CLUSTER_SOURCE_ID, {
+      type: "geojson",
+      data: emptyFeatureCollection(),
+      cluster: true,
+      clusterRadius: CLUSTER_PIXEL_RADIUS,
+      clusterMaxZoom: maxZoom,
+      clusterProperties: CLUSTER_AGGREGATE_PROPERTIES,
+    });
+  }
+
+  if (!map.getLayer(CLUSTER_LAYER_ID)) {
+    map.addLayer({
+      id: CLUSTER_LAYER_ID,
+      type: "circle",
+      source: CLUSTER_SOURCE_ID,
+      layout: { visibility: "none" },
+      filter: ["has", "point_count"],
+      paint: {
+        "circle-radius": ["step", ["get", "point_count"], 16, 5, 20, 15, 24],
+        "circle-color": [
+          "case",
+          [">", ["get", "hasLifer"], 0],
+          COLOUR_LIFER,
+          [">", ["get", "hasYearTick"], 0],
+          COLOUR_YEAR_TICK,
+          [">", ["get", "hasCountryTick"], 0],
+          COLOUR_COUNTRY_TICK,
+          COLOUR_NORMAL_SIGHTING,
+        ],
+        "circle-opacity": 0.9,
+        "circle-stroke-color": COLOUR_WHITE,
+        "circle-stroke-width": 2,
+      },
+    });
+  }
+
+  if (!map.getLayer(CLUSTER_COUNT_LAYER_ID)) {
+    map.addLayer({
+      id: CLUSTER_COUNT_LAYER_ID,
+      type: "symbol",
+      source: CLUSTER_SOURCE_ID,
+      layout: {
+        visibility: "none",
+        "text-field": ["to-string", ["get", "point_count"]],
+        "text-size": 13,
+      },
+      filter: ["has", "point_count"],
+      paint: {
+        "text-color": COLOUR_WHITE,
+      },
+    });
+  }
+
+  if (!map.getLayer(CLUSTER_POINTS_LAYER_ID)) {
+    map.addLayer({
+      id: CLUSTER_POINTS_LAYER_ID,
+      type: "circle",
+      source: CLUSTER_SOURCE_ID,
+      layout: { visibility: "none" },
+      filter: ["!", ["has", "point_count"]],
+      paint: {
+        "circle-radius": 6,
+        "circle-color": [
+          "case",
+          ["boolean", ["get", "isLifer"], false],
+          COLOUR_LIFER,
+          ["boolean", ["get", "isCountryTick"], false],
+          COLOUR_COUNTRY_TICK,
+          ["boolean", ["get", "isYearTick"], false],
+          COLOUR_YEAR_TICK,
+          COLOUR_NORMAL_SIGHTING,
+        ],
+        "circle-stroke-width": 1.5,
+        "circle-stroke-color": COLOUR_WHITE,
+      },
+    });
+  }
+
+  const updateBaseLayerOpacity = (opacity: number) => {
+    if (map.getLayer("sightings-circles")) {
+      map.setPaintProperty("sightings-circles", "circle-opacity", opacity);
+      map.setPaintProperty("sightings-circles", "circle-stroke-opacity", opacity);
+    }
+  };
+
+  const setClusterVisibility = (visible: boolean) => {
+    const visibility = visible ? "visible" : "none";
+    if (map.getLayer(CLUSTER_LAYER_ID)) {
+      map.setLayoutProperty(CLUSTER_LAYER_ID, "visibility", visibility);
+    }
+    if (map.getLayer(CLUSTER_COUNT_LAYER_ID)) {
+      map.setLayoutProperty(CLUSTER_COUNT_LAYER_ID, "visibility", visibility);
+    }
+    if (map.getLayer(CLUSTER_POINTS_LAYER_ID)) {
+      map.setLayoutProperty(CLUSTER_POINTS_LAYER_ID, "visibility", visibility);
+    }
+  };
+
+  const clearClusterPopup = () => {
+    if (clusterPopupRoot) {
+      clusterPopupRoot.unmount();
+      clusterPopupRoot = null;
+    }
+    if (clusterPopup) {
+      clusterPopup.remove();
+      clusterPopup = null;
+    }
+  };
+
+  const applyCurrentMode = () => {
+    const active = clusterModeRef.current;
+    updateBaseLayerOpacity(active ? 0 : 1);
+    setClusterVisibility(active);
+    if (!active) {
+      clearClusterPopup();
+    }
+  };
+
+  const ensureClusterSource = () => map.getSource(CLUSTER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+
+  const clearClusterData = () => {
+    const source = ensureClusterSource();
+    if (source) {
+      source.setData(emptyFeatureCollection());
+    }
+  };
+
+  const updateClusterData = () => {
+    if (!clusterModeRef.current) {
+      return;
+    }
+    const source = ensureClusterSource();
+    if (!source || !map.getLayer("sightings-circles-hit")) {
+      return;
+    }
+    const rendered = map.queryRenderedFeatures(undefined, {
+      layers: ["sightings-circles-hit"],
+    });
+    source.setData(buildOverlapFeatureCollection(rendered));
+  };
+
+  const scheduleClusterDataUpdate = () => {
+    if (!clusterModeRef.current) {
+      return;
+    }
+    if (dataUpdateTimer) {
+      return;
+    }
+    dataUpdateTimer = setTimeout(() => {
+      dataUpdateTimer = null;
+      updateClusterData();
+    }, 120);
+  };
+
+  const openClusterPopup = (coordinates: [number, number], sightings: ClusterPopupSighting[]) => {
+    if (!sightings.length) {
+      return;
+    }
+    clearClusterPopup();
+    const container = document.createElement("div");
+    container.className = "species-popup";
+    clusterPopupRoot = createRoot(container);
+    clusterPopupRoot.render(
+      <ClusterPopup
+        sightings={sightings}
+        onSelect={(selected) => {
+          clearClusterPopup();
+          showPopupById(selected.id, selected.lat, selected.lng);
+        }}
+      />,
+    );
+    clusterPopup = new maplibregl.Popup({
+      maxWidth: "320px",
+      closeButton: true,
+      closeOnClick: true,
+    })
+      .setLngLat(coordinates)
+      .setDOMContent(container)
+      .addTo(map);
+    clusterPopup.on("close", () => {
+      clearClusterPopup();
+    });
+  };
+
+  const getClusterSightings = async (
+    clusterId: number,
+    total: number,
+  ): Promise<ClusterPopupSighting[]> => {
+    const source = ensureClusterSource();
+    if (!source || !source.getClusterLeaves) {
+      return [];
+    }
+    const sightings: ClusterPopupSighting[] = [];
+    const pageSize = 25;
+    let offset = 0;
+
+    while (sightings.length < total) {
+      const leaves = await source
+        .getClusterLeaves(clusterId, pageSize, offset)
+        .catch(() => null);
+      const normalizedLeaves = leaves as
+        | Array<maplibregl.MapGeoJSONFeature | Feature<Point, GeoJsonProperties>>
+        | null;
+
+      if (!normalizedLeaves || !normalizedLeaves.length) {
+        break;
+      }
+
+      normalizedLeaves.forEach((leaf) => {
+        const sighting = mapLeafToSighting(leaf);
+        if (sighting) {
+          sightings.push(sighting);
+        }
+      });
+      offset += normalizedLeaves.length;
+    }
+
+    return sightings;
+  };
+
+  const handleClusterClick = (event: maplibregl.MapLayerMouseEvent) => {
+    if (!clusterModeRef.current || !event.features?.length) {
+      return;
+    }
+    const feature = event.features[0];
+    if (feature.geometry.type !== "Point" || !feature.geometry.coordinates) {
+      return;
+    }
+    const coordinates = feature.geometry.coordinates as [number, number];
+    const clusterId = getNumericId(
+      feature.properties?.cluster_id ?? feature.properties?.clusterId,
+    );
+    if (clusterId === null) {
+      return;
+    }
+    const pointCount = parseCount(feature.properties?.point_count);
+    const currentZoom = map.getZoom();
+    const source = ensureClusterSource();
+    if (!source) {
+      return;
+    }
+
+    if (currentZoom < maxZoom && source.getClusterExpansionZoom) {
+      source
+        .getClusterExpansionZoom(clusterId)
+        .then((targetZoom) => {
+          if (typeof targetZoom !== "number") {
+            return;
+          }
+          map.easeTo({
+            center: coordinates,
+            zoom: Math.min(targetZoom, maxZoom),
+          });
+        })
+        .catch(() => {});
+      return;
+    }
+
+    getClusterSightings(clusterId, pointCount)
+      .then((sightings) => {
+        if (sightings.length) {
+          openClusterPopup(coordinates, sightings);
+        }
+      })
+      .catch(() => {});
+  };
+
+  const handleUnclusteredClick = (event: maplibregl.MapLayerMouseEvent) => {
+    if (!clusterModeRef.current || !event.features?.length) {
+      return;
+    }
+    const feature = event.features[0];
+    if (feature.geometry.type !== "Point" || !feature.geometry.coordinates) {
+      return;
+    }
+    const coordinates = feature.geometry.coordinates as [number, number];
+    const sightingId = getNumericId(feature.properties?.sightingId ?? feature.id);
+    if (sightingId === null) {
+      return;
+    }
+    showPopupById(sightingId, coordinates[1], coordinates[0]);
+  };
+
+  const handleZoomChange = () => {
+    const shouldEnable = map.getZoom() >= activationZoom;
+    if (clusterModeRef.current === shouldEnable) {
+      if (shouldEnable) {
+        scheduleClusterDataUpdate();
+      }
+      return;
+    }
+    clusterModeRef.current = shouldEnable;
+    applyCurrentMode();
+    if (shouldEnable) {
+      updateClusterData();
+    } else {
+      clearClusterData();
+    }
+  };
+
+  const handleMoveEnd = () => {
+    if (clusterModeRef.current) {
+      scheduleClusterDataUpdate();
+    }
+  };
+
+  const handleSourceData = (event: maplibregl.MapSourceDataEvent) => {
+    if (clusterModeRef.current && event.sourceId === "sightings" && event.isSourceLoaded) {
+      scheduleClusterDataUpdate();
+    }
+  };
+
+  const handleMouseEnter = () => {
+    map.getCanvas().style.cursor = "pointer";
+  };
+
+  const handleMouseLeave = () => {
+    map.getCanvas().style.cursor = "";
+  };
+
+  map.on("zoom", handleZoomChange);
+  map.on("moveend", handleMoveEnd);
+  map.on("sourcedata", handleSourceData);
+  map.on("click", CLUSTER_LAYER_ID, handleClusterClick);
+  map.on("click", CLUSTER_POINTS_LAYER_ID, handleUnclusteredClick);
+  map.on("mouseenter", CLUSTER_LAYER_ID, handleMouseEnter);
+  map.on("mouseleave", CLUSTER_LAYER_ID, handleMouseLeave);
+  map.on("mouseenter", CLUSTER_POINTS_LAYER_ID, handleMouseEnter);
+  map.on("mouseleave", CLUSTER_POINTS_LAYER_ID, handleMouseLeave);
+
+  handleZoomChange();
+
+  return {
+    destroy: () => {
+      clusterModeRef.current = false;
+      if (dataUpdateTimer) {
+        clearTimeout(dataUpdateTimer);
+        dataUpdateTimer = null;
+      }
+      clearClusterPopup();
+      map.off("zoom", handleZoomChange);
+      map.off("moveend", handleMoveEnd);
+      map.off("sourcedata", handleSourceData);
+      map.off("click", CLUSTER_LAYER_ID, handleClusterClick);
+      map.off("click", CLUSTER_POINTS_LAYER_ID, handleUnclusteredClick);
+      map.off("mouseenter", CLUSTER_LAYER_ID, handleMouseEnter);
+      map.off("mouseleave", CLUSTER_LAYER_ID, handleMouseLeave);
+      map.off("mouseenter", CLUSTER_POINTS_LAYER_ID, handleMouseEnter);
+      map.off("mouseleave", CLUSTER_POINTS_LAYER_ID, handleMouseLeave);
+      if (map.getLayer(CLUSTER_POINTS_LAYER_ID)) {
+        map.removeLayer(CLUSTER_POINTS_LAYER_ID);
+      }
+      if (map.getLayer(CLUSTER_COUNT_LAYER_ID)) {
+        map.removeLayer(CLUSTER_COUNT_LAYER_ID);
+      }
+      if (map.getLayer(CLUSTER_LAYER_ID)) {
+        map.removeLayer(CLUSTER_LAYER_ID);
+      }
+      if (map.getSource(CLUSTER_SOURCE_ID)) {
+        map.removeSource(CLUSTER_SOURCE_ID);
+      }
+      updateBaseLayerOpacity(1);
+      map.getCanvas().style.cursor = "";
+    },
+    applyCurrentMode,
+    clearData: clearClusterData,
+  };
+}
+
+function emptyFeatureCollection(): FeatureCollection<Point, OverlapFeatureProperties> {
+  return {
+    type: "FeatureCollection",
+    features: [],
+  };
+}
+
+function buildOverlapFeatureCollection(
+  features: maplibregl.MapGeoJSONFeature[],
+): FeatureCollection<Point, OverlapFeatureProperties> {
+  const seen = new Set<number>();
+  const converted: OverlapFeature[] = [];
+  features.forEach((feature) => {
+    const overlapFeature = convertToOverlapFeature(feature);
+    if (!overlapFeature) {
+      return;
+    }
+    const sightingId = overlapFeature.properties.sightingId;
+    if (seen.has(sightingId)) {
+      return;
+    }
+    seen.add(sightingId);
+    converted.push(overlapFeature);
+  });
+
+  return {
+    type: "FeatureCollection",
+    features: converted,
+  };
+}
+
+function convertToOverlapFeature(feature: maplibregl.MapGeoJSONFeature): OverlapFeature | null {
+  if (feature.geometry.type !== "Point" || !feature.geometry.coordinates) {
+    return null;
+  }
+  const coordinates = feature.geometry.coordinates as [number, number];
+  const sightingId = getNumericId(feature.id);
+  if (sightingId === null) {
+    return null;
+  }
+  const props = feature.properties ?? {};
+
+  return {
+    type: "Feature",
+    id: sightingId,
+    geometry: {
+      type: "Point",
+      coordinates,
+    },
+    properties: {
+      sightingId,
+      name: typeof props.name === "string" ? props.name : "Unknown",
+      scientificName:
+        typeof props.scientific_name === "string" ? props.scientific_name : undefined,
+      count: parseCount(props.count),
+      observedAt: props.observed_at?.toString(),
+      isLifer: boolFromProperty(props.lifer),
+      isYearTick: boolFromProperty(props.year_tick),
+      isCountryTick: boolFromProperty(props.country_tick),
+    },
+  };
+}
+
+function mapLeafToSighting(
+  feature: maplibregl.MapGeoJSONFeature | Feature<Point, GeoJsonProperties>,
+): ClusterPopupSighting | null {
+  if (feature.geometry.type !== "Point" || !feature.geometry.coordinates) {
+    return null;
+  }
+  const coordinates = feature.geometry.coordinates as [number, number];
+  const properties = (feature.properties ?? {}) as Record<string, unknown>;
+  const baseId = "id" in feature ? feature.id : undefined;
+  const sightingId = getNumericId(properties.sightingId ?? baseId);
+  if (sightingId === null) {
+    return null;
+  }
+
+  return {
+    id: sightingId,
+    lat: coordinates[1],
+    lng: coordinates[0],
+    name: typeof properties.name === "string" ? (properties.name as string) : "Unknown",
+    scientificName:
+      typeof properties.scientificName === "string"
+        ? (properties.scientificName as string)
+        : typeof properties.scientific_name === "string"
+        ? (properties.scientific_name as string)
+        : undefined,
+    count: parseCount(properties.count),
+    observedAt:
+      stringFromValue(properties.observedAt) ?? stringFromValue(properties.observed_at),
+    isLifer: boolFromProperty(properties.isLifer ?? properties.lifer),
+    isYearTick: boolFromProperty(properties.isYearTick ?? properties.year_tick),
+    isCountryTick: boolFromProperty(properties.isCountryTick ?? properties.country_tick),
+  };
+}
+
+function getNumericId(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function parseCount(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return 1;
+}
+
+function boolFromProperty(value: unknown): boolean {
+  return value === 1 || value === "1" || value === true;
+}
+
+function stringFromValue(value: unknown): string | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  return String(value);
 }
