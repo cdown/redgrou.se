@@ -210,62 +210,10 @@ where
     Ok(sink.total_rows())
 }
 
-async fn compute_lifer_and_year_tick(
+async fn compute_grid_cell_visibility(
     pool: &SqlitePool,
     upload_id_blob: &[u8],
 ) -> Result<(), DbQueryError> {
-    // Derive lifer, year, and country ticks (first sightings per grouping) and bump their vis_rank.
-    db::query_with_timeout(
-        sqlx::query(
-            "UPDATE sightings SET lifer = 1 WHERE id IN (
-            SELECT id FROM (
-                SELECT id, ROW_NUMBER() OVER (PARTITION BY species_id ORDER BY observed_at) as rn
-                FROM sightings WHERE upload_id = ?
-            ) WHERE rn = 1
-        )",
-        )
-        .bind(upload_id_blob)
-        .execute(pool),
-    )
-    .await?;
-
-    db::query_with_timeout(
-        sqlx::query(
-        "UPDATE sightings SET year_tick = 1 WHERE id IN (
-            SELECT id FROM (
-                SELECT id, ROW_NUMBER() OVER (PARTITION BY species_id, year ORDER BY observed_at) as rn
-                FROM sightings WHERE upload_id = ?
-            ) WHERE rn = 1
-        )"
-        )
-        .bind(upload_id_blob)
-        .execute(pool),
-    )
-    .await?;
-
-    db::query_with_timeout(
-        sqlx::query(
-        "UPDATE sightings SET country_tick = 1 WHERE id IN (
-            SELECT id FROM (
-                SELECT id, ROW_NUMBER() OVER (PARTITION BY species_id, country_code ORDER BY observed_at) as rn
-                FROM sightings WHERE upload_id = ? AND country_code IS NOT NULL
-            ) WHERE rn = 1
-        )"
-        )
-        .bind(upload_id_blob)
-        .execute(pool),
-    )
-    .await?;
-
-    // Boost visibility of lifers, year ticks, and country ticks (rank 0 = highest priority)
-    // This ensures 'important' sightings are seen even at world-view zoom levels
-    db::query_with_timeout(
-        sqlx::query("UPDATE sightings SET vis_rank = 0 WHERE upload_id = ? AND (lifer = 1 OR year_tick = 1 OR country_tick = 1)")
-            .bind(upload_id_blob)
-            .execute(pool),
-    )
-    .await?;
-
     // Ensure at least one sighting per 1-degree grid cell is visible. Basically the logic is:
     //
     // 1. Partitions data into grid cells
@@ -350,8 +298,9 @@ pub async fn upload_csv(
             e.log("updating upload row_count");
         }
 
-        if let Err(e) = compute_lifer_and_year_tick(&pool, &upload_id_blob[..]).await {
-            e.log("computing lifer/year_tick flags");
+        // Still need to compute grid cell visibility as a post-processing step
+        if let Err(e) = compute_grid_cell_visibility(&pool, &upload_id_blob[..]).await {
+            e.log("computing grid cell visibility");
         }
 
         info!(
@@ -556,8 +505,8 @@ pub async fn update_csv(
             e.log("updating upload metadata after replace");
         }
 
-        if let Err(e) = compute_lifer_and_year_tick(&pool, &upload_id_blob[..]).await {
-            e.log("computing lifer/year_tick flags");
+        if let Err(e) = compute_grid_cell_visibility(&pool, &upload_id_blob[..]).await {
+            e.log("computing grid cell visibility");
         }
 
         info!(

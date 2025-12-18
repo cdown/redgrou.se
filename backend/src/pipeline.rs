@@ -7,6 +7,8 @@ use once_cell::sync::Lazy;
 use serde::{ser::SerializeTuple, Serialize, Serializer};
 use smartstring::{LazyCompact, SmartString};
 use sqlx::{Acquire, Executor, Sqlite, Transaction};
+use std::collections::{hash_map::DefaultHasher, HashSet};
+use std::hash::{Hash, Hasher};
 use tracing::error;
 use uuid::Uuid;
 
@@ -65,6 +67,11 @@ pub struct ProcessedSighting {
     pub latitude: f64,
     pub longitude: f64,
     pub year: i32,
+    // Tick flags (computed during upload)
+    pub lifer: bool,
+    pub year_tick: bool,
+    pub country_tick: bool,
+    pub vis_rank: i32,
 }
 
 impl Serialize for ProcessedSighting {
@@ -76,9 +83,9 @@ impl Serialize for ProcessedSighting {
         // This removes serialize_field calls that write field names for every single row,
         // reducing payload size by ~40% and serialization time.
         // Serialization order: [uuid, species_id, country_code, region_code,
-        //                        observed_at, count, latitude, longitude, year]
+        //                        observed_at, count, latitude, longitude, year, lifer, year_tick, country_tick, vis_rank]
         // SELECT order must match INSERT column order exactly.
-        let mut tup = serializer.serialize_tuple(9)?;
+        let mut tup = serializer.serialize_tuple(13)?;
 
         tup.serialize_element(&self.sighting_uuid)?; // Index 0
         tup.serialize_element(&self.species_id)?; // Index 1
@@ -89,6 +96,10 @@ impl Serialize for ProcessedSighting {
         tup.serialize_element(&self.latitude)?; // Index 6
         tup.serialize_element(&self.longitude)?; // Index 7
         tup.serialize_element(&self.year)?; // Index 8
+        tup.serialize_element(&(if self.lifer { 1 } else { 0 }))?; // Index 9
+        tup.serialize_element(&(if self.year_tick { 1 } else { 0 }))?; // Index 10
+        tup.serialize_element(&(if self.country_tick { 1 } else { 0 }))?; // Index 11
+        tup.serialize_element(&self.vis_rank)?; // Index 12
 
         tup.end()
     }
@@ -248,6 +259,10 @@ impl Geocoder {
                     region_code,
                     observed_at: sighting.observed_at.into(),
                     year,
+                    lifer: false, // Will be set during flush
+                    year_tick: false, // Will be set during flush
+                    country_tick: false, // Will be set during flush
+                    vis_rank: 0, // Will be set during flush
                 }
             })
             .collect())
@@ -266,6 +281,10 @@ pub struct DbSink {
     total_rows: usize,
     // Reusable buffer for JSON serialization to avoid per-batch allocations
     json_buffer: Vec<u8>,
+    // Track seen species/years/countries for tick calculation
+    seen_species: HashSet<i64>,
+    seen_year_ticks: HashSet<(i64, i32)>,
+    seen_country_ticks: HashSet<(i64, String)>,
 }
 
 impl DbSink {
@@ -276,6 +295,9 @@ impl DbSink {
             total_rows: 0,
             // Pre-allocate ~1MB to avoid growing during serialization
             json_buffer: Vec::with_capacity(1024 * 1024),
+            seen_species: HashSet::new(),
+            seen_year_ticks: HashSet::new(),
+            seen_country_ticks: HashSet::new(),
         }
     }
 
@@ -308,6 +330,7 @@ impl DbSink {
             })?;
 
             // Look up or insert species for all sightings in the batch
+            // and compute tick flags
             for sighting in &mut self.batch {
                 if sighting.species_id.is_none() {
                     let scientific_name_str = sighting.scientific_name.as_deref();
@@ -326,6 +349,40 @@ impl DbSink {
                             ));
                         }
                     }
+                }
+
+                let species_id = sighting.species_id.expect("species_id should be set");
+
+                // Check for lifer (first sighting of this species in this upload)
+                if !self.seen_species.contains(&species_id) {
+                    sighting.lifer = true;
+                    self.seen_species.insert(species_id);
+                }
+
+                // Check for year tick (first sighting of this species in this year)
+                let year_tick_key = (species_id, sighting.year);
+                if !self.seen_year_ticks.contains(&year_tick_key) {
+                    sighting.year_tick = true;
+                    self.seen_year_ticks.insert(year_tick_key);
+                }
+
+                // Check for country tick (first sighting of this species in this country)
+                if !sighting.country_code.is_empty() && sighting.country_code != "XX" {
+                    let country_tick_key = (species_id, sighting.country_code.to_string());
+                    if !self.seen_country_ticks.contains(&country_tick_key) {
+                        sighting.country_tick = true;
+                        self.seen_country_ticks.insert(country_tick_key);
+                    }
+                }
+
+                // Set vis_rank: 0 for lifers/year_ticks/country_ticks, pseudo-random otherwise
+                if sighting.lifer || sighting.year_tick || sighting.country_tick {
+                    sighting.vis_rank = 0;
+                } else {
+                    // Use hash of UUID for pseudo-random vis_rank (0-10000)
+                    let mut hasher = DefaultHasher::new();
+                    sighting.sighting_uuid.hash(&mut hasher);
+                    sighting.vis_rank = (hasher.finish() % 10001) as i32;
                 }
             }
 
@@ -458,7 +515,7 @@ where
     INSERT INTO sightings (
         upload_id, sighting_uuid, species_id,
         count, latitude, longitude, country_code,
-        region_code, observed_at, year, lifer, year_tick, vis_rank
+        region_code, observed_at, year, lifer, year_tick, country_tick, vis_rank
     )
     SELECT
         ?1,
@@ -471,8 +528,10 @@ where
         value->>3, -- region_code
         value->>4, -- observed_at
         CAST(value->>8 AS INTEGER), -- year
-        0, 0,
-        ABS(RANDOM()) % 10001 -- vis_rank: random 0-10000 (lifers/year_ticks will override to 0 later)
+        CAST(value->>9 AS INTEGER), -- lifer
+        CAST(value->>10 AS INTEGER), -- year_tick
+        CAST(value->>11 AS INTEGER), -- country_tick
+        CAST(value->>12 AS INTEGER) -- vis_rank
     FROM json_each(?2)
     "#;
 
