@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   MoreVertical,
@@ -14,6 +14,7 @@ import {
   Upload,
   Info,
   Github,
+  Type,
 } from "lucide-react";
 import { removeEditToken } from "@/lib/storage";
 import {
@@ -24,29 +25,38 @@ import {
   parseProtoResponse,
 } from "@/lib/api";
 import { VERSION_ROUTE, UPLOAD_DETAILS_ROUTE } from "@/lib/generated/api_constants";
-import { VersionInfo as VersionInfoDecoder } from "@/lib/proto/redgrouse_api";
+import {
+  VersionInfo as VersionInfoDecoder,
+  UploadMetadata as UploadMetadataDecoder,
+} from "@/lib/proto/redgrouse_api";
 import { FilterGroup } from "@/lib/filter-types";
+import type { UploadMetadata as UploadMetadataMessage } from "@/lib/proto/redgrouse_api";
+import { sanitizeText } from "@/lib/sanitize";
 
 interface ActionsMenuProps {
   uploadId: string;
   filename: string;
+  title: string;
   rowCount: number;
   isFilterOpen: boolean;
   onToggleFilter: () => void;
   filter: FilterGroup | null;
   editToken: string | null;
   onUpdateComplete?: () => void;
+  onRenameComplete?: (metadata: UploadMetadataMessage) => void;
 }
 
 export function ActionsMenu({
   uploadId,
   filename,
+  title,
   rowCount,
   isFilterOpen,
   onToggleFilter,
   filter,
   editToken,
   onUpdateComplete,
+  onRenameComplete,
 }: ActionsMenuProps) {
   const router = useRouter();
   const [menuExpanded, setMenuExpanded] = useState(false);
@@ -55,15 +65,29 @@ export function ActionsMenu({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState(title);
   const [backendVersion, setBackendVersion] = useState<{
     gitHash: string;
     buildDate: string;
     rustcVersion: string;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const safeTitle = sanitizeText(title);
+  const safeFilename = sanitizeText(filename);
+
+  useEffect(() => {
+    setRenameValue(title);
+  }, [title]);
+
+  const renameCharCount = renameValue.trim().length;
+  const renameDisabled =
+    renameCharCount === 0 || renameCharCount > 128 || !editToken;
 
   const handleCopyLink = useCallback(async () => {
     const url = window.location.origin + "/single/" + uploadId;
@@ -160,6 +184,45 @@ export function ActionsMenu({
     [handleUpdate],
   );
 
+  const handleRenameSubmit = useCallback(async () => {
+    if (!editToken) return;
+    const trimmed = renameValue.trim();
+    if (trimmed.length === 0) {
+      setRenameError("Name cannot be empty");
+      return;
+    }
+    if (trimmed.length > 128) {
+      setRenameError("Name must be at most 128 characters");
+      return;
+    }
+
+    setIsRenaming(true);
+    setRenameError(null);
+
+    try {
+      const res = await apiFetch(
+        buildApiUrl(UPLOAD_DETAILS_ROUTE, { upload_id: uploadId }),
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${editToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ display_name: trimmed }),
+        },
+      );
+
+      await checkApiResponse(res, "Rename failed");
+      const metadata = await parseProtoResponse(res, UploadMetadataDecoder);
+      onRenameComplete?.(metadata);
+      setShowRenameModal(false);
+    } catch (err) {
+      setRenameError(getErrorMessage(err, "Rename failed"));
+    } finally {
+      setIsRenaming(false);
+    }
+  }, [editToken, uploadId, renameValue, onRenameComplete]);
+
   return (
     <>
       <div className="flex flex-col overflow-hidden rounded-lg bg-white shadow-lg">
@@ -234,6 +297,18 @@ export function ActionsMenu({
                 </button>
                 <button
                   onClick={() => {
+                    setRenameValue(title);
+                    setRenameError(null);
+                    setShowRenameModal(true);
+                    setMenuExpanded(false);
+                  }}
+                  className="flex items-center gap-2 border-t px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
+                >
+                  <Type className="h-4 w-4" />
+                  Rename upload
+                </button>
+                <button
+                  onClick={() => {
                     setShowUpdateModal(true);
                     setMenuExpanded(false);
                   }}
@@ -300,7 +375,7 @@ export function ActionsMenu({
             <p className="mb-6 text-sm text-stone-600">
               This will permanently delete all{" "}
               {rowCount.toLocaleString()} sightings from{" "}
-              <strong>{filename}</strong>. This action cannot be undone.
+              <strong>{safeTitle}</strong>. This action cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -380,6 +455,65 @@ export function ActionsMenu({
                     <Upload className="h-4 w-4" />
                     Choose file
                   </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRenameModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-semibold text-stone-900">
+              Rename upload
+            </h3>
+            <p className="mb-4 text-sm text-stone-600">
+              Choose a display name (max 128 characters).
+            </p>
+            <p className="mb-4 text-xs text-stone-500">
+              Original file: {safeFilename}
+            </p>
+            {renameError && (
+              <p className="mb-3 text-sm font-medium text-rose-600">
+                {renameError}
+              </p>
+            )}
+            <input
+              type="text"
+              maxLength={128}
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-900 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
+              placeholder="e.g. Spring migration 2024"
+              autoFocus
+            />
+            <div className="mt-2 text-right text-xs text-stone-500">
+              {renameCharCount}/128
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowRenameModal(false);
+                  setRenameError(null);
+                }}
+                disabled={isRenaming}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-stone-600 hover:bg-stone-100 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRenameSubmit}
+                disabled={renameDisabled || isRenaming}
+                className="flex items-center gap-2 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 transition-colors disabled:opacity-50"
+              >
+                {isRenaming ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save"
                 )}
               </button>
             </div>

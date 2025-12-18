@@ -11,6 +11,7 @@ message UploadMetadata {
   string upload_id = 1;
   string filename = 2;
   int64 row_count = 3;
+  string title = 4;
 }
 
 message UploadResponse {
@@ -18,12 +19,14 @@ message UploadResponse {
   string filename = 2;
   int64 row_count = 3;
   string edit_token = 4;
+  string title = 5;
 }
 
 message UpdateResponse {
   string upload_id = 1;
   string filename = 2;
   int64 row_count = 3;
+  string title = 4;
 }
 
 message DeleteResponse {

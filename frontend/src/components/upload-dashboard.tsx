@@ -44,6 +44,7 @@ import {
   UploadMetadata as UploadMetadataDecoder,
   SightingsResponse as SightingsResponseDecoder,
 } from "@/lib/proto/redgrouse_api";
+import { deriveTitleFromFilename } from "@/lib/uploads";
 
 export type UploadMetadata = UploadMetadataMessage;
 
@@ -126,6 +127,13 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   );
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
   const [nameIndex, setNameIndex] = useState<Species[]>([]);
+  const resolvedTitle = useMemo(() => {
+    if (upload.title && upload.title.trim().length > 0) {
+      return upload.title;
+    }
+    return deriveTitleFromFilename(upload.filename);
+  }, [upload.title, upload.filename]);
+
   const [editToken] = useState<string | null>(() => getEditToken(uploadId));
   const [tableTopOffset, setTableTopOffset] = useState(200);
   const navigateToLocationRef = useRef<
@@ -157,6 +165,12 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
       window.history.replaceState({}, "", cleanUrl);
     }
   }, [searchParams, uploadId]);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.title = `${resolvedTitle} | redgrou.se`;
+    }
+  }, [resolvedTitle]);
 
   useEffect(() => {
     if (!uploadId) return;
@@ -274,6 +288,10 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
       })
       .catch(() => {});
   }, [uploadId, setFilter]);
+
+  const handleRenameComplete = useCallback((metadata: UploadMetadata) => {
+    setUpload(metadata);
+  }, []);
 
   const showingFiltered =
     (filter || lifersOnly || yearTickYear !== null || countryTickCountry !== null) &&
@@ -488,14 +506,16 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
 
               <ActionsMenu
                 uploadId={upload.uploadId}
-          filename={upload.filename}
-          rowCount={upload.rowCount}
-          isFilterOpen={filterOpen}
-          onToggleFilter={() => setFilterOpen((prev) => !prev)}
-          filter={filter}
-          editToken={editToken}
-          onUpdateComplete={handleUpdateComplete}
-        />
+                  filename={upload.filename}
+                  title={resolvedTitle}
+                  rowCount={upload.rowCount}
+                  isFilterOpen={filterOpen}
+                  onToggleFilter={() => setFilterOpen((prev) => !prev)}
+                  filter={filter}
+                  editToken={editToken}
+                  onUpdateComplete={handleUpdateComplete}
+                  onRenameComplete={handleRenameComplete}
+                />
       </div>
     </main>
   );

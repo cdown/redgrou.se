@@ -7,12 +7,14 @@ use crate::db;
 use crate::error::ApiError;
 use crate::filter::{build_filter_clause, get_distinct_values, get_field_metadata, CountQuery};
 use crate::proto::{pb, Proto};
+use crate::upload::effective_display_name;
 
 #[derive(FromRow)]
 struct UploadRow {
     id: Vec<u8>,
     filename: String,
     row_count: i64,
+    display_name: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -28,9 +30,11 @@ pub async fn get_upload(
     let upload_uuid = Uuid::parse_str(&upload_id)
         .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
     let row = db::query_with_timeout(
-        sqlx::query_as::<_, UploadRow>("SELECT id, filename, row_count FROM uploads WHERE id = ?")
-            .bind(&upload_uuid.as_bytes()[..])
-            .fetch_optional(&pool),
+        sqlx::query_as::<_, UploadRow>(
+            "SELECT id, filename, row_count, display_name FROM uploads WHERE id = ?",
+        )
+        .bind(&upload_uuid.as_bytes()[..])
+        .fetch_optional(&pool),
     )
     .await
     .map_err(|e| e.into_api_error("loading upload metadata", "Database error"))?
@@ -40,10 +44,13 @@ pub async fn get_upload(
     let id_uuid = Uuid::from_slice(&row.id)
         .map_err(|_| ApiError::internal("Invalid UUID format in database"))?;
 
+    let title = effective_display_name(row.display_name, &row.filename);
+
     Ok(Proto::new(pb::UploadMetadata {
         upload_id: id_uuid.to_string(),
         filename: row.filename,
         row_count: row.row_count,
+        title,
     }))
 }
 

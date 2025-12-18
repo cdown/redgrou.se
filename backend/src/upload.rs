@@ -2,6 +2,7 @@ use axum::body::Bytes;
 use axum::extract::{multipart::Field, Multipart, Path, State};
 use axum::http::header;
 use axum::response::IntoResponse;
+use axum::Json;
 use csv_async::AsyncReaderBuilder;
 use futures::{Stream, StreamExt, TryStreamExt};
 use sha2::{Digest, Sha256};
@@ -19,10 +20,12 @@ use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
 use crate::pipeline::{CsvParser, DbSink, Geocoder, BATCH_SIZE};
 use crate::proto::{pb, Proto};
+use serde::Deserialize;
 
 pub const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 pub const MAX_UPLOAD_BODY_BYTES: usize = MAX_UPLOAD_BYTES + (2 * 1024 * 1024); // allow multipart overhead
 const UPLOAD_LIMIT_MB: usize = MAX_UPLOAD_BYTES / (1024 * 1024);
+const MAX_DISPLAY_NAME_LENGTH: usize = 128;
 
 // No salt needed: tokens are 122-bit random UUIDs, not user-chosen passwords.
 // Salting prevents rainbow table attacks on low-entropy secrets, but rainbow
@@ -353,6 +356,8 @@ pub async fn upload_csv(
             total_rows, filename, upload_id
         );
 
+        let response_title = default_display_name(&filename);
+
         return (
             axum::http::StatusCode::OK,
             Proto::new(pb::UploadResponse {
@@ -360,6 +365,7 @@ pub async fn upload_csv(
                 filename,
                 row_count: i64::try_from(total_rows).unwrap_or(i64::MAX),
                 edit_token,
+                title: response_title,
             }),
         )
             .into_response();
@@ -419,6 +425,76 @@ async fn verify_edit_token(
             .into_api_error("verifying edit token", "Database error")
             .into_response()),
     }
+}
+
+#[derive(Deserialize)]
+pub struct RenamePayload {
+    display_name: Option<String>,
+}
+
+pub async fn rename_upload(
+    State(pool): State<SqlitePool>,
+    Path(upload_id): Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<RenamePayload>,
+) -> impl IntoResponse {
+    if let Err(response) = verify_edit_token(&pool, &headers, &upload_id).await {
+        return response;
+    }
+
+    let upload_uuid = match Uuid::parse_str(&upload_id) {
+        Ok(uuid) => uuid,
+        Err(_) => {
+            return ApiError::bad_request("Invalid upload_id format").into_response();
+        }
+    };
+    let upload_id_blob = upload_uuid.as_bytes();
+
+    let display_name = match normalise_display_name(payload.display_name) {
+        Ok(name) => name,
+        Err(err) => return err.into_response(),
+    };
+
+    if let Err(e) = db::query_with_timeout(
+        sqlx::query("UPDATE uploads SET display_name = ? WHERE id = ?")
+            .bind(&display_name)
+            .bind(&upload_id_blob[..])
+            .execute(&pool),
+    )
+    .await
+    {
+        return e
+            .into_api_error("updating upload display name", "Database error")
+            .into_response();
+    }
+
+    let metadata = match db::query_with_timeout(
+        sqlx::query_as::<_, (String, i64, Option<String>)>(
+            "SELECT filename, row_count, display_name FROM uploads WHERE id = ?",
+        )
+        .bind(&upload_id_blob[..])
+        .fetch_optional(&pool),
+    )
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return ApiError::not_found("Upload not found").into_response(),
+        Err(e) => {
+            return e
+                .into_api_error("loading upload metadata", "Database error")
+                .into_response()
+        }
+    };
+
+    let title = effective_display_name(metadata.2, &metadata.0);
+
+    Proto::new(pb::UploadMetadata {
+        upload_id,
+        filename: metadata.0,
+        row_count: metadata.1,
+        title,
+    })
+    .into_response()
 }
 
 pub async fn update_csv(
@@ -486,12 +562,15 @@ pub async fn update_csv(
             total_rows, filename, upload_id
         );
 
+        let response_title = default_display_name(&filename);
+
         return (
             axum::http::StatusCode::OK,
             Proto::new(pb::UpdateResponse {
                 upload_id,
                 filename,
                 row_count: i64::try_from(total_rows).unwrap_or(i64::MAX),
+                title: response_title,
             }),
         )
             .into_response();
@@ -536,5 +615,49 @@ pub async fn delete_upload(
         Err(e) => e
             .into_api_error("deleting upload", "Database error")
             .into_response(),
+    }
+}
+
+fn normalise_display_name(value: Option<String>) -> Result<String, ApiError> {
+    let Some(raw) = value else {
+        return Err(ApiError::bad_request("display_name is required"));
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request("Display name cannot be empty"));
+    }
+    if trimmed.chars().count() > MAX_DISPLAY_NAME_LENGTH {
+        return Err(ApiError::bad_request(format!(
+            "Display name must be at most {} characters",
+            MAX_DISPLAY_NAME_LENGTH
+        )));
+    }
+    Ok(trimmed.to_string())
+}
+
+pub(crate) fn default_display_name(filename: &str) -> String {
+    if filename.len() > 4 && filename.to_ascii_lowercase().ends_with(".csv") {
+        let trimmed = &filename[..filename.len() - 4];
+        if trimmed.is_empty() {
+            filename.to_string()
+        } else {
+            trimmed.to_string()
+        }
+    } else {
+        filename.to_string()
+    }
+}
+
+pub(crate) fn effective_display_name(stored: Option<String>, filename: &str) -> String {
+    match stored {
+        Some(name) => {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                default_display_name(filename)
+            } else {
+                trimmed.to_string()
+            }
+        }
+        None => default_display_name(filename),
     }
 }

@@ -165,7 +165,9 @@ async fn main() -> anyhow::Result<()> {
         .route(api_constants::VERSION_ROUTE, get(version_info))
         .route(
             api_constants::UPLOAD_DETAILS_ROUTE,
-            get(handlers::get_upload).delete(upload::delete_upload),
+            get(handlers::get_upload)
+                .delete(upload::delete_upload)
+                .patch(upload::rename_upload),
         )
         .route(
             api_constants::UPLOAD_COUNT_ROUTE,
