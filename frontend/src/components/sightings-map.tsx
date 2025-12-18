@@ -102,6 +102,22 @@ const GEOJSON_SIGHTING_SORT_KEY: ExpressionSpecification = [
   0,
 ];
 
+function getFeaturePriority(feature: maplibregl.MapGeoJSONFeature): number {
+  const props = feature.properties;
+  if (!props) return 0;
+
+  // Handle both tile features (lifer, year_tick, country_tick) and GeoJSON
+  // features (isLifer, isYearTick, isCountryTick)
+  const lifer = props.lifer ?? props.isLifer;
+  const yearTick = props.year_tick ?? props.isYearTick;
+  const countryTick = props.country_tick ?? props.isCountryTick;
+
+  if (lifer === 1 || lifer === "1" || lifer === true) return 3;
+  if (yearTick === 1 || yearTick === "1" || yearTick === true) return 2;
+  if (countryTick === 1 || countryTick === "1" || countryTick === true) return 1;
+  return 0;
+}
+
 function createPopupContent(
   name: string,
   count: number,
@@ -325,6 +341,9 @@ function addSightingsLayer(
     type: "circle",
     source: "sightings",
     "source-layer": "sightings",
+    layout: {
+      "circle-sort-key": TILE_SIGHTING_SORT_KEY,
+    },
     paint: {
       "circle-radius": 12,
       "circle-opacity": 0,
@@ -362,7 +381,16 @@ function addSightingsLayer(
       return;
     }
     if (!e.features?.length) return;
-    const feature = e.features[0];
+
+    // Sort features by priority (highest first) to ensure we get the visually
+    // topmost marker
+    const sortedFeatures = [...e.features].sort((a, b) => {
+      const priorityA = getFeaturePriority(a);
+      const priorityB = getFeaturePriority(b);
+      return priorityB - priorityA;
+    });
+
+    const feature = sortedFeatures[0];
     const featureId = feature.id;
     if (typeof featureId !== "number") return;
 
@@ -1090,7 +1118,16 @@ function setupOverlapClusters(
     if (!clusterModeRef.current || !event.features?.length) {
       return;
     }
-    const feature = event.features[0];
+
+    // Sort features by priority (highest first) to ensure we get the visually
+    // topmost marker
+    const sortedFeatures = [...event.features].sort((a, b) => {
+      const priorityA = getFeaturePriority(a);
+      const priorityB = getFeaturePriority(b);
+      return priorityB - priorityA;
+    });
+
+    const feature = sortedFeatures[0];
     if (feature.geometry.type !== "Point" || !feature.geometry.coordinates) {
       return;
     }
