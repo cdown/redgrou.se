@@ -51,6 +51,10 @@ Filters apply to both the map (via tile query parameters) and the table view
 because things are... complicated. If you find them, please feel free to file
 an issue or PR :-)
 
+Tick filtering uses compressed roaring bitmaps stored in the `tick_bitmaps`
+table. Bitmaps are computed during upload and loaded when filtering, which
+avoids scanning all sightings.
+
 ## Database schema
 
 We use SQLite with `STRICT` tables. Dates are stored as ISO 8601 `TEXT` (STRICT
