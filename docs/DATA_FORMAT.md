@@ -45,14 +45,15 @@ code is set to `XX`.
 
 ## Tick computation
 
-After upload, the system automatically computes:
+During upload, the system automatically computes:
 
 - **Lifers**: First sighting of each species (across all uploads)
 - **Year ticks**: First sighting of each species per calendar year
 - **Country ticks**: First sighting of each species per country
 
-These flags are used for filtering and to boost visibility of significant
-sightings on the map.
+These flags are computed in-memory during CSV parsing and set immediately
+before database insertion. The flags are used for filtering and to boost
+visibility of significant sightings on the map.
 
 ## Adding support for other formats
 
