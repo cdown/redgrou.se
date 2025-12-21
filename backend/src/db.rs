@@ -33,7 +33,7 @@ impl DbPools {
     }
 }
 
-fn build_connection_options(database_url: &str) -> Result<SqliteConnectOptions, sqlx::Error> {
+fn build_read_connection_options(database_url: &str) -> Result<SqliteConnectOptions, sqlx::Error> {
     Ok(SqliteConnectOptions::from_str(database_url)?
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
@@ -44,19 +44,24 @@ fn build_connection_options(database_url: &str) -> Result<SqliteConnectOptions, 
         .busy_timeout(BUSY_TIMEOUT))
 }
 
+fn build_write_connection_options(database_url: &str) -> Result<SqliteConnectOptions, sqlx::Error> {
+    Ok(build_read_connection_options(database_url)?.pragma("locking_mode", "IMMEDIATE"))
+}
+
 pub async fn init_pool(database_url: &str) -> Result<DbPools, sqlx::Error> {
-    let options = build_connection_options(database_url)?;
+    let read_options = build_read_connection_options(database_url)?;
+    let write_options = build_write_connection_options(database_url)?;
 
     let read_pool = SqlitePoolOptions::new()
         .max_connections(READ_POOL_MAX_CONNECTIONS)
         .acquire_timeout(Duration::from_secs(30))
-        .connect_with(options.clone())
+        .connect_with(read_options)
         .await?;
 
     let write_pool = SqlitePoolOptions::new()
         .max_connections(WRITE_POOL_MAX_CONNECTIONS)
         .acquire_timeout(Duration::from_secs(30))
-        .connect_with(options)
+        .connect_with(write_options)
         .await?;
 
     info!(
