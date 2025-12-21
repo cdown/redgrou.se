@@ -47,6 +47,20 @@ pub async fn get_upload(
 
     let title = effective_display_name(row.display_name, &row.filename);
 
+    let upload_id_blob = upload_uuid.as_bytes().to_vec();
+    let write_pool = pools.write().clone();
+    tokio::spawn(async move {
+        if let Err(e) = db::query_with_timeout(
+            sqlx::query("UPDATE uploads SET last_accessed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?")
+                .bind(&upload_id_blob[..])
+                .execute(&write_pool),
+        )
+        .await
+        {
+            tracing::warn!("Failed to update last_accessed_at: {:?}", e);
+        }
+    });
+
     Ok(Proto::new(pb::UploadMetadata {
         upload_id: id_uuid.to_string(),
         filename: row.filename,
