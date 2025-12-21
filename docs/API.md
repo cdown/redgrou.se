@@ -209,3 +209,18 @@ codes:
 Request timeouts are set to 3 seconds for all endpoints except uploads.
 Upload requests have a 30 second timeout to accommodate large file uploads
 and processing.
+
+## Data retention
+
+redgrou.se implements a "view-to-renew" retention policy for GDPR compliance:
+
+- Uploads are retained for 365 days from last access (configurable via
+  `REDGROUSE_DATA_RETENTION_DAYS` environment variable, default: 365)
+- Accessing an upload (via `GET /api/uploads/{upload_id}`) automatically
+  updates its `last_accessed_at` timestamp, renewing the retention period
+- A background task runs daily to automatically delete uploads where
+  `last_accessed_at` is older than the retention period
+- Deletion cascades to all associated sightings and tick bitmaps
+
+This ensures abandoned location data is automatically removed while preserving
+actively-viewed uploads.
