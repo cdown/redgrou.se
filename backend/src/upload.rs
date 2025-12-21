@@ -158,18 +158,9 @@ where
 
     let mut parser = CsvParser::new(headers)?;
     let geocoder = Geocoder::new();
-    let mut sink = DbSink::new(upload_id.to_string());
 
-    let mut tx = db::query_with_timeout(pool.begin())
-        .await
-        .map_err(|e| e.into_api_error("starting upload transaction", "Database error"))?;
-
-    // Process rows in batches for geocoding (CPU-bound operation offloaded to blocking threads)
-    // Manual loop is used instead of iterator chunks because:
-    // 1. Async stream processing (read_byte_record is async)
-    // 2. Per-row validation and error handling
-    // 3. Geocoding batching requires collecting coordinates before async operation
     let mut pending_rows: Vec<crate::pipeline::ParsedSighting> = Vec::new();
+    let mut all_processed: Vec<crate::pipeline::ProcessedSighting> = Vec::new();
     let mut record = csv_async::ByteRecord::new();
 
     while csv_reader
@@ -180,26 +171,29 @@ where
         if let Some(parsed) = parser.parse_row(&record)? {
             pending_rows.push(parsed);
 
-            // Geocode batched rows on blocking threads to avoid stalling the async runtime.
             if pending_rows.len() >= BATCH_SIZE {
                 let processed = geocoder.geocode_batch(pending_rows).await?;
+                all_processed.extend(processed);
                 pending_rows = Vec::new();
-
-                for sighting in processed {
-                    if sink.needs_flush() {
-                        sink.flush(&mut tx).await?;
-                    }
-                    sink.add(sighting)?;
-                }
             }
         }
     }
 
     if !pending_rows.is_empty() {
         let processed = geocoder.geocode_batch(pending_rows).await?;
-        for sighting in processed {
-            sink.add(sighting)?;
+        all_processed.extend(processed);
+    }
+
+    let mut tx = db::query_with_timeout(pool.begin())
+        .await
+        .map_err(|e| e.into_api_error("starting upload transaction", "Database error"))?;
+
+    let mut sink = DbSink::new(upload_id.to_string());
+    for sighting in all_processed {
+        if sink.needs_flush() {
+            sink.flush(&mut tx).await?;
         }
+        sink.add(sighting)?;
     }
 
     sink.flush(&mut tx).await?;
