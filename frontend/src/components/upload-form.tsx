@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Upload, FileText, AlertCircle, Info } from "lucide-react";
+import { Upload, FileText, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import {
   apiFetch,
@@ -24,7 +24,6 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showStorageNotice, setShowStorageNotice] = useState(false);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -49,7 +48,6 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
 
         const result = await parseProtoResponse(res, UploadResponseDecoder);
         setEditToken(result.uploadId, result.editToken);
-        setShowStorageNotice(true);
         onUploadComplete(result);
       } catch (err) {
         setError(getErrorMessage(err, "Upload failed"));
@@ -143,32 +141,6 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
       )}
       {error && (
         <p className="mt-4 text-sm font-medium text-rose-600">{error}</p>
-      )}
-      {showStorageNotice && (
-        <div className="mt-4 rounded-lg border border-stone-200 bg-stone-50 p-3 text-left">
-          <div className="flex items-start gap-2">
-            <Info className="mt-0.5 h-4 w-4 shrink-0 text-stone-600" />
-            <div className="flex-1 space-y-1">
-              <p className="text-xs font-medium text-stone-900">
-                Edit token saved
-              </p>
-              <p className="text-xs text-stone-700">
-                An edit token has been saved to your browser&apos;s{" "}
-                <code className="rounded bg-stone-100 px-1 py-0.5 font-mono text-[10px]">
-                  localStorage
-                </code>{" "}
-                to enable future edits and deletions. This is strictly necessary
-                for the site to function.{" "}
-                <Link
-                  href="/privacy"
-                  className="underline hover:text-stone-900"
-                >
-                  Privacy policy
-                </Link>
-              </p>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );
