@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS uploads (
     filename TEXT NOT NULL,
     display_name TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    last_accessed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     row_count INTEGER DEFAULT 0,
     edit_token_hash TEXT
 ) STRICT;

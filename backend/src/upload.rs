@@ -267,7 +267,7 @@ pub async fn upload_csv(
         let edit_token_hash = hash_token(&edit_token);
 
         if let Err(e) = db::query_with_timeout(
-            sqlx::query("INSERT INTO uploads (id, filename, edit_token_hash, last_accessed_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))")
+            sqlx::query("INSERT INTO uploads (id, filename, edit_token_hash) VALUES (?, ?, ?)")
                 .bind(&upload_id_blob[..])
                 .bind(&filename)
                 .bind(&edit_token_hash)
