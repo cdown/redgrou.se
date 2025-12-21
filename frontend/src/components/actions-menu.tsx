@@ -68,6 +68,8 @@ export function ActionsMenu({
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showRenameModal, setShowRenameModal] = useState(false);
+  const [showPublicLinkWarning, setShowPublicLinkWarning] = useState(false);
+  const [showEditLinkWarning, setShowEditLinkWarning] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
@@ -91,20 +93,31 @@ export function ActionsMenu({
   const renameDisabled =
     renameCharCount === 0 || renameCharCount > 128 || !editToken;
 
-  const handleCopyLink = useCallback(async () => {
+  const handleCopyLink = useCallback(() => {
+    setShowPublicLinkWarning(true);
+    setMenuExpanded(false);
+  }, []);
+
+  const confirmCopyLink = useCallback(async () => {
     const url = window.location.origin + "/single/" + uploadId;
     await navigator.clipboard.writeText(url);
     setCopied(true);
-    setMenuExpanded(false);
+    setShowPublicLinkWarning(false);
     setTimeout(() => setCopied(false), 2000);
   }, [uploadId]);
 
-  const handleCopyEditLink = useCallback(async () => {
+  const handleCopyEditLink = useCallback(() => {
+    if (!editToken) return;
+    setShowEditLinkWarning(true);
+    setMenuExpanded(false);
+  }, [editToken]);
+
+  const confirmCopyEditLink = useCallback(async () => {
     if (!editToken) return;
     const url = `${window.location.origin}/single/${uploadId}?token=${editToken}`;
     await navigator.clipboard.writeText(url);
     setCopiedEditLink(true);
-    setMenuExpanded(false);
+    setShowEditLinkWarning(false);
     setTimeout(() => setCopiedEditLink(false), 2000);
   }, [uploadId, editToken]);
 
@@ -619,6 +632,66 @@ export function ActionsMenu({
                 className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 transition-colors"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPublicLinkWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-semibold text-stone-900">
+              Share public link?
+            </h3>
+            <p className="mb-6 text-sm text-stone-600">
+              This link grants <strong>public read access</strong> to your
+              location history. Anyone with the link can view all your
+              sightings and their GPS coordinates without authentication.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowPublicLinkWarning(false)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-stone-600 hover:bg-stone-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmCopyLink}
+                className="flex items-center gap-2 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 transition-colors"
+              >
+                <Link className="h-4 w-4" />
+                Copy link
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEditLinkWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-semibold text-stone-900">
+              Share edit link?
+            </h3>
+            <p className="mb-6 text-sm text-stone-600">
+              This link includes your <strong>authentication credentials</strong>
+              . Anyone with this link can edit, rename, replace, or delete your
+              upload. Only share this link with people you trust.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowEditLinkWarning(false)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-stone-600 hover:bg-stone-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmCopyEditLink}
+                className="flex items-center gap-2 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 transition-colors"
+              >
+                <Edit className="h-4 w-4" />
+                Copy edit link
               </button>
             </div>
           </div>
