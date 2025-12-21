@@ -12,38 +12,75 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 pub const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 const DB_TIMEOUT_MESSAGE: &str = "Database is busy, please retry";
 
-pub async fn init_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
-    let options = SqliteConnectOptions::from_str(database_url)?
+// SQLite is single writer only, having more in the pool just results in locking and other issues.
+// So instead just queue it on our side until SQLite is free again.
+const WRITE_POOL_MAX_CONNECTIONS: u32 = 1;
+const READ_POOL_MAX_CONNECTIONS: u32 = 100;
+
+#[derive(Clone)]
+pub struct DbPools {
+    read: SqlitePool,
+    write: SqlitePool,
+}
+
+impl DbPools {
+    pub fn read(&self) -> &SqlitePool {
+        &self.read
+    }
+
+    pub fn write(&self) -> &SqlitePool {
+        &self.write
+    }
+}
+
+fn build_connection_options(database_url: &str) -> Result<SqliteConnectOptions, sqlx::Error> {
+    Ok(SqliteConnectOptions::from_str(database_url)?
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
         .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
         .pragma("foreign_keys", "ON")
         .pragma("mmap_size", "314572800")
         .pragma("wal_autocheckpoint", WAL_AUTOCHECKPOINT_PAGES.to_string())
-        .busy_timeout(BUSY_TIMEOUT);
+        .busy_timeout(BUSY_TIMEOUT))
+}
 
-    let pool = SqlitePoolOptions::new()
-        .max_connections(5)
+pub async fn init_pool(database_url: &str) -> Result<DbPools, sqlx::Error> {
+    let options = build_connection_options(database_url)?;
+
+    let read_pool = SqlitePoolOptions::new()
+        .max_connections(READ_POOL_MAX_CONNECTIONS)
+        .acquire_timeout(Duration::from_secs(30))
+        .connect_with(options.clone())
+        .await?;
+
+    let write_pool = SqlitePoolOptions::new()
+        .max_connections(WRITE_POOL_MAX_CONNECTIONS)
         .acquire_timeout(Duration::from_secs(30))
         .connect_with(options)
         .await?;
 
-    info!("DB pool initialised");
+    info!(
+        "DB pools initialised (read: {}, write: {})",
+        READ_POOL_MAX_CONNECTIONS, WRITE_POOL_MAX_CONNECTIONS
+    );
 
-    Ok(pool)
+    Ok(DbPools {
+        read: read_pool,
+        write: write_pool,
+    })
 }
 
-pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::migrate!("./migrations").run(pool).await?;
+pub async fn run_migrations(pools: &DbPools) -> Result<(), sqlx::Error> {
+    sqlx::migrate!("./migrations").run(pools.write()).await?;
     info!("Database migrations completed");
     Ok(())
 }
 
-pub async fn vacuum_database(pool: &SqlitePool) {
+pub async fn vacuum_database(pools: &DbPools) {
     info!("Running database vacuum");
     let start = std::time::Instant::now();
 
-    match sqlx::query("VACUUM").execute(pool).await {
+    match sqlx::query("VACUUM").execute(pools.write()).await {
         Ok(_) => {
             let duration = start.elapsed();
             info!("Database vacuum completed in {:?}", duration);

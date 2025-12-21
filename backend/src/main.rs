@@ -8,8 +8,9 @@ use axum::routing::{get, post, put};
 use axum::{BoxError, Router};
 use dashmap::DashMap;
 use ipnet::IpNet;
+use redgrouse::db::DbPools;
 use serde::Deserialize;
-use sqlx::{Row, SqlitePool};
+use sqlx::Row;
 use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
@@ -89,9 +90,9 @@ async fn main() -> anyhow::Result<()> {
     let database_url =
         env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:redgrouse.db".to_string());
 
-    let pool = db::init_pool(&database_url).await?;
-    db::run_migrations(&pool).await?;
-    db::vacuum_database(&pool).await;
+    let pools = db::init_pool(&database_url).await?;
+    db::run_migrations(&pools).await?;
+    db::vacuum_database(&pools).await;
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -206,7 +207,7 @@ async fn main() -> anyhow::Result<()> {
                 .timeout(GLOBAL_REQUEST_TIMEOUT)
                 .into_inner(),
         )
-        .with_state(pool);
+        .with_state(pools);
 
     let port = config::parse_port()?;
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -654,7 +655,7 @@ async fn fetch_cloudflare_proxies() -> anyhow::Result<Vec<IpNet>> {
 }
 
 async fn get_bbox(
-    State(pool): State<SqlitePool>,
+    State(pools): State<DbPools>,
     Path(upload_id): Path<String>,
     Query(query): Query<CountQuery>,
 ) -> Result<Proto<pb::BboxResponse>, ApiError> {
@@ -662,7 +663,7 @@ async fn get_bbox(
         .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
 
     let filter_result = build_filter_clause(
-        &pool,
+        pools.read(),
         &upload_uuid.as_bytes()[..],
         query.filter.as_ref(),
         query.lifers_only,
@@ -683,7 +684,7 @@ async fn get_bbox(
         db_query = db_query.bind(param);
     }
 
-    let row = db::query_with_timeout(db_query.fetch_optional(&pool))
+    let row = db::query_with_timeout(db_query.fetch_optional(pools.read()))
         .await
         .map_err(|e| e.into_api_error("getting bounding box", "Database error"))?
         .ok_or_else(|| ApiError::not_found("No sightings found"))?;

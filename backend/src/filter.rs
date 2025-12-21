@@ -3,7 +3,6 @@ use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
 use roaring::RoaringBitmap;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use std::convert::TryFrom;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -363,7 +362,7 @@ const SQLITE_SAFE_PARAM_LIMIT: u64 = 30_000;
 /// Builds filter SQL clauses and parameters using roaring bitmaps for tick filters.
 /// Returns filter_clause (a string like " AND (...)" or empty string) and params.
 pub async fn build_filter_clause(
-    pool: &SqlitePool,
+    pool: &sqlx::SqlitePool,
     upload_id_blob: &[u8],
     filter_json: Option<&String>,
     lifers_only: Option<bool>,
@@ -410,7 +409,7 @@ pub async fn build_filter_clause(
 }
 
 async fn load_bitmap_or_fail(
-    pool: &SqlitePool,
+    pool: &sqlx::SqlitePool,
     upload_id_blob: &[u8],
     bitmap_type: &str,
     bitmap_key: Option<&str>,
@@ -462,7 +461,7 @@ fn bitmap_to_clause(
 }
 
 async fn build_bitmap_clause(
-    pool: &SqlitePool,
+    pool: &sqlx::SqlitePool,
     upload_id_blob: &[u8],
     lifers_only: Option<bool>,
     year_tick_year: Option<i32>,
@@ -526,7 +525,7 @@ struct FieldColumnInfo {
 }
 
 pub async fn get_distinct_values(
-    pool: &SqlitePool,
+    pool: &sqlx::SqlitePool,
     upload_id: &[u8],
     field: &str,
 ) -> Result<Vec<String>, DbQueryError> {

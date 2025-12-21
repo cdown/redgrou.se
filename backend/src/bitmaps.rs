@@ -1,10 +1,8 @@
 use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
 use roaring::RoaringBitmap;
-use sqlx::SqlitePool;
-
 pub async fn compute_and_store_bitmaps(
-    pool: &SqlitePool,
+    pool: &sqlx::SqlitePool,
     upload_id_blob: &[u8],
 ) -> Result<(), ApiError> {
     // Delete existing bitmaps for this upload (in case of update)
@@ -128,7 +126,7 @@ pub async fn compute_and_store_bitmaps(
 }
 
 pub async fn load_bitmap(
-    pool: &SqlitePool,
+    pool: &sqlx::SqlitePool,
     upload_id_blob: &[u8],
     bitmap_type: &str,
     bitmap_key: Option<&str>,

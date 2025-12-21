@@ -1,3 +1,4 @@
+use crate::db::DbPools;
 use axum::body::Bytes;
 use axum::extract::{multipart::Field, Multipart, Path, State};
 use axum::http::header;
@@ -6,7 +7,6 @@ use axum::Json;
 use csv_async::AsyncReaderBuilder;
 use futures::{Stream, StreamExt, TryStreamExt};
 use sha2::{Digest, Sha256};
-use sqlx::SqlitePool;
 use std::fmt;
 use std::io;
 use std::pin::Pin;
@@ -132,7 +132,7 @@ fn size_limit_failure(err: &csv_async::Error) -> Option<ApiError> {
 
 async fn ingest_csv_field(
     field: Field<'_>,
-    pool: &SqlitePool,
+    pool: &sqlx::SqlitePool,
     upload_id: &str,
 ) -> Result<usize, ApiError> {
     let stream = field
@@ -143,7 +143,7 @@ async fn ingest_csv_field(
     read_csv(reader, pool, upload_id).await
 }
 
-async fn read_csv<R>(reader: R, pool: &SqlitePool, upload_id: &str) -> Result<usize, ApiError>
+async fn read_csv<R>(reader: R, pool: &sqlx::SqlitePool, upload_id: &str) -> Result<usize, ApiError>
 where
     R: tokio::io::AsyncRead + Unpin + Send,
 {
@@ -212,7 +212,7 @@ where
 }
 
 async fn compute_grid_cell_visibility(
-    pool: &SqlitePool,
+    pool: &sqlx::SqlitePool,
     upload_id_blob: &[u8],
 ) -> Result<(), DbQueryError> {
     // Ensure at least one sighting per 1-degree grid cell is visible. Basically the logic is:
@@ -240,7 +240,7 @@ async fn compute_grid_cell_visibility(
 }
 
 pub async fn upload_csv(
-    State(pool): State<SqlitePool>,
+    State(pools): State<DbPools>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -263,7 +263,7 @@ pub async fn upload_csv(
                 .bind(&upload_id_blob[..])
                 .bind(&filename)
                 .bind(&edit_token_hash)
-                .execute(&pool),
+                .execute(pools.write()),
         )
         .await
         {
@@ -272,13 +272,13 @@ pub async fn upload_csv(
                 .into_response();
         }
 
-        let total_rows = match ingest_csv_field(field, &pool, &upload_id).await {
+        let total_rows = match ingest_csv_field(field, pools.write(), &upload_id).await {
             Ok(rows) => rows,
             Err(err) => {
                 if let Err(db_err) = db::query_with_timeout(
                     sqlx::query("DELETE FROM uploads WHERE id = ?")
                         .bind(&upload_id_blob[..])
-                        .execute(&pool),
+                        .execute(pools.write()),
                 )
                 .await
                 {
@@ -292,7 +292,7 @@ pub async fn upload_csv(
             sqlx::query("UPDATE uploads SET row_count = ? WHERE id = ?")
                 .bind(i64::try_from(total_rows).unwrap_or(i64::MAX))
                 .bind(&upload_id_blob[..])
-                .execute(&pool),
+                .execute(pools.write()),
         )
         .await
         {
@@ -300,12 +300,13 @@ pub async fn upload_csv(
         }
 
         // Still need to compute grid cell visibility as a post-processing step
-        if let Err(e) = compute_grid_cell_visibility(&pool, &upload_id_blob[..]).await {
+        if let Err(e) = compute_grid_cell_visibility(pools.write(), &upload_id_blob[..]).await {
             e.log("computing grid cell visibility");
         }
 
         // Compute and store Roaring bitmaps for efficient tick filtering
-        if let Err(e) = crate::bitmaps::compute_and_store_bitmaps(&pool, &upload_id_blob[..]).await
+        if let Err(e) =
+            crate::bitmaps::compute_and_store_bitmaps(pools.write(), &upload_id_blob[..]).await
         {
             error!("Failed to compute tick bitmaps: {}", e.body.error);
         }
@@ -348,7 +349,7 @@ fn extract_edit_token(headers: &axum::http::HeaderMap) -> Option<String> {
 }
 
 async fn verify_upload_access(
-    pool: &SqlitePool,
+    pool: &sqlx::SqlitePool,
     upload_id: &str,
     token: &str,
 ) -> Result<bool, DbQueryError> {
@@ -369,7 +370,7 @@ async fn verify_upload_access(
 }
 
 async fn verify_edit_token(
-    pool: &SqlitePool,
+    pool: &sqlx::SqlitePool,
     headers: &axum::http::HeaderMap,
     upload_id: &str,
 ) -> Result<(), axum::response::Response> {
@@ -392,12 +393,12 @@ pub struct RenamePayload {
 }
 
 pub async fn rename_upload(
-    State(pool): State<SqlitePool>,
+    State(pools): State<DbPools>,
     Path(upload_id): Path<String>,
     headers: axum::http::HeaderMap,
     Json(payload): Json<RenamePayload>,
 ) -> impl IntoResponse {
-    if let Err(response) = verify_edit_token(&pool, &headers, &upload_id).await {
+    if let Err(response) = verify_edit_token(pools.read(), &headers, &upload_id).await {
         return response;
     }
 
@@ -418,7 +419,7 @@ pub async fn rename_upload(
         sqlx::query("UPDATE uploads SET display_name = ? WHERE id = ?")
             .bind(&display_name)
             .bind(&upload_id_blob[..])
-            .execute(&pool),
+            .execute(pools.write()),
     )
     .await
     {
@@ -432,7 +433,7 @@ pub async fn rename_upload(
             "SELECT filename, row_count, display_name FROM uploads WHERE id = ?",
         )
         .bind(&upload_id_blob[..])
-        .fetch_optional(&pool),
+        .fetch_optional(pools.read()),
     )
     .await
     {
@@ -457,12 +458,12 @@ pub async fn rename_upload(
 }
 
 pub async fn update_csv(
-    State(pool): State<SqlitePool>,
+    State(pools): State<DbPools>,
     Path(upload_id): Path<String>,
     headers: axum::http::HeaderMap,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
-    if let Err(response) = verify_edit_token(&pool, &headers, &upload_id).await {
+    if let Err(response) = verify_edit_token(pools.read(), &headers, &upload_id).await {
         return response;
     }
 
@@ -486,7 +487,7 @@ pub async fn update_csv(
         if let Err(e) = db::query_with_timeout(
             sqlx::query("DELETE FROM sightings WHERE upload_id = ?")
                 .bind(&upload_id_blob[..])
-                .execute(&pool),
+                .execute(pools.write()),
         )
         .await
         {
@@ -495,7 +496,7 @@ pub async fn update_csv(
                 .into_response();
         }
 
-        let total_rows = match ingest_csv_field(field, &pool, &upload_id).await {
+        let total_rows = match ingest_csv_field(field, pools.write(), &upload_id).await {
             Ok(rows) => rows,
             Err(err) => return err.into_response(),
         };
@@ -505,19 +506,20 @@ pub async fn update_csv(
                 .bind(i64::try_from(total_rows).unwrap_or(i64::MAX))
                 .bind(&filename)
                 .bind(&upload_id_blob[..])
-                .execute(&pool),
+                .execute(pools.write()),
         )
         .await
         {
             e.log("updating upload metadata after replace");
         }
 
-        if let Err(e) = compute_grid_cell_visibility(&pool, &upload_id_blob[..]).await {
+        if let Err(e) = compute_grid_cell_visibility(pools.write(), &upload_id_blob[..]).await {
             e.log("computing grid cell visibility");
         }
 
         // Compute and store Roaring bitmaps for efficient tick filtering
-        if let Err(e) = crate::bitmaps::compute_and_store_bitmaps(&pool, &upload_id_blob[..]).await
+        if let Err(e) =
+            crate::bitmaps::compute_and_store_bitmaps(pools.write(), &upload_id_blob[..]).await
         {
             error!("Failed to compute tick bitmaps: {}", e.body.error);
         }
@@ -547,11 +549,11 @@ pub async fn update_csv(
 }
 
 pub async fn delete_upload(
-    State(pool): State<SqlitePool>,
+    State(pools): State<DbPools>,
     Path(upload_id): Path<String>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-    if let Err(response) = verify_edit_token(&pool, &headers, &upload_id).await {
+    if let Err(response) = verify_edit_token(pools.read(), &headers, &upload_id).await {
         return response;
     }
 
@@ -567,7 +569,7 @@ pub async fn delete_upload(
     match db::query_with_timeout(
         sqlx::query("DELETE FROM uploads WHERE id = ?")
             .bind(&upload_id_blob[..])
-            .execute(&pool),
+            .execute(pools.write()),
     )
     .await
     {

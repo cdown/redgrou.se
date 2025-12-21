@@ -26,12 +26,12 @@ mod macros {
     }
 }
 
+use crate::db::DbPools;
 use axum::routing::{get, post};
 use axum::Router;
-use sqlx::SqlitePool;
 
 /// Create a minimal test router for benchmarks without production middleware
-pub async fn create_test_router(pool: SqlitePool) -> Router {
+pub async fn create_test_router(pools: DbPools) -> Router {
     use crate::api_constants;
     use crate::handlers;
     use crate::sightings::get_sightings;
@@ -57,5 +57,5 @@ pub async fn create_test_router(pool: SqlitePool) -> Router {
             api_constants::FIELD_VALUES_ROUTE,
             get(handlers::field_values),
         )
-        .with_state(pool)
+        .with_state(pools)
 }

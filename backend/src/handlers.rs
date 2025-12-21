@@ -1,9 +1,10 @@
 use axum::extract::{Path, Query, State};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::bind_filter_params;
 use crate::db;
+use crate::db::DbPools;
 use crate::error::ApiError;
 use crate::filter::{build_filter_clause, get_distinct_values, get_field_metadata, CountQuery};
 use crate::proto::{pb, Proto};
@@ -24,7 +25,7 @@ pub struct FieldValuesPath {
 }
 
 pub async fn get_upload(
-    State(pool): State<SqlitePool>,
+    State(pools): State<DbPools>,
     Path(upload_id): Path<String>,
 ) -> Result<Proto<pb::UploadMetadata>, ApiError> {
     let upload_uuid = Uuid::parse_str(&upload_id)
@@ -34,7 +35,7 @@ pub async fn get_upload(
             "SELECT id, filename, row_count, display_name FROM uploads WHERE id = ?",
         )
         .bind(&upload_uuid.as_bytes()[..])
-        .fetch_optional(&pool),
+        .fetch_optional(pools.read()),
     )
     .await
     .map_err(|e| e.into_api_error("loading upload metadata", "Database error"))?
@@ -55,7 +56,7 @@ pub async fn get_upload(
 }
 
 pub async fn get_filtered_count(
-    State(pool): State<SqlitePool>,
+    State(pools): State<DbPools>,
     Path(upload_id): Path<String>,
     Query(query): Query<CountQuery>,
 ) -> Result<Proto<pb::CountResponse>, ApiError> {
@@ -70,7 +71,7 @@ pub async fn get_filtered_count(
     };
 
     let filter_result = build_filter_clause(
-        &pool,
+        pools.read(),
         &upload_uuid.as_bytes()[..],
         query.filter.as_ref(),
         query.lifers_only,
@@ -105,7 +106,7 @@ pub async fn get_filtered_count(
         &filter_result.params
     );
 
-    let count = db::query_with_timeout(db_query.fetch_one(&pool))
+    let count = db::query_with_timeout(db_query.fetch_one(pools.read()))
         .await
         .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
@@ -125,12 +126,12 @@ pub async fn fields_metadata() -> Proto<pb::FieldMetadataList> {
 }
 
 pub async fn field_values(
-    State(pool): State<SqlitePool>,
+    State(pools): State<DbPools>,
     Path(path): Path<FieldValuesPath>,
 ) -> Result<Proto<pb::FieldValues>, ApiError> {
     let upload_uuid = Uuid::parse_str(&path.upload_id)
         .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
-    let values = get_distinct_values(&pool, &upload_uuid.as_bytes()[..], &path.field)
+    let values = get_distinct_values(pools.read(), &upload_uuid.as_bytes()[..], &path.field)
         .await
         .map_err(|e| e.into_api_error("loading field values", "Database error"))?;
 

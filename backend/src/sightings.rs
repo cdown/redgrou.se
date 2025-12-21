@@ -1,7 +1,8 @@
+use crate::db::DbPools;
 use axum::extract::{Path, Query, State};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, Row, SqlitePool};
+use sqlx::{FromRow, Row};
 use uuid::Uuid;
 
 use crate::api_constants;
@@ -53,7 +54,7 @@ struct NameIndexResult {
 }
 
 async fn build_name_index(
-    pool: &SqlitePool,
+    pool: &sqlx::SqlitePool,
     upload_uuid: &[u8],
 ) -> Result<NameIndexResult, ApiError> {
     let species_rows = db::query_with_timeout(
@@ -227,7 +228,7 @@ fn validate_group_by_fields(fields: &[String]) -> Result<Vec<String>, ApiError> 
 }
 
 pub async fn get_sightings(
-    State(pool): State<SqlitePool>,
+    State(pools): State<DbPools>,
     Path(upload_id): Path<String>,
     Query(query): Query<SightingsQuery>,
 ) -> Result<Proto<pb::SightingsResponse>, ApiError> {
@@ -244,7 +245,7 @@ pub async fn get_sightings(
 
     // Collect filter params separately so upload_id stays first and field names remain enum-whitelisted.
     let filter_result = build_filter_clause(
-        &pool,
+        pools.read(),
         &upload_uuid.as_bytes()[..],
         query.filter.as_ref(),
         query.lifers_only,
@@ -309,7 +310,7 @@ pub async fn get_sightings(
             &filter_result.params
         );
 
-        let total = db::query_with_timeout(count_query.fetch_one(&pool))
+        let total = db::query_with_timeout(count_query.fetch_one(pools.read()))
             .await
             .map_err(|e| e.into_api_error("counting grouped sightings", "Database error"))?;
 
@@ -377,11 +378,11 @@ pub async fn get_sightings(
         select_query = select_query.bind(i64::from(page_size));
         select_query = select_query.bind(offset_i64);
 
-        let rows = db::query_with_timeout(select_query.fetch_all(&pool))
+        let rows = db::query_with_timeout(select_query.fetch_all(pools.read()))
             .await
             .map_err(|e| e.into_api_error("loading grouped sightings", "Database error"))?;
 
-        let index_result = build_name_index(&pool, &upload_uuid.as_bytes()[..]).await?;
+        let index_result = build_name_index(pools.read(), &upload_uuid.as_bytes()[..]).await?;
 
         let mut groups = Vec::new();
         for row in rows {
@@ -470,7 +471,7 @@ pub async fn get_sightings(
         &filter_result.params
     );
 
-    let total = db::query_with_timeout(count_query.fetch_one(&pool))
+    let total = db::query_with_timeout(count_query.fetch_one(pools.read()))
         .await
         .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
@@ -523,7 +524,7 @@ pub async fn get_sightings(
     }
     select_query = select_query.bind(i64::from(page_size));
 
-    let rows = db::query_with_timeout(select_query.fetch_all(&pool))
+    let rows = db::query_with_timeout(select_query.fetch_all(pools.read()))
         .await
         .map_err(|e| e.into_api_error("loading sightings", "Database error"))?;
 
@@ -550,7 +551,7 @@ pub async fn get_sightings(
         next_cursor = Some(encode_cursor(&sort_val_str, id));
     }
 
-    let index_result = build_name_index(&pool, &upload_uuid.as_bytes()[..]).await?;
+    let index_result = build_name_index(pools.read(), &upload_uuid.as_bytes()[..]).await?;
 
     let sightings_pb = sightings
         .into_iter()

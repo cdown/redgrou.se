@@ -1,3 +1,4 @@
+use crate::db::DbPools;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -6,7 +7,7 @@ use mvt::{GeomEncoder, GeomType, Tile};
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use sqlx::{Row, SqlitePool};
+use sqlx::Row;
 use tracing::{debug, error};
 
 use crate::db;
@@ -142,7 +143,7 @@ pub async fn invalidate_upload_cache(upload_id: &str) {
 }
 
 pub async fn get_tile(
-    State(pool): State<SqlitePool>,
+    State(pools): State<DbPools>,
     Path(path): Path<TilePath>,
     Query(query): Query<TileQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -193,7 +194,7 @@ pub async fn get_tile(
     }
 
     let filter_result = build_filter_clause(
-        &pool,
+        pools.read(),
         &upload_uuid.as_bytes()[..],
         query.filter.as_ref(),
         query.lifers_only,
@@ -276,7 +277,7 @@ pub async fn get_tile(
     }
     db_query = db_query.bind(i64::from(max_points));
 
-    let rows = db::query_with_timeout(db_query.fetch_all(&pool))
+    let rows = db::query_with_timeout(db_query.fetch_all(pools.read()))
         .await
         .map_err(|e| e.into_api_error("loading tile sightings", "Database error"))?;
 
