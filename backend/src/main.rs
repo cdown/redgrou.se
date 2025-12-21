@@ -94,6 +94,29 @@ async fn main() -> anyhow::Result<()> {
     db::run_migrations(&pools).await?;
     db::vacuum_database(&pools).await;
 
+    let retention_days: i64 = env::var("REDGROUSE_DATA_RETENTION_DAYS")
+        .unwrap_or_else(|_| "365".to_string())
+        .parse()
+        .unwrap_or(365);
+
+    let write_pool = pools.write().clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(86400));
+        loop {
+            interval.tick().await;
+            match upload::delete_old_uploads(&write_pool, retention_days).await {
+                Ok(count) => {
+                    if count > 0 {
+                        info!("Auto-deleted {} old upload(s)", count);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to delete old uploads: {:?}", e);
+                }
+            }
+        }
+    });
+
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)

@@ -22,6 +22,7 @@ use crate::pipeline::{CsvParser, DbSink, Geocoder, BATCH_SIZE};
 use crate::proto::{pb, Proto};
 use crate::tiles::invalidate_upload_cache;
 use serde::Deserialize;
+use sqlx::Row;
 
 pub const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 pub const MAX_UPLOAD_BODY_BYTES: usize = MAX_UPLOAD_BYTES + (2 * 1024 * 1024); // allow multipart overhead
@@ -655,4 +656,49 @@ pub(crate) fn effective_display_name(stored: Option<String>, filename: &str) -> 
         }
         None => default_display_name(filename),
     }
+}
+
+pub async fn delete_old_uploads(
+    pool: &sqlx::SqlitePool,
+    retention_days: i64,
+) -> Result<usize, DbQueryError> {
+    let cutoff_date = chrono::Utc::now()
+        .checked_sub_signed(chrono::Duration::days(retention_days))
+        .ok_or_else(|| {
+            DbQueryError::Sqlx(sqlx::Error::Decode("Invalid retention period".into()))
+        })?;
+    let cutoff_str = cutoff_date.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    let rows = db::query_with_timeout(
+        sqlx::query("SELECT id FROM uploads WHERE last_accessed_at < ?")
+            .bind(&cutoff_str)
+            .fetch_all(pool),
+    )
+    .await?;
+
+    let mut deleted_count = 0;
+    for row in rows {
+        let id_blob: Vec<u8> = row.get("id");
+        if let Ok(upload_uuid) = Uuid::from_slice(&id_blob) {
+            let upload_id = upload_uuid.to_string();
+            match db::query_with_timeout(
+                sqlx::query("DELETE FROM uploads WHERE id = ?")
+                    .bind(&id_blob[..])
+                    .execute(pool),
+            )
+            .await
+            {
+                Ok(_) => {
+                    invalidate_upload_cache(&upload_id).await;
+                    deleted_count += 1;
+                    info!("Auto-deleted old upload: {}", upload_id);
+                }
+                Err(e) => {
+                    error!("Failed to delete old upload {}: {:?}", upload_id, e);
+                }
+            }
+        }
+    }
+
+    Ok(deleted_count)
 }
