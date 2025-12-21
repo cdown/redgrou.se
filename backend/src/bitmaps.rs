@@ -1,15 +1,20 @@
 use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
 use roaring::RoaringBitmap;
+
 pub async fn compute_and_store_bitmaps(
     pool: &sqlx::SqlitePool,
     upload_id_blob: &[u8],
 ) -> Result<(), ApiError> {
+    let mut tx = db::query_with_timeout(pool.begin())
+        .await
+        .map_err(|e| e.into_api_error("starting bitmap transaction", "Database error"))?;
+
     // Delete existing bitmaps for this upload (in case of update)
     db::query_with_timeout(
         sqlx::query("DELETE FROM tick_bitmaps WHERE upload_id = ?")
             .bind(upload_id_blob)
-            .execute(pool),
+            .execute(&mut *tx),
     )
     .await
     .map_err(|e| e.into_api_error("deleting existing bitmaps", "Database error"))?;
@@ -18,7 +23,7 @@ pub async fn compute_and_store_bitmaps(
     let lifer_ids: Vec<i64> = db::query_with_timeout(
         sqlx::query_scalar::<_, i64>("SELECT id FROM sightings WHERE upload_id = ? AND lifer = 1")
             .bind(upload_id_blob)
-            .fetch_all(pool),
+            .fetch_all(&mut *tx),
     )
     .await
     .map_err(|e| e.into_api_error("querying lifer sightings", "Database error"))?;
@@ -38,7 +43,7 @@ pub async fn compute_and_store_bitmaps(
             )
             .bind(upload_id_blob)
             .bind(&bitmap_data)
-            .execute(pool),
+            .execute(&mut *tx),
         )
         .await
         .map_err(|e| e.into_api_error("storing lifer bitmap", "Database error"))?;
@@ -50,7 +55,7 @@ pub async fn compute_and_store_bitmaps(
             "SELECT year, id FROM sightings WHERE upload_id = ? AND year_tick = 1",
         )
         .bind(upload_id_blob)
-        .fetch_all(pool),
+        .fetch_all(&mut *tx),
     )
     .await
     .map_err(|e| e.into_api_error("querying year tick sightings", "Database error"))?;
@@ -77,7 +82,7 @@ pub async fn compute_and_store_bitmaps(
             .bind(upload_id_blob)
             .bind(year.to_string())
             .bind(&bitmap_data)
-            .execute(pool),
+            .execute(&mut *tx),
         )
         .await
         .map_err(|e| e.into_api_error("storing year tick bitmap", "Database error"))?;
@@ -89,7 +94,7 @@ pub async fn compute_and_store_bitmaps(
             "SELECT country_code, id FROM sightings WHERE upload_id = ? AND country_tick = 1 AND country_code IS NOT NULL AND country_code != '' AND country_code != 'XX'",
         )
         .bind(upload_id_blob)
-        .fetch_all(pool),
+        .fetch_all(&mut *tx),
     )
     .await
     .map_err(|e| e.into_api_error("querying country tick sightings", "Database error"))?;
@@ -116,11 +121,15 @@ pub async fn compute_and_store_bitmaps(
             .bind(upload_id_blob)
             .bind(&country)
             .bind(&bitmap_data)
-            .execute(pool),
+            .execute(&mut *tx),
         )
         .await
         .map_err(|e| e.into_api_error("storing country tick bitmap", "Database error"))?;
     }
+
+    db::query_with_timeout(tx.commit())
+        .await
+        .map_err(|e| e.into_api_error("committing bitmap transaction", "Database error"))?;
 
     Ok(())
 }
