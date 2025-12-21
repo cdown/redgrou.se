@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Upload, FileText, AlertCircle } from "lucide-react";
+import { Upload, FileText } from "lucide-react";
 import Link from "next/link";
 import {
   apiFetch,
@@ -114,29 +114,16 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
             />
           </label>
           <p className="mt-3 text-xs text-stone-400">
-            Supports CSV exports from Birda
+            Supports CSV exports from Birda. In order to display your data, it
+            will be stored in a database.{" "}
+            <Link
+              href="/privacy"
+              className="underline hover:text-stone-300"
+            >
+              Learn more
+            </Link>
+            .
           </p>
-          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-left">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-              <div className="flex-1 space-y-1">
-                <p className="text-xs font-medium text-amber-900">
-                  Data storage notice
-                </p>
-                <p className="text-xs text-amber-800">
-                  Your data will be uploaded and stored on our server in a
-                  database. This includes location data (GPS coordinates) from
-                  your sightings.{" "}
-                  <Link
-                    href="/privacy"
-                    className="underline hover:text-amber-900"
-                  >
-                    Learn more
-                  </Link>
-                </p>
-              </div>
-            </div>
-          </div>
         </>
       )}
       {error && (
