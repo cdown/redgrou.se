@@ -39,8 +39,16 @@ export default function Home() {
               Visualise your sightings
             </h2>
             <p className="mb-6 text-sm text-stone-600">
-              Upload a CSV export from Birda to see your observations on an
-              interactive map.
+              Upload a CSV export from{" "}
+              <a
+                href="https://app.birda.org/exports"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-stone-900"
+              >
+                Birda
+              </a>{" "}
+              to see your observations on an interactive map.
             </p>
             <UploadForm
               onUploadComplete={(result) =>

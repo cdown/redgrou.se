@@ -114,8 +114,16 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
             />
           </label>
           <p className="mt-3 text-xs text-stone-400">
-            Supports CSV exports from Birda. In order to display your data, it
-            will be stored in a database.{" "}
+            Supports CSV exports from{" "}
+            <a
+              href="https://app.birda.org/exports"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-stone-300"
+            >
+              Birda
+            </a>
+            . In order to display your data, it will be stored in a database.{" "}
             <Link
               href="/privacy"
               className="underline hover:text-stone-300"
