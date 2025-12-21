@@ -209,6 +209,19 @@ async fn compute_grid_cell_visibility(
     pool: &sqlx::SqlitePool,
     upload_id_blob: &[u8],
 ) -> Result<(), DbQueryError> {
+    let mut tx = db::query_with_timeout(pool.begin()).await?;
+
+    compute_grid_cell_visibility_tx(&mut tx, upload_id_blob).await?;
+
+    db::query_with_timeout(tx.commit()).await?;
+
+    Ok(())
+}
+
+async fn compute_grid_cell_visibility_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    upload_id_blob: &[u8],
+) -> Result<(), DbQueryError> {
     // Ensure at least one sighting per 1-degree grid cell is visible. Basically the logic is:
     //
     // 1. Partitions data into grid cells
@@ -226,7 +239,7 @@ async fn compute_grid_cell_visibility(
             )"
         )
             .bind(upload_id_blob)
-            .execute(pool),
+            .execute(&mut **tx),
     )
     .await?;
 
@@ -282,23 +295,40 @@ pub async fn upload_csv(
             }
         };
 
+        let mut tx = match db::query_with_timeout(pools.write().begin()).await {
+            Ok(tx) => tx,
+            Err(e) => {
+                return e
+                    .into_api_error("starting upload metadata transaction", "Database error")
+                    .into_response();
+            }
+        };
+
         if let Err(e) = db::query_with_timeout(
             sqlx::query("UPDATE uploads SET row_count = ? WHERE id = ?")
                 .bind(i64::try_from(total_rows).unwrap_or(i64::MAX))
                 .bind(&upload_id_blob[..])
-                .execute(pools.write()),
+                .execute(&mut *tx),
         )
         .await
         {
-            e.log("updating upload row_count");
+            return e
+                .into_api_error("updating upload row_count", "Database error")
+                .into_response();
         }
 
-        // Still need to compute grid cell visibility as a post-processing step
-        if let Err(e) = compute_grid_cell_visibility(pools.write(), &upload_id_blob[..]).await {
-            e.log("computing grid cell visibility");
+        if let Err(e) = compute_grid_cell_visibility_tx(&mut tx, &upload_id_blob[..]).await {
+            return e
+                .into_api_error("computing grid cell visibility", "Database error")
+                .into_response();
         }
 
-        // Compute and store Roaring bitmaps for efficient tick filtering
+        if let Err(e) = db::query_with_timeout(tx.commit()).await {
+            return e
+                .into_api_error("committing upload metadata transaction", "Database error")
+                .into_response();
+        }
+
         if let Err(e) =
             crate::bitmaps::compute_and_store_bitmaps(pools.write(), &upload_id_blob[..]).await
         {
