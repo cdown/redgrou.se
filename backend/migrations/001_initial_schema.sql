@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS uploads (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     last_accessed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     row_count INTEGER DEFAULT 0,
-    edit_token_hash TEXT
+    edit_token_hash TEXT,
+    data_version INTEGER NOT NULL DEFAULT 1
 ) STRICT;
 
 -- Species dictionary
