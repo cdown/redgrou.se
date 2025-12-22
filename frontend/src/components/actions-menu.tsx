@@ -561,7 +561,7 @@ export function ActionsMenu({
               About redgrou.se
             </h3>
             <p className="mb-6 text-sm text-stone-600">
-              A high-performance bird sighting analytics platform. Upload your
+              A bird sighting analytics platform. Upload your
               sightings, explore them all on an interactive map, and filter by
               species, location, date, significance, and more.
             </p>
