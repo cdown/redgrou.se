@@ -11,6 +11,7 @@ use crate::db;
 use crate::error::ApiError;
 use crate::filter::build_filter_clause;
 use crate::proto::{pb, Proto};
+use crate::upload::get_upload_data_version;
 use tracing::warn;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
@@ -234,6 +235,7 @@ pub async fn get_sightings(
 ) -> Result<Proto<pb::SightingsResponse>, ApiError> {
     let upload_uuid = Uuid::parse_str(&upload_id)
         .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
+    let data_version = get_upload_data_version(pools.read(), &upload_uuid).await?;
     let page = query.page.unwrap_or(1).max(1);
     let page_size = query
         .page_size
@@ -448,6 +450,7 @@ pub async fn get_sightings(
             sightings: Vec::new(),
             groups: groups_pb,
             total,
+            data_version,
             next_cursor: None,
         }));
     }
@@ -563,6 +566,7 @@ pub async fn get_sightings(
         sightings: sightings_pb,
         groups: Vec::new(),
         total,
+        data_version,
         next_cursor,
     }))
 }

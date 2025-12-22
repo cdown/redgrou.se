@@ -39,6 +39,8 @@ interface SightingsTableProps {
   countryTickCountry: string | null;
   nameIndex: Species[];
   onNavigateToSighting?: (sightingId: number, lat: number, lng: number) => void;
+  onRemoteVersionObserved?: (version: number) => void;
+  onUploadDeleted?: () => void;
 }
 
 type SortDir = "asc" | "desc";
@@ -88,6 +90,8 @@ export function SightingsTable({
   countryTickCountry,
   nameIndex,
   onNavigateToSighting,
+  onRemoteVersionObserved,
+  onUploadDeleted,
 }: SightingsTableProps) {
   const { showToast } = useToast();
   const [sightings, setSightings] = useState<SightingMessage[]>([]);
@@ -143,6 +147,7 @@ export function SightingsTable({
         const res = await apiFetch(url);
         await checkApiResponse(res, "Failed to fetch sightings");
         const data = await parseProtoResponse(res, SightingsResponseDecoder);
+        onRemoteVersionObserved?.(data.dataVersion);
 
         if (isGrouped) {
           const groupsData: GroupedSightingDisplay[] = data.groups.map((g) => ({
@@ -184,7 +189,12 @@ export function SightingsTable({
         }
       } catch (e) {
         console.error("Failed to fetch sightings:", e);
-        showToast(getErrorMessage(e, "Failed to fetch sightings"), "error");
+        const message = getErrorMessage(e, "Failed to fetch sightings");
+        if (message === "Upload not found") {
+          onUploadDeleted?.();
+        } else {
+          showToast(message, "error");
+        }
       } finally {
         loadingRef.current = false;
         setLoading(false);
@@ -200,6 +210,8 @@ export function SightingsTable({
       yearTickYear,
       countryTickCountry,
       showToast,
+      onRemoteVersionObserved,
+      onUploadDeleted,
     ],
   );
 

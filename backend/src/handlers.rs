@@ -8,7 +8,7 @@ use crate::db::DbPools;
 use crate::error::ApiError;
 use crate::filter::{build_filter_clause, get_distinct_values, get_field_metadata, CountQuery};
 use crate::proto::{pb, Proto};
-use crate::upload::effective_display_name;
+use crate::upload::{effective_display_name, get_upload_data_version};
 
 #[derive(FromRow)]
 struct UploadRow {
@@ -16,6 +16,7 @@ struct UploadRow {
     filename: String,
     row_count: i64,
     display_name: Option<String>,
+    data_version: i64,
 }
 
 #[derive(serde::Deserialize)]
@@ -32,7 +33,7 @@ pub async fn get_upload(
         .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
     let row = db::query_with_timeout(
         sqlx::query_as::<_, UploadRow>(
-            "SELECT id, filename, row_count, display_name FROM uploads WHERE id = ?",
+            "SELECT id, filename, row_count, display_name, data_version FROM uploads WHERE id = ?",
         )
         .bind(&upload_uuid.as_bytes()[..])
         .fetch_optional(pools.read()),
@@ -66,6 +67,7 @@ pub async fn get_upload(
         filename: row.filename,
         row_count: row.row_count,
         title,
+        data_version: row.data_version,
     }))
 }
 
@@ -76,6 +78,7 @@ pub async fn get_filtered_count(
 ) -> Result<Proto<pb::CountResponse>, ApiError> {
     let upload_uuid = Uuid::parse_str(&upload_id)
         .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
+    let data_version = get_upload_data_version(pools.read(), &upload_uuid).await?;
 
     let needs_join = if let Some(filter_json) = &query.filter {
         let filter: crate::filter::FilterGroup = filter_json.try_into()?;
@@ -124,7 +127,10 @@ pub async fn get_filtered_count(
         .await
         .map_err(|e| e.into_api_error("counting sightings", "Database error"))?;
 
-    Ok(Proto::new(pb::CountResponse { count }))
+    Ok(Proto::new(pb::CountResponse {
+        count,
+        data_version,
+    }))
 }
 
 pub async fn fields_metadata() -> Proto<pb::FieldMetadataList> {
@@ -145,6 +151,7 @@ pub async fn field_values(
 ) -> Result<Proto<pb::FieldValues>, ApiError> {
     let upload_uuid = Uuid::parse_str(&path.upload_id)
         .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
+    let data_version = get_upload_data_version(pools.read(), &upload_uuid).await?;
     let values = get_distinct_values(pools.read(), &upload_uuid.as_bytes()[..], &path.field)
         .await
         .map_err(|e| e.into_api_error("loading field values", "Database error"))?;
@@ -158,5 +165,6 @@ pub async fn field_values(
     Ok(Proto::new(pb::FieldValues {
         field: path.field,
         values,
+        data_version,
     }))
 }

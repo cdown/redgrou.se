@@ -37,7 +37,10 @@ interface SightingsMapProps {
   lifersOnly: boolean;
   yearTickYear: number | null;
   countryTickCountry: string | null;
+  dataVersion: number;
   onMapReady?: (navigateToSighting: (sightingId: number, lat: number, lng: number) => void) => void;
+  onRemoteVersionObserved?: (version: number) => void;
+  onUploadDeleted?: () => void;
 }
 
 interface OverlapFeatureProperties {
@@ -242,6 +245,7 @@ function buildTileUrl(
   lifersOnly: boolean,
   yearTickYear: number | null,
   countryTickCountry: string | null,
+  dataVersion: number,
 ): string {
   const params = buildFilterParams(
     filter ? filterToJson(filter) : null,
@@ -249,6 +253,8 @@ function buildTileUrl(
     yearTickYear,
     countryTickCountry
   );
+  params.set("data_version", String(dataVersion));
+  params.set("data_version", String(dataVersion));
   const queryString = params.toString();
   const filterParam = queryString ? `?${queryString}` : "";
 
@@ -423,7 +429,10 @@ export function SightingsMap({
   lifersOnly,
   yearTickYear,
   countryTickCountry,
+  dataVersion,
   onMapReady,
+  onRemoteVersionObserved,
+  onUploadDeleted,
 }: SightingsMapProps) {
   const { showToast } = useToast();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -625,7 +634,14 @@ export function SightingsMap({
     };
 
     map.on("load", () => {
-      const tileUrl = buildTileUrl(uploadId, filter, lifersOnly, yearTickYear, countryTickCountry);
+      const tileUrl = buildTileUrl(
+        uploadId,
+        filter,
+        lifersOnly,
+        yearTickYear,
+        countryTickCountry,
+        dataVersion,
+      );
 
       map.addSource("sightings", {
         type: "vector",
@@ -714,7 +730,14 @@ export function SightingsMap({
       return;
     }
 
-    const tileUrl = buildTileUrl(uploadId, filter, lifersOnly, yearTickYear, countryTickCountry);
+    const tileUrl = buildTileUrl(
+      uploadId,
+      filter,
+      lifersOnly,
+      yearTickYear,
+      countryTickCountry,
+      dataVersion,
+    );
     const source = map.getSource("sightings") as maplibregl.VectorTileSource;
 
     if (source && source.tiles && source.tiles[0] === tileUrl) {
@@ -784,50 +807,67 @@ export function SightingsMap({
       bearing: bearing,
       pitch: pitch,
     });
-  }, [uploadId, filter, lifersOnly, yearTickYear, countryTickCountry]);
+  }, [uploadId, filter, lifersOnly, yearTickYear, countryTickCountry, dataVersion]);
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !countryTickCountry) {
-      return;
-    }
+useEffect(() => {
+  const map = mapRef.current;
+  if (!map || !countryTickCountry) {
+    return;
+  }
 
-    const params = buildFilterParams(
+  const params = buildFilterParams(
     filter ? filterToJson(filter) : null,
     lifersOnly,
     yearTickYear,
     countryTickCountry
   );
 
-    const url = `${buildApiUrl(UPLOAD_BBOX_ROUTE, { upload_id: uploadId })}?${params}`;
+  const url = `${buildApiUrl(UPLOAD_BBOX_ROUTE, { upload_id: uploadId })}?${params}`;
 
-    apiFetch(url)
-      .then(async (res) => {
-        if (res.status === 404) {
-          return null;
-        }
-        await checkApiResponse(res, "Failed to load map bounds");
-        return parseProtoResponse(res, BboxResponse);
-      })
-      .then((bbox) => {
-        if (bbox && map) {
-          map.fitBounds(
-            [
-              [bbox.minLng, bbox.minLat],
-              [bbox.maxLng, bbox.maxLat],
-            ],
-            {
-              padding: { top: 50, bottom: 50, left: 50, right: 50 },
-              maxZoom: 12,
-            }
-          );
-        }
-      })
-      .catch((err) => {
-        console.error("Failed to fetch bounding box:", err);
-        showToast(getErrorMessage(err, "Failed to load map bounds"), "error");
-      });
-  }, [uploadId, countryTickCountry, filter, lifersOnly, yearTickYear, showToast]);
+  apiFetch(url)
+    .then(async (res) => {
+      if (res.status === 404) {
+        onUploadDeleted?.();
+        return null;
+      }
+      await checkApiResponse(res, "Failed to load map bounds");
+      return parseProtoResponse(res, BboxResponse);
+    })
+    .then((bbox) => {
+      if (bbox && map) {
+        onRemoteVersionObserved?.(bbox.dataVersion);
+        map.fitBounds(
+          [
+            [bbox.minLng, bbox.minLat],
+            [bbox.maxLng, bbox.maxLat],
+          ],
+          {
+            padding: { top: 50, bottom: 50, left: 50, right: 50 },
+            maxZoom: 12,
+          }
+        );
+      }
+    })
+    .catch((err) => {
+      console.error("Failed to fetch bounding box:", err);
+      const message = getErrorMessage(err, "Failed to load map bounds");
+      if (message === "Upload not found") {
+        onUploadDeleted?.();
+        return;
+      }
+      showToast(message, "error");
+    });
+}, [
+  uploadId,
+  countryTickCountry,
+  filter,
+  lifersOnly,
+  yearTickYear,
+  showToast,
+  onRemoteVersionObserved,
+  onUploadDeleted,
+  dataVersion,
+]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }

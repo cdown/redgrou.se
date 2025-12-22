@@ -19,6 +19,7 @@ export interface UploadMetadata {
   filename: string;
   rowCount: number;
   title: string;
+  dataVersion: number;
 }
 
 export interface UploadResponse {
@@ -27,6 +28,7 @@ export interface UploadResponse {
   rowCount: number;
   editToken: string;
   title: string;
+  dataVersion: number;
 }
 
 export interface UpdateResponse {
@@ -34,6 +36,7 @@ export interface UpdateResponse {
   filename: string;
   rowCount: number;
   title: string;
+  dataVersion: number;
 }
 
 export interface DeleteResponse {
@@ -42,6 +45,7 @@ export interface DeleteResponse {
 
 export interface CountResponse {
   count: number;
+  dataVersion: number;
 }
 
 export interface FieldMetadata {
@@ -57,6 +61,7 @@ export interface FieldMetadataList {
 export interface FieldValues {
   field: string;
   values: string[];
+  dataVersion: number;
 }
 
 export interface BboxResponse {
@@ -64,6 +69,7 @@ export interface BboxResponse {
   minLat: number;
   maxLng: number;
   maxLat: number;
+  dataVersion: number;
 }
 
 export interface Species {
@@ -95,6 +101,7 @@ export interface SightingsResponse {
   sightings: Sighting[];
   groups: GroupedSighting[];
   total: number;
+  dataVersion: number;
   nextCursor?: string | undefined;
 }
 
@@ -163,7 +170,7 @@ export const ApiErrorBody: MessageFns<ApiErrorBody> = {
 };
 
 function createBaseUploadMetadata(): UploadMetadata {
-  return { uploadId: "", filename: "", rowCount: 0, title: "" };
+  return { uploadId: "", filename: "", rowCount: 0, title: "", dataVersion: 0 };
 }
 
 export const UploadMetadata: MessageFns<UploadMetadata> = {
@@ -179,6 +186,9 @@ export const UploadMetadata: MessageFns<UploadMetadata> = {
     }
     if (message.title !== "") {
       writer.uint32(34).string(message.title);
+    }
+    if (message.dataVersion !== 0) {
+      writer.uint32(40).int64(message.dataVersion);
     }
     return writer;
   },
@@ -222,6 +232,14 @@ export const UploadMetadata: MessageFns<UploadMetadata> = {
           message.title = reader.string();
           continue;
         }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.dataVersion = longToNumber(reader.int64());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -240,12 +258,13 @@ export const UploadMetadata: MessageFns<UploadMetadata> = {
     message.filename = object.filename ?? "";
     message.rowCount = object.rowCount ?? 0;
     message.title = object.title ?? "";
+    message.dataVersion = object.dataVersion ?? 0;
     return message;
   },
 };
 
 function createBaseUploadResponse(): UploadResponse {
-  return { uploadId: "", filename: "", rowCount: 0, editToken: "", title: "" };
+  return { uploadId: "", filename: "", rowCount: 0, editToken: "", title: "", dataVersion: 0 };
 }
 
 export const UploadResponse: MessageFns<UploadResponse> = {
@@ -264,6 +283,9 @@ export const UploadResponse: MessageFns<UploadResponse> = {
     }
     if (message.title !== "") {
       writer.uint32(42).string(message.title);
+    }
+    if (message.dataVersion !== 0) {
+      writer.uint32(48).int64(message.dataVersion);
     }
     return writer;
   },
@@ -315,6 +337,14 @@ export const UploadResponse: MessageFns<UploadResponse> = {
           message.title = reader.string();
           continue;
         }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.dataVersion = longToNumber(reader.int64());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -334,12 +364,13 @@ export const UploadResponse: MessageFns<UploadResponse> = {
     message.rowCount = object.rowCount ?? 0;
     message.editToken = object.editToken ?? "";
     message.title = object.title ?? "";
+    message.dataVersion = object.dataVersion ?? 0;
     return message;
   },
 };
 
 function createBaseUpdateResponse(): UpdateResponse {
-  return { uploadId: "", filename: "", rowCount: 0, title: "" };
+  return { uploadId: "", filename: "", rowCount: 0, title: "", dataVersion: 0 };
 }
 
 export const UpdateResponse: MessageFns<UpdateResponse> = {
@@ -355,6 +386,9 @@ export const UpdateResponse: MessageFns<UpdateResponse> = {
     }
     if (message.title !== "") {
       writer.uint32(34).string(message.title);
+    }
+    if (message.dataVersion !== 0) {
+      writer.uint32(40).int64(message.dataVersion);
     }
     return writer;
   },
@@ -398,6 +432,14 @@ export const UpdateResponse: MessageFns<UpdateResponse> = {
           message.title = reader.string();
           continue;
         }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.dataVersion = longToNumber(reader.int64());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -416,6 +458,7 @@ export const UpdateResponse: MessageFns<UpdateResponse> = {
     message.filename = object.filename ?? "";
     message.rowCount = object.rowCount ?? 0;
     message.title = object.title ?? "";
+    message.dataVersion = object.dataVersion ?? 0;
     return message;
   },
 };
@@ -467,13 +510,16 @@ export const DeleteResponse: MessageFns<DeleteResponse> = {
 };
 
 function createBaseCountResponse(): CountResponse {
-  return { count: 0 };
+  return { count: 0, dataVersion: 0 };
 }
 
 export const CountResponse: MessageFns<CountResponse> = {
   encode(message: CountResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.count !== 0) {
       writer.uint32(8).int64(message.count);
+    }
+    if (message.dataVersion !== 0) {
+      writer.uint32(16).int64(message.dataVersion);
     }
     return writer;
   },
@@ -493,6 +539,14 @@ export const CountResponse: MessageFns<CountResponse> = {
           message.count = longToNumber(reader.int64());
           continue;
         }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.dataVersion = longToNumber(reader.int64());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -508,6 +562,7 @@ export const CountResponse: MessageFns<CountResponse> = {
   fromPartial<I extends Exact<DeepPartial<CountResponse>, I>>(object: I): CountResponse {
     const message = createBaseCountResponse();
     message.count = object.count ?? 0;
+    message.dataVersion = object.dataVersion ?? 0;
     return message;
   },
 };
@@ -629,7 +684,7 @@ export const FieldMetadataList: MessageFns<FieldMetadataList> = {
 };
 
 function createBaseFieldValues(): FieldValues {
-  return { field: "", values: [] };
+  return { field: "", values: [], dataVersion: 0 };
 }
 
 export const FieldValues: MessageFns<FieldValues> = {
@@ -639,6 +694,9 @@ export const FieldValues: MessageFns<FieldValues> = {
     }
     for (const v of message.values) {
       writer.uint32(18).string(v!);
+    }
+    if (message.dataVersion !== 0) {
+      writer.uint32(24).int64(message.dataVersion);
     }
     return writer;
   },
@@ -666,6 +724,14 @@ export const FieldValues: MessageFns<FieldValues> = {
           message.values.push(reader.string());
           continue;
         }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.dataVersion = longToNumber(reader.int64());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -682,12 +748,13 @@ export const FieldValues: MessageFns<FieldValues> = {
     const message = createBaseFieldValues();
     message.field = object.field ?? "";
     message.values = object.values?.map((e) => e) || [];
+    message.dataVersion = object.dataVersion ?? 0;
     return message;
   },
 };
 
 function createBaseBboxResponse(): BboxResponse {
-  return { minLng: 0, minLat: 0, maxLng: 0, maxLat: 0 };
+  return { minLng: 0, minLat: 0, maxLng: 0, maxLat: 0, dataVersion: 0 };
 }
 
 export const BboxResponse: MessageFns<BboxResponse> = {
@@ -703,6 +770,9 @@ export const BboxResponse: MessageFns<BboxResponse> = {
     }
     if (message.maxLat !== 0) {
       writer.uint32(33).double(message.maxLat);
+    }
+    if (message.dataVersion !== 0) {
+      writer.uint32(40).int64(message.dataVersion);
     }
     return writer;
   },
@@ -746,6 +816,14 @@ export const BboxResponse: MessageFns<BboxResponse> = {
           message.maxLat = reader.double();
           continue;
         }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.dataVersion = longToNumber(reader.int64());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -764,6 +842,7 @@ export const BboxResponse: MessageFns<BboxResponse> = {
     message.minLat = object.minLat ?? 0;
     message.maxLng = object.maxLng ?? 0;
     message.maxLat = object.maxLat ?? 0;
+    message.dataVersion = object.dataVersion ?? 0;
     return message;
   },
 };
@@ -1060,7 +1139,7 @@ export const GroupedSighting: MessageFns<GroupedSighting> = {
 };
 
 function createBaseSightingsResponse(): SightingsResponse {
-  return { nameIndex: [], sightings: [], groups: [], total: 0, nextCursor: undefined };
+  return { nameIndex: [], sightings: [], groups: [], total: 0, dataVersion: 0, nextCursor: undefined };
 }
 
 export const SightingsResponse: MessageFns<SightingsResponse> = {
@@ -1076,6 +1155,9 @@ export const SightingsResponse: MessageFns<SightingsResponse> = {
     }
     if (message.total !== 0) {
       writer.uint32(32).int64(message.total);
+    }
+    if (message.dataVersion !== 0) {
+      writer.uint32(40).int64(message.dataVersion);
     }
     if (message.nextCursor !== undefined) {
       writer.uint32(66).string(message.nextCursor);
@@ -1122,6 +1204,14 @@ export const SightingsResponse: MessageFns<SightingsResponse> = {
           message.total = longToNumber(reader.int64());
           continue;
         }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.dataVersion = longToNumber(reader.int64());
+          continue;
+        }
         case 8: {
           if (tag !== 66) {
             break;
@@ -1148,6 +1238,7 @@ export const SightingsResponse: MessageFns<SightingsResponse> = {
     message.sightings = object.sightings?.map((e) => Sighting.fromPartial(e)) || [];
     message.groups = object.groups?.map((e) => GroupedSighting.fromPartial(e)) || [];
     message.total = object.total ?? 0;
+    message.dataVersion = object.dataVersion ?? 0;
     message.nextCursor = object.nextCursor ?? undefined;
     return message;
   },

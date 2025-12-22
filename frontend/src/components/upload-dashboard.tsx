@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryState } from "nuqs";
 import { searchParamsCache } from "@/lib/search-params";
 import { FilterGroup } from "@/lib/filter-types";
@@ -46,7 +46,11 @@ import {
   UploadMetadata as UploadMetadataDecoder,
   SightingsResponse as SightingsResponseDecoder,
 } from "@/lib/proto/redgrouse_api";
-import { deriveTitleFromFilename } from "@/lib/uploads";
+import {
+  deriveTitleFromFilename,
+  UPLOAD_EVENTS_CHANNEL,
+  type UploadBroadcastEvent,
+} from "@/lib/uploads";
 
 export type UploadMetadata = UploadMetadataMessage;
 
@@ -84,11 +88,32 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   const { showToast } = useToast();
   const searchParams = useSearchParams();
   const uploadId = initialUpload.uploadId;
+  const router = useRouter();
 
   const [upload, setUpload] = useState<UploadMetadata>(initialUpload);
+  const [pendingDataVersion, setPendingDataVersion] = useState<number | null>(null);
+  const [isDeleted, setIsDeleted] = useState(false);
   const [filterString, setFilterString] = useQueryState(
     "filter",
     searchParamsCache.filter.withOptions({ history: "push" })
+  );
+  const currentDataVersion = upload.dataVersion ?? 1;
+
+  const observeVersion = useCallback(
+    (version?: number | null) => {
+      if (typeof version !== "number") {
+        return;
+      }
+      if (version > currentDataVersion) {
+        setPendingDataVersion((prev) => {
+          if (prev && prev >= version) {
+            return prev;
+          }
+          return version;
+        });
+      }
+    },
+    [currentDataVersion],
   );
 
   const filter: FilterGroup | null = useMemo(
@@ -170,13 +195,70 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   }, [searchParams, uploadId]);
 
   useEffect(() => {
+    if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return;
+    const channel = new BroadcastChannel(UPLOAD_EVENTS_CHANNEL);
+    channel.onmessage = (event: MessageEvent<UploadBroadcastEvent>) => {
+      const payload = event.data;
+      if (!payload || payload.uploadId !== uploadId) {
+        return;
+      }
+      if (payload.type === "updated") {
+        observeVersion(payload.dataVersion ?? null);
+      } else if (payload.type === "deleted") {
+        setIsDeleted(true);
+      }
+    };
+
+    return () => {
+      channel.close();
+    };
+  }, [uploadId, observeVersion]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+
+    const poll = () => {
+      if (cancelled || document.hidden || isDeleted) {
+        return;
+      }
+
+      apiFetch(buildApiUrl(UPLOAD_DETAILS_ROUTE, { upload_id: uploadId }))
+        .then(async (res) => {
+          if (res.status === 404) {
+            setIsDeleted(true);
+            return null;
+          }
+          await checkApiResponse(res, "Upload not found");
+          return parseProtoResponse(res, UploadMetadataDecoder);
+        })
+        .then((data) => {
+          if (!data) return;
+          observeVersion(data.dataVersion);
+        })
+        .catch((err) => {
+          const message = getErrorMessage(err, "Failed to check upload status");
+          if (message === "Upload not found") {
+            setIsDeleted(true);
+          }
+        });
+    };
+
+    const interval = window.setInterval(poll, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [uploadId, observeVersion, isDeleted]);
+
+  useEffect(() => {
     if (typeof document !== "undefined") {
       document.title = `${resolvedTitle} | redgrou.se`;
     }
   }, [resolvedTitle]);
 
   useEffect(() => {
-    if (!uploadId) return;
+    if (!uploadId || isDeleted) return;
 
     apiFetch(
       buildApiUrl(FIELD_VALUES_ROUTE, {
@@ -189,6 +271,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
         return parseProtoResponse(res, FieldValuesDecoder);
       })
       .then((data) => {
+        observeVersion(data.dataVersion);
         const years = data.values
           .map((y) => parseInt(y, 10))
           .filter((y) => !isNaN(y))
@@ -211,6 +294,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
         return parseProtoResponse(res, FieldValuesDecoder);
       })
       .then((data) => {
+        observeVersion(data.dataVersion);
         const countries = data.values
           .filter((c) => c && c.trim() !== "")
           .sort((a, b) => {
@@ -224,10 +308,10 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
         console.error("Failed to fetch country field values:", err);
         showToast(getErrorMessage(err, "Failed to load available countries"), "error");
       });
-  }, [uploadId, showToast]);
+  }, [uploadId, showToast, observeVersion, isDeleted]);
 
   useEffect(() => {
-    if (!uploadId) return;
+    if (!uploadId || isDeleted) return;
 
     fetchNameIndex(uploadId)
       .then((index) => {
@@ -237,10 +321,10 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
         console.error("Failed to fetch name index:", err);
         showToast(getErrorMessage(err, "Failed to load species names"), "error");
       });
-  }, [uploadId, showToast]);
+  }, [uploadId, showToast, isDeleted]);
 
   useEffect(() => {
-    if (!uploadId) return;
+    if (!uploadId || isDeleted) return;
 
     let cancelled = false;
     const params = buildFilterParams(filterString, lifersOnly, yearTickYear, countryTickCountry);
@@ -249,25 +333,46 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
 
     apiFetch(url)
       .then(async (res) => {
+        if (res.status === 404) {
+          setIsDeleted(true);
+          return null;
+        }
         await checkApiResponse(res, "Failed to load filtered count");
         return parseProtoResponse(res, CountResponse);
       })
       .then((data) => {
-        if (!cancelled) setFilteredCount(Number(data.count));
+        if (!data || cancelled) return;
+        observeVersion(data.dataVersion);
+        setFilteredCount(Number(data.count));
       })
       .catch((err) => {
         console.error("Failed to fetch filtered count:", err);
-        if (!cancelled) {
-          setFilteredCount(null);
-          showToast(getErrorMessage(err, "Failed to load filtered count"), "error");
+        if (cancelled) {
+          return;
         }
+        const message = getErrorMessage(err, "Failed to load filtered count");
+        if (message === "Upload not found") {
+          setIsDeleted(true);
+          return;
+        }
+        setFilteredCount(null);
+        showToast(message, "error");
       });
 
     return () => {
       cancelled = true;
       setFilteredCount(null);
     };
-  }, [uploadId, filterString, lifersOnly, yearTickYear, countryTickCountry, showToast]);
+  }, [
+    uploadId,
+    filterString,
+    lifersOnly,
+    yearTickYear,
+    countryTickCountry,
+    showToast,
+    observeVersion,
+    isDeleted,
+  ]);
 
   const handleNavigateToSighting = useCallback(
     (sightingId: number, lat: number, lng: number) => {
@@ -279,20 +384,32 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
     [mapReady],
   );
 
-  const handleUpdateComplete = useCallback(() => {
+  const refreshUpload = useCallback(() => {
     apiFetch(buildApiUrl(UPLOAD_DETAILS_ROUTE, { upload_id: uploadId }))
       .then(async (res) => {
+        if (res.status === 404) {
+          setIsDeleted(true);
+          return null;
+        }
         await checkApiResponse(res, "Failed to refresh");
         return parseProtoResponse(res, UploadMetadataDecoder);
       })
       .then((data) => {
+        if (!data) return;
         setUpload(data);
         setFilter(null);
         setFilteredCount(null);
+        setPendingDataVersion(null);
+        setIsDeleted(false);
       })
       .catch((err) => {
         console.error("Failed to refresh upload:", err);
-        showToast(getErrorMessage(err, "Failed to refresh upload"), "error");
+        const message = getErrorMessage(err, "Failed to refresh upload");
+        if (message === "Upload not found") {
+          setIsDeleted(true);
+          return;
+        }
+        showToast(message, "error");
       });
 
     fetchNameIndex(uploadId)
@@ -301,21 +418,74 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
       })
       .catch((err) => {
         console.error("Failed to fetch name index after update:", err);
-        showToast(getErrorMessage(err, "Failed to reload species names"), "error");
+        const message = getErrorMessage(err, "Failed to reload species names");
+        if (message === "Upload not found") {
+          setIsDeleted(true);
+          return;
+        }
+        showToast(message, "error");
       });
   }, [uploadId, setFilter, showToast]);
 
-  const handleRenameComplete = useCallback((metadata: UploadMetadata) => {
-    setUpload(metadata);
-  }, []);
+  const handleRenameComplete = useCallback(
+    (metadata: UploadMetadata) => {
+      setUpload(metadata);
+      setPendingDataVersion(null);
+      setIsDeleted(false);
+    },
+    [],
+  );
 
   const showingFiltered =
     (filter || lifersOnly || yearTickYear !== null || countryTickCountry !== null) &&
     filteredCount !== null &&
     filteredCount !== upload.rowCount;
 
+  const hasPendingUpdate =
+    pendingDataVersion !== null && pendingDataVersion > currentDataVersion;
+
+  if (isDeleted) {
+    return (
+      <main className="flex h-full flex-col items-center justify-center gap-4 bg-stone-50 px-4 text-center">
+        <div className="text-2xl font-semibold text-stone-900">This upload is no longer available.</div>
+        <p className="max-w-md text-sm text-stone-600">
+          The owner has deleted or replaced this dataset. You can try refreshing once more or return
+          to the uploads page.
+        </p>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            onClick={refreshUpload}
+            className="rounded-full bg-stone-900 px-5 py-2 text-sm font-medium text-white hover:bg-stone-800 transition-colors"
+          >
+            Retry
+          </button>
+          <button
+            onClick={() => router.push("/")}
+            className="rounded-full border border-stone-300 px-5 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100 transition-colors"
+          >
+            Back to uploads
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="fixed inset-0 overflow-hidden">
+    <>
+      {hasPendingUpdate && (
+        <div className="pointer-events-none fixed left-1/2 top-4 z-50 -translate-x-1/2 px-4">
+          <div className="pointer-events-auto flex items-center gap-3 rounded-full bg-stone-900/90 px-4 py-2 text-sm text-white shadow-2xl">
+            <span>Dataset updated elsewhere.</span>
+            <button
+              onClick={refreshUpload}
+              className="rounded-full bg-white/20 px-3 py-1 text-xs font-semibold text-white hover:bg-white/30 transition-colors"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+      )}
+      <main className="fixed inset-0 overflow-hidden">
       <div className="absolute inset-0">
         <SightingsMap
           uploadId={upload.uploadId}
@@ -323,6 +493,9 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
           lifersOnly={lifersOnly}
           yearTickYear={yearTickYear}
           countryTickCountry={countryTickCountry}
+          dataVersion={currentDataVersion}
+          onRemoteVersionObserved={observeVersion}
+          onUploadDeleted={() => setIsDeleted(true)}
           onMapReady={(navigateFn) => {
             navigateToLocationRef.current = navigateFn;
             setMapReady(true);
@@ -359,6 +532,8 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
               countryTickCountry={countryTickCountry}
               nameIndex={nameIndex}
               onNavigateToSighting={handleNavigateToSighting}
+              onRemoteVersionObserved={observeVersion}
+              onUploadDeleted={() => setIsDeleted(true)}
             />
           </div>
         </div>
@@ -522,19 +697,20 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
           </button>
         </div>
 
-              <ActionsMenu
-                uploadId={upload.uploadId}
-                  filename={upload.filename}
-                  title={resolvedTitle}
-                  rowCount={upload.rowCount}
-                  isFilterOpen={filterOpen}
-                  onToggleFilter={() => setFilterOpen((prev) => !prev)}
-                  filter={filter}
-                  editToken={editToken}
-                  onUpdateComplete={handleUpdateComplete}
-                  onRenameComplete={handleRenameComplete}
-                />
+        <ActionsMenu
+          uploadId={upload.uploadId}
+          filename={upload.filename}
+          title={resolvedTitle}
+          rowCount={upload.rowCount}
+          isFilterOpen={filterOpen}
+          onToggleFilter={() => setFilterOpen((prev) => !prev)}
+          filter={filter}
+          editToken={editToken}
+          onUpdateComplete={refreshUpload}
+          onRenameComplete={handleRenameComplete}
+        />
       </div>
     </main>
+    </>
   );
 }

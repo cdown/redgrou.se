@@ -28,6 +28,7 @@ pub const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 pub const MAX_UPLOAD_BODY_BYTES: usize = MAX_UPLOAD_BYTES + (2 * 1024 * 1024); // allow multipart overhead
 const UPLOAD_LIMIT_MB: usize = MAX_UPLOAD_BYTES / (1024 * 1024);
 const MAX_DISPLAY_NAME_LENGTH: usize = 128;
+const INITIAL_DATA_VERSION: i64 = 1;
 
 // No salt needed: tokens are 122-bit random UUIDs, not user-chosen passwords.
 // Salting prevents rainbow table attacks on low-entropy secrets, but rainbow
@@ -267,11 +268,14 @@ pub async fn upload_csv(
         let edit_token_hash = hash_token(&edit_token);
 
         if let Err(e) = db::query_with_timeout(
-            sqlx::query("INSERT INTO uploads (id, filename, edit_token_hash) VALUES (?, ?, ?)")
-                .bind(&upload_id_blob[..])
-                .bind(&filename)
-                .bind(&edit_token_hash)
-                .execute(pools.write()),
+            sqlx::query(
+                "INSERT INTO uploads (id, filename, edit_token_hash, data_version) VALUES (?, ?, ?, ?)",
+            )
+            .bind(&upload_id_blob[..])
+            .bind(&filename)
+            .bind(&edit_token_hash)
+            .bind(INITIAL_DATA_VERSION)
+            .execute(pools.write()),
         )
         .await
         {
@@ -351,6 +355,7 @@ pub async fn upload_csv(
                 row_count: i64::try_from(total_rows).unwrap_or(i64::MAX),
                 edit_token,
                 title: response_title,
+                data_version: INITIAL_DATA_VERSION,
             }),
         )
             .into_response();
@@ -441,10 +446,12 @@ pub async fn rename_upload(
     };
 
     if let Err(e) = db::query_with_timeout(
-        sqlx::query("UPDATE uploads SET display_name = ? WHERE id = ?")
-            .bind(&display_name)
-            .bind(&upload_id_blob[..])
-            .execute(pools.write()),
+        sqlx::query(
+            "UPDATE uploads SET display_name = ?, data_version = data_version + 1 WHERE id = ?",
+        )
+        .bind(&display_name)
+        .bind(&upload_id_blob[..])
+        .execute(pools.write()),
     )
     .await
     {
@@ -454,8 +461,8 @@ pub async fn rename_upload(
     }
 
     let metadata = match db::query_with_timeout(
-        sqlx::query_as::<_, (String, i64, Option<String>)>(
-            "SELECT filename, row_count, display_name FROM uploads WHERE id = ?",
+        sqlx::query_as::<_, (String, i64, Option<String>, i64)>(
+            "SELECT filename, row_count, display_name, data_version FROM uploads WHERE id = ?",
         )
         .bind(&upload_id_blob[..])
         .fetch_optional(pools.read()),
@@ -471,13 +478,15 @@ pub async fn rename_upload(
         }
     };
 
-    let title = effective_display_name(metadata.2, &metadata.0);
+    let (filename, row_count, display_name, data_version) = metadata;
+    let title = effective_display_name(display_name, &filename);
 
     Proto::new(pb::UploadMetadata {
         upload_id,
-        filename: metadata.0,
-        row_count: metadata.1,
+        filename,
+        row_count,
         title,
+        data_version,
     })
     .into_response()
 }
@@ -527,11 +536,13 @@ pub async fn update_csv(
         };
 
         if let Err(e) = db::query_with_timeout(
-            sqlx::query("UPDATE uploads SET row_count = ?, filename = ? WHERE id = ?")
-                .bind(i64::try_from(total_rows).unwrap_or(i64::MAX))
-                .bind(&filename)
-                .bind(&upload_id_blob[..])
-                .execute(pools.write()),
+            sqlx::query(
+                "UPDATE uploads SET row_count = ?, filename = ?, data_version = data_version + 1 WHERE id = ?",
+            )
+            .bind(i64::try_from(total_rows).unwrap_or(i64::MAX))
+            .bind(&filename)
+            .bind(&upload_id_blob[..])
+            .execute(pools.write()),
         )
         .await
         {
@@ -551,6 +562,21 @@ pub async fn update_csv(
 
         invalidate_upload_cache(&upload_id).await;
 
+        let data_version = match db::query_with_timeout(
+            sqlx::query_scalar::<_, i64>("SELECT data_version FROM uploads WHERE id = ?")
+                .bind(&upload_id_blob[..])
+                .fetch_one(pools.read()),
+        )
+        .await
+        {
+            Ok(version) => version,
+            Err(e) => {
+                return e
+                    .into_api_error("loading upload data_version", "Database error")
+                    .into_response();
+            }
+        };
+
         info!(
             "Update complete: {} rows from {} (upload_id: {})",
             total_rows, filename, upload_id
@@ -565,6 +591,7 @@ pub async fn update_csv(
                 filename,
                 row_count: i64::try_from(total_rows).unwrap_or(i64::MAX),
                 title: response_title,
+                data_version,
             }),
         )
             .into_response();
@@ -656,6 +683,22 @@ pub(crate) fn effective_display_name(stored: Option<String>, filename: &str) -> 
         }
         None => default_display_name(filename),
     }
+}
+
+pub async fn get_upload_data_version(
+    pool: &sqlx::SqlitePool,
+    upload_uuid: &Uuid,
+) -> Result<i64, ApiError> {
+    let version = db::query_with_timeout(
+        sqlx::query_scalar::<_, i64>("SELECT data_version FROM uploads WHERE id = ?")
+            .bind(&upload_uuid.as_bytes()[..])
+            .fetch_optional(pool),
+    )
+    .await
+    .map_err(|e| e.into_api_error("loading upload data_version", "Database error"))?
+    .ok_or_else(|| ApiError::not_found("Upload not found"))?;
+
+    Ok(version)
 }
 
 pub async fn delete_old_uploads(

@@ -13,6 +13,7 @@ use tracing::{debug, error};
 use crate::db;
 use crate::error::ApiError;
 use crate::filter::build_filter_clause;
+use crate::upload::get_upload_data_version;
 
 const TILE_EXTENT: u32 = 4096;
 // Maximum vis_rank value (0-10000). When threshold equals this, all points are included.
@@ -157,6 +158,7 @@ pub async fn get_tile(
             return Err(ApiError::bad_request("Invalid y coordinate"));
         }
     };
+    let data_version = get_upload_data_version(pools.read(), &upload_uuid).await?;
 
     let tile_pos = TileCoordinates {
         z: path.z,
@@ -177,8 +179,8 @@ pub async fn get_tile(
         query.country_tick_country.as_ref(),
     );
     let cache_key = format!(
-        "{}:{}:{}:{}:{}",
-        path.upload_id, path.z, path.x, y, filter_hash
+        "{}:{}:{}:{}:{}:{}",
+        path.upload_id, data_version, path.z, path.x, y, filter_hash
     );
 
     if let Some(cached_data) = TILE_CACHE.get(&cache_key).await {
@@ -187,6 +189,7 @@ pub async fn get_tile(
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/x-protobuf")
             .header(header::CACHE_CONTROL, "public, max-age=3600")
+            .header("x-upload-version", data_version.to_string())
             .body(axum::body::Body::from(cached_data))
             .map_err(|err| {
                 error!("Failed to build cached tile response: {}", err);
@@ -441,6 +444,7 @@ pub async fn get_tile(
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/x-protobuf")
         .header(header::CACHE_CONTROL, "public, max-age=3600")
+        .header("x-upload-version", data_version.to_string())
         .body(axum::body::Body::from(data))
         .map_err(|err| {
             error!("Failed to build tile response: {}", err);

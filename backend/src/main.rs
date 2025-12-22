@@ -684,6 +684,7 @@ async fn get_bbox(
 ) -> Result<Proto<pb::BboxResponse>, ApiError> {
     let upload_uuid = uuid::Uuid::parse_str(&upload_id)
         .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
+    let data_version = upload::get_upload_data_version(pools.read(), &upload_uuid).await?;
 
     let filter_result = build_filter_clause(
         pools.read(),
@@ -726,5 +727,6 @@ async fn get_bbox(
         min_lat: min_lat.unwrap(),
         max_lng: max_lng.unwrap(),
         max_lat: max_lat.unwrap(),
+        data_version,
     }))
 }

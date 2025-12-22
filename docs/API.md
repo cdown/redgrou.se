@@ -16,6 +16,15 @@ All responses use Protocol Buffer encoding. Error responses include an
 The `x-build-version` header is included on all responses and contains the git
 commit hash of the deployed version.
 
+## Dataset versions
+
+Each upload maintains a monotonically increasing `data_version`. The backend
+includes this value in every metadata, count, field values, bounding box, and
+`SightingsResponse`. Tile responses also expose it via the `x-upload-version`
+header. Clients should treat the value as opaque and refresh any cached data
+whenever it changes to ensure viewers see the latest dataset contents (or learn
+when an upload has been deleted).
+
 ## Authentication
 
 Most endpoints are public. Upload modification and deletion require an edit token
@@ -53,7 +62,7 @@ Uploads a new CSV file. The request body must be multipart/form-data with a CSV
 file field.
 
 **Response**: `UploadResponse` containing `upload_id`, `filename`, `row_count`,
-and `edit_token`.
+`data_version`, and `edit_token`.
 
 **Rate limits**: 1 concurrent upload per IP, 3 uploads per minute per IP.
 
@@ -67,7 +76,9 @@ GET /api/uploads/{upload_id}
 
 Returns metadata for a specific upload including filename, row count, and display name.
 
-**Response**: `UploadMetadata` containing `upload_id`, `filename`, `row_count`, and `title` (display name or filename if no display name is set).
+**Response**: `UploadMetadata` containing `upload_id`, `filename`, `row_count`,
+`title` (display name or filename if no display name is set), and
+`data_version`.
 
 ### Rename upload
 
@@ -94,7 +105,7 @@ Content-Type: multipart/form-data
 Replaces all sightings in an upload with data from a new CSV file. Requires
 the edit token.
 
-**Response**: `UpdateResponse`
+**Response**: `UpdateResponse` with the new `data_version`.
 
 ### Delete upload
 
@@ -117,7 +128,7 @@ Returns the count of sightings matching the provided filter criteria. The
 `filter` parameter is a JSON-encoded filter group (see filter system
 documentation).
 
-**Response**: `CountResponse`
+**Response**: `CountResponse` (includes `data_version`)
 
 ### Get bounding box
 
@@ -128,7 +139,7 @@ GET /api/uploads/{upload_id}/bbox?filter={json}&lifers_only={bool}&year_tick_yea
 Returns the bounding box (min/max latitude and longitude) of all sightings
 matching the filter criteria.
 
-**Response**: `BboxResponse`
+**Response**: `BboxResponse` (includes `data_version`)
 
 ### Get sightings
 
@@ -145,7 +156,7 @@ response falls back to page/offset pagination, so `page` must be supplied in
 those requests.
 
 **Response**: `SightingsResponse` containing `sightings`, `groups`, `total`,
-`total` and `next_cursor` (for cursor-based pagination).
+`total`, `data_version`, and `next_cursor` (for cursor-based pagination).
 
 ### Get vector tile
 
@@ -161,7 +172,7 @@ query parameters (same as sightings endpoint).
 
 **Content-Type**: `application/x-protobuf`
 
-**Caching**: Tiles are cached in memory using an LRU cache (~50MB limit) to improve performance for frequently accessed tiles, especially at low zoom levels.
+**Caching**: Tiles are cached in memory using an LRU cache (~50MB limit) to improve performance for frequently accessed tiles, especially at low zoom levels. Responses also include an `x-upload-version` header so clients can detect stale tiles; append `data_version=<value>` to tile URLs to force browsers to revalidate when a dataset changes.
 
 ### Get field metadata
 
@@ -182,7 +193,7 @@ GET /api/uploads/{upload_id}/fields/{field}
 Returns all distinct values for a specific field within an upload. Useful for
 populating filter dropdowns.
 
-**Response**: `FieldValues`
+**Response**: `FieldValues` (includes `data_version`)
 
 ## Rate limiting
 

@@ -29,10 +29,12 @@ import { VERSION_ROUTE, UPLOAD_DETAILS_ROUTE } from "@/lib/generated/api_constan
 import {
   VersionInfo as VersionInfoDecoder,
   UploadMetadata as UploadMetadataDecoder,
+  UpdateResponse as UpdateResponseDecoder,
 } from "@/lib/proto/redgrouse_api";
 import { FilterGroup } from "@/lib/filter-types";
 import type { UploadMetadata as UploadMetadataMessage } from "@/lib/proto/redgrouse_api";
 import { sanitizeText } from "@/lib/sanitize";
+import { broadcastUploadEvent } from "@/lib/uploads";
 
 interface ActionsMenuProps {
   uploadId: string;
@@ -138,6 +140,7 @@ export function ActionsMenu({
 
       await checkApiResponse(res, "Delete failed");
 
+      broadcastUploadEvent({ type: "deleted", uploadId });
       removeEditToken(uploadId);
       router.push("/");
     } catch (err) {
@@ -172,11 +175,17 @@ export function ActionsMenu({
         );
 
         await checkApiResponse(res, "Update failed");
+        const updateData = await parseProtoResponse(res, UpdateResponseDecoder);
 
         setShowUpdateModal(false);
         if (onUpdateComplete) {
           onUpdateComplete();
         }
+        broadcastUploadEvent({
+          type: "updated",
+          uploadId,
+          dataVersion: updateData.dataVersion,
+        });
       } catch (err) {
         setUpdateError(getErrorMessage(err, "Update failed"));
       } finally {
@@ -231,6 +240,11 @@ export function ActionsMenu({
       await checkApiResponse(res, "Rename failed");
       const metadata = await parseProtoResponse(res, UploadMetadataDecoder);
       onRenameComplete?.(metadata);
+      broadcastUploadEvent({
+        type: "updated",
+        uploadId,
+        dataVersion: metadata.dataVersion,
+      });
       setShowRenameModal(false);
     } catch (err) {
       setRenameError(getErrorMessage(err, "Rename failed"));
