@@ -11,12 +11,10 @@ use ipnet::IpNet;
 use redgrouse::db::DbPools;
 use serde::Deserialize;
 use sqlx::Row;
-use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
 use tower::timeout::error::Elapsed;
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
@@ -32,6 +30,7 @@ use redgrouse::config;
 use redgrouse::error::ApiError;
 use redgrouse::filter::{build_filter_clause, CountQuery};
 use redgrouse::handlers;
+use redgrouse::limits::{UploadLimiter, UploadUsageTracker};
 use redgrouse::proto::{pb, Proto};
 use redgrouse::{db, sightings, tiles, upload};
 
@@ -72,6 +71,13 @@ const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(30);
 /// Maximum time for upload requests (body + processing).
 /// Applies to: POST /upload and PUT /single/{id} routes only.
 const UPLOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Total writer time allowed per IP within the writer budget window.
+/// Ensures no single tenant monopolises the single SQLite writer.
+const UPLOAD_WRITER_BUDGET_LIMIT: Duration = Duration::from_secs(120);
+
+/// Sliding window for enforcing writer time budgets.
+const UPLOAD_WRITER_BUDGET_WINDOW: Duration = Duration::from_secs(900);
 
 /// Window duration for per-IP rate limiting (used with GLOBAL_RATE_LIMIT_PER_MINUTE).
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
@@ -139,6 +145,8 @@ async fn main() -> anyhow::Result<()> {
         UPLOAD_CONCURRENCY_PER_IP,
         UPLOAD_RATE_PER_IP_PER_MINUTE,
         RATE_LIMIT_WINDOW,
+        UPLOAD_WRITER_BUDGET_LIMIT,
+        UPLOAD_WRITER_BUDGET_WINDOW,
     );
 
     let ingest_routes = Router::new()
@@ -220,6 +228,7 @@ async fn main() -> anyhow::Result<()> {
                 .on_response(on_response),
         )
         .layer(from_fn(extract_and_log_ip))
+        .layer(Extension(UploadUsageTracker::disabled()))
         .layer(Extension(upload_limiter))
         .layer(Extension(rate_limiter))
         .layer(Extension(trusted_proxies.clone()))
@@ -342,83 +351,6 @@ impl RequestRateLimiter {
     }
 }
 
-#[derive(Clone)]
-struct UploadLimiter {
-    max_concurrent: usize,
-    rate_limit: u64,
-    window: Duration,
-    state: Arc<Mutex<HashMap<String, UploadState>>>,
-}
-
-struct UploadState {
-    active: usize,
-    window_start: Instant,
-    window_count: u64,
-}
-
-/// RAII guard that automatically releases an upload slot when dropped.
-/// Ensures slots are released even if the client disconnects or the request is cancelled.
-pub struct UploadGuard {
-    limiter: Arc<Mutex<HashMap<String, UploadState>>>,
-    key: String,
-}
-
-impl Drop for UploadGuard {
-    fn drop(&mut self) {
-        let limiter = Arc::clone(&self.limiter);
-        let key = self.key.clone();
-        // Spawn a task to decrement the counter asynchronously.
-        // This ensures cleanup happens even if the guard is dropped during cancellation.
-        tokio::spawn(async move {
-            let mut state = limiter.lock().await;
-            if let Some(entry) = state.get_mut(&key) {
-                entry.active = entry.active.saturating_sub(1);
-            }
-        });
-    }
-}
-
-impl UploadLimiter {
-    fn new(max_concurrent: usize, rate_limit: u64, window: Duration) -> Self {
-        Self {
-            max_concurrent,
-            rate_limit,
-            window,
-            state: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-
-    async fn try_start(&self, key: &str) -> Result<UploadGuard, &'static str> {
-        let mut state = self.state.lock().await;
-        let entry = state.entry(key.to_string()).or_insert(UploadState {
-            active: 0,
-            window_start: Instant::now(),
-            window_count: 0,
-        });
-
-        let now = Instant::now();
-        if now.duration_since(entry.window_start) >= self.window {
-            entry.window_start = now;
-            entry.window_count = 0;
-        }
-
-        if entry.active >= self.max_concurrent {
-            return Err("Upload already in progress");
-        }
-
-        if entry.window_count >= self.rate_limit {
-            return Err("Too many uploads, please wait");
-        }
-
-        entry.active += 1;
-        entry.window_count += 1;
-        Ok(UploadGuard {
-            limiter: Arc::clone(&self.state),
-            key: key.to_string(),
-        })
-    }
-}
-
 async fn enforce_upload_limit(
     Extension(limiter): Extension<UploadLimiter>,
     Extension(trusted): Extension<TrustedProxyList>,
@@ -428,6 +360,8 @@ async fn enforce_upload_limit(
 ) -> Response {
     #[cfg(feature = "disable-rate-limits")]
     {
+        let mut req = req;
+        req.extensions_mut().insert(UploadUsageTracker::disabled());
         return next.run(req).await;
     }
 
@@ -440,14 +374,15 @@ async fn enforce_upload_limit(
         }
 
         let client_key = extract_client_addr(&req, peer_addr, &trusted);
+        let tracker = limiter.tracker(&client_key);
+        let mut req = req;
+        req.extensions_mut().insert(tracker.clone());
 
         let _guard = match limiter.try_start(&client_key).await {
             Ok(guard) => guard,
             Err(msg) => return ApiError::too_many_requests(msg).into_response(),
         };
 
-        // Guard is automatically dropped when this function returns, releasing the slot.
-        // This ensures cleanup even if the client disconnects or the request is cancelled.
         next.run(req).await
     }
 }

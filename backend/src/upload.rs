@@ -1,6 +1,6 @@
 use crate::db::DbPools;
 use axum::body::Bytes;
-use axum::extract::{multipart::Field, Multipart, Path, State};
+use axum::extract::{multipart::Field, Extension, Multipart, Path, State};
 use axum::http::header;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -11,6 +11,7 @@ use std::fmt;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::Instant;
 use subtle::ConstantTimeEq;
 use tokio_util::io::StreamReader;
 use tracing::{error, info};
@@ -18,6 +19,7 @@ use uuid::Uuid;
 
 use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
+use crate::limits::UploadUsageTracker;
 use crate::pipeline::{CsvParser, DbSink, Geocoder, ParsedSighting, BATCH_SIZE};
 use crate::proto::{pb, Proto};
 use crate::tiles::invalidate_upload_cache;
@@ -136,16 +138,22 @@ async fn ingest_csv_field(
     field: Field<'_>,
     pool: &sqlx::SqlitePool,
     upload_id: &str,
+    writer_tracker: &UploadUsageTracker,
 ) -> Result<usize, ApiError> {
     let stream = field
         .into_stream()
         .map(|result| result.map_err(io::Error::other));
     let limited_stream = SizeLimitedStream::new(stream, MAX_UPLOAD_BYTES);
     let reader = StreamReader::new(limited_stream);
-    read_csv(reader, pool, upload_id).await
+    read_csv(reader, pool, upload_id, writer_tracker).await
 }
 
-async fn read_csv<R>(reader: R, pool: &sqlx::SqlitePool, upload_id: &str) -> Result<usize, ApiError>
+async fn read_csv<R>(
+    reader: R,
+    pool: &sqlx::SqlitePool,
+    upload_id: &str,
+    writer_tracker: &UploadUsageTracker,
+) -> Result<usize, ApiError>
 where
     R: tokio::io::AsyncRead + Unpin + Send,
 {
@@ -173,13 +181,27 @@ where
             pending_rows.push(parsed);
 
             if pending_rows.len() >= BATCH_SIZE {
-                process_pending_rows(&mut sink, pool, &geocoder, &mut pending_rows).await?;
+                process_pending_rows(
+                    &mut sink,
+                    pool,
+                    &geocoder,
+                    &mut pending_rows,
+                    writer_tracker,
+                )
+                .await?;
             }
         }
     }
 
-    process_pending_rows(&mut sink, pool, &geocoder, &mut pending_rows).await?;
-    sink.flush(pool).await?;
+    process_pending_rows(
+        &mut sink,
+        pool,
+        &geocoder,
+        &mut pending_rows,
+        writer_tracker,
+    )
+    .await?;
+    flush_with_tracking(&mut sink, pool, writer_tracker).await?;
 
     Ok(sink.total_rows())
 }
@@ -189,6 +211,7 @@ async fn process_pending_rows(
     pool: &sqlx::SqlitePool,
     geocoder: &Geocoder,
     pending_rows: &mut Vec<ParsedSighting>,
+    writer_tracker: &UploadUsageTracker,
 ) -> Result<(), ApiError> {
     if pending_rows.is_empty() {
         return Ok(());
@@ -199,11 +222,22 @@ async fn process_pending_rows(
 
     for sighting in processed {
         if sink.needs_flush() {
-            sink.flush(pool).await?;
+            flush_with_tracking(sink, pool, writer_tracker).await?;
         }
         sink.add(sighting)?;
     }
 
+    Ok(())
+}
+
+async fn flush_with_tracking(
+    sink: &mut DbSink,
+    pool: &sqlx::SqlitePool,
+    writer_tracker: &UploadUsageTracker,
+) -> Result<(), ApiError> {
+    let start = Instant::now();
+    sink.flush(pool).await?;
+    writer_tracker.record_writer_usage(start.elapsed()).await;
     Ok(())
 }
 
@@ -250,6 +284,7 @@ async fn compute_grid_cell_visibility_tx(
 
 pub async fn upload_csv(
     State(pools): State<DbPools>,
+    Extension(writer_tracker): Extension<UploadUsageTracker>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -284,21 +319,22 @@ pub async fn upload_csv(
                 .into_response();
         }
 
-        let total_rows = match ingest_csv_field(field, pools.write(), &upload_id).await {
-            Ok(rows) => rows,
-            Err(err) => {
-                if let Err(db_err) = db::query_with_timeout(
-                    sqlx::query("DELETE FROM uploads WHERE id = ?")
-                        .bind(&upload_id_blob[..])
-                        .execute(pools.write()),
-                )
-                .await
-                {
-                    db_err.log("deleting failed upload record");
+        let total_rows =
+            match ingest_csv_field(field, pools.write(), &upload_id, &writer_tracker).await {
+                Ok(rows) => rows,
+                Err(err) => {
+                    if let Err(db_err) = db::query_with_timeout(
+                        sqlx::query("DELETE FROM uploads WHERE id = ?")
+                            .bind(&upload_id_blob[..])
+                            .execute(pools.write()),
+                    )
+                    .await
+                    {
+                        db_err.log("deleting failed upload record");
+                    }
+                    return err.into_response();
                 }
-                return err.into_response();
-            }
-        };
+            };
 
         let mut tx = match db::query_with_timeout(pools.write().begin()).await {
             Ok(tx) => tx,
@@ -495,6 +531,7 @@ pub async fn update_csv(
     State(pools): State<DbPools>,
     Path(upload_id): Path<String>,
     headers: axum::http::HeaderMap,
+    Extension(writer_tracker): Extension<UploadUsageTracker>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
     if let Err(response) = verify_edit_token(pools.read(), &headers, &upload_id).await {
@@ -530,10 +567,11 @@ pub async fn update_csv(
                 .into_response();
         }
 
-        let total_rows = match ingest_csv_field(field, pools.write(), &upload_id).await {
-            Ok(rows) => rows,
-            Err(err) => return err.into_response(),
-        };
+        let total_rows =
+            match ingest_csv_field(field, pools.write(), &upload_id, &writer_tracker).await {
+                Ok(rows) => rows,
+                Err(err) => return err.into_response(),
+            };
 
         if let Err(e) = db::query_with_timeout(
             sqlx::query(

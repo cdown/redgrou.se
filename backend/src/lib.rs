@@ -5,6 +5,7 @@ pub mod db;
 pub mod error;
 pub mod filter;
 pub mod handlers;
+pub mod limits;
 pub mod pipeline;
 pub mod proto;
 pub mod sightings;
@@ -27,8 +28,9 @@ mod macros {
 }
 
 use crate::db::DbPools;
+use crate::limits::UploadUsageTracker;
 use axum::routing::{get, post};
-use axum::Router;
+use axum::{Extension, Router};
 
 /// Create a minimal test router for benchmarks without production middleware
 pub async fn create_test_router(pools: DbPools) -> Router {
@@ -57,5 +59,6 @@ pub async fn create_test_router(pools: DbPools) -> Router {
             api_constants::FIELD_VALUES_ROUTE,
             get(handlers::field_values),
         )
+        .layer(Extension(UploadUsageTracker::disabled()))
         .with_state(pools)
 }
