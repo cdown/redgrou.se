@@ -567,10 +567,10 @@ export function SightingsTable({
                             }
                           }}
                           disabled={!onNavigateToSighting}
-                          className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="flex h-6 w-6 items-center justify-center rounded-full hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           title="Show on map"
                         >
-                          <MapPin className="h-4 w-4" />
+                          <MapPin className="h-3.5 w-3.5" />
                         </button>
                       ) : null}
                     </div>
