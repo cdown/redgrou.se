@@ -19,6 +19,8 @@ const TILE_EXTENT: u32 = 4096;
 const MAX_VIS_RANK: i32 = 10000;
 // Tile cache size limit: ~50MB (assuming average tile size of ~10KB, cache ~5000 tiles)
 const TILE_CACHE_SIZE: u64 = 50 * 1024 * 1024;
+const BBOX_CANDIDATE_LIMIT_MULTIPLIER: i64 = 4;
+const BBOX_CANDIDATE_LIMIT_MAX: i64 = 1_000_000;
 
 // LRU cache for tiles: key is (upload_id, z, x, y, filter_hash), value is encoded MVT bytes
 static TILE_CACHE: Lazy<Cache<String, Vec<u8>>> = Lazy::new(|| {
@@ -231,55 +233,101 @@ pub async fn get_tile(
     // Filter by upload_id + vis_rank before the rtree join; skip the vis_rank predicate
     // entirely when the threshold would include everyone.
     let include_all_points = vis_rank_threshold >= MAX_VIS_RANK;
-    let vis_rank_clause = if include_all_points {
-        String::new()
+    let rows = if include_all_points {
+        let candidate_limit = (i64::from(max_points)
+            .saturating_mul(BBOX_CANDIDATE_LIMIT_MULTIPLIER))
+        .max(i64::from(max_points))
+        .min(BBOX_CANDIDATE_LIMIT_MAX);
+
+        let sql = format!(
+            r#"
+            WITH bbox AS (
+                SELECT id
+                FROM sightings_geo
+                WHERE max_lat >= ? AND min_lat <= ?
+                  AND max_lon >= ? AND min_lon <= ?
+                LIMIT ?
+            )
+            SELECT
+                s.id,
+                s.latitude,
+                s.longitude,
+                sp.common_name,
+                sp.scientific_name,
+                s.count,
+                s.observed_at,
+                s.lifer,
+                s.year_tick,
+                s.country_tick
+            FROM bbox
+            JOIN sightings AS s ON s.id = bbox.id
+            JOIN species sp ON s.species_id = sp.id
+            WHERE s.upload_id = ?{}
+            LIMIT ?
+            "#,
+            filter_result.filter_clause
+        );
+
+        let mut db_query = sqlx::query(&sql)
+            .bind(bbox.lat_min)
+            .bind(bbox.lat_max)
+            .bind(bbox.lon_min)
+            .bind(bbox.lon_max)
+            .bind(candidate_limit)
+            .bind(&upload_uuid.as_bytes()[..]);
+
+        for param in &filter_result.params {
+            db_query = db_query.bind(param);
+        }
+        db_query = db_query.bind(i64::from(max_points));
+
+        db::query_with_timeout(db_query.fetch_all(pools.read()))
+            .await
+            .map_err(|e| e.into_api_error("loading tile sightings", "Database error"))?
     } else {
-        " AND s.vis_rank < ?".to_string()
+        let sql = format!(
+            r#"
+            SELECT
+                s.id,
+                s.latitude,
+                s.longitude,
+                sp.common_name,
+                sp.scientific_name,
+                s.count,
+                s.observed_at,
+                s.lifer,
+                s.year_tick,
+                s.country_tick
+            FROM sightings AS s
+            JOIN species sp ON s.species_id = sp.id
+            JOIN sightings_geo AS sg ON sg.id = s.id
+            WHERE s.upload_id = ?
+              AND s.vis_rank < ?
+              AND sg.max_lat >= ? AND sg.min_lat <= ?
+              AND sg.max_lon >= ? AND sg.min_lon <= ?
+            {}
+            LIMIT ?
+            "#,
+            filter_result.filter_clause
+        );
+
+        let mut db_query = sqlx::query(&sql)
+            .bind(&upload_uuid.as_bytes()[..])
+            .bind(vis_rank_threshold)
+            .bind(bbox.lat_min)
+            .bind(bbox.lat_max)
+            .bind(bbox.lon_min)
+            .bind(bbox.lon_max);
+
+        for param in &filter_result.params {
+            db_query = db_query.bind(param);
+        }
+        db_query = db_query.bind(i64::from(max_points));
+
+        db::query_with_timeout(db_query.fetch_all(pools.read()))
+            .await
+            .map_err(|e| e.into_api_error("loading tile sightings", "Database error"))?
     };
-
-    let sql = format!(
-        r"
-        SELECT
-            s.id,
-            s.latitude,
-            s.longitude,
-            sp.common_name,
-            sp.scientific_name,
-            s.count,
-            s.observed_at,
-            s.lifer,
-            s.year_tick,
-            s.country_tick
-        FROM sightings AS s
-        JOIN species sp ON s.species_id = sp.id
-        JOIN sightings_geo AS sg ON sg.id = s.id
-        WHERE s.upload_id = ?{}
-          AND sg.max_lat >= ? AND sg.min_lat <= ?
-          AND sg.max_lon >= ? AND sg.min_lon <= ?
-        {}
-        LIMIT ?
-        ",
-        vis_rank_clause, filter_result.filter_clause
-    );
-
-    let mut db_query = sqlx::query(&sql).bind(&upload_uuid.as_bytes()[..]);
-    if !include_all_points {
-        db_query = db_query.bind(vis_rank_threshold);
-    }
-    db_query = db_query
-        .bind(bbox.lat_min)
-        .bind(bbox.lat_max)
-        .bind(bbox.lon_min)
-        .bind(bbox.lon_max);
-
-    for param in &filter_result.params {
-        db_query = db_query.bind(param);
-    }
-    db_query = db_query.bind(i64::from(max_points));
-
-    let rows = db::query_with_timeout(db_query.fetch_all(pools.read()))
-        .await
-        .map_err(|e| e.into_api_error("loading tile sightings", "Database error"))?;
 
     // Collect row data into a Vec to move into spawn_blocking
     // This avoids holding async types across the blocking boundary
