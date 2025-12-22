@@ -321,81 +321,95 @@ impl DbSink {
         Ok(())
     }
 
-    pub async fn flush(&mut self, tx: &mut Transaction<'_, Sqlite>) -> Result<(), ApiError> {
+    pub async fn flush(&mut self, pool: &sqlx::SqlitePool) -> Result<(), ApiError> {
         if self.batch.is_empty() {
             return Ok(());
         }
 
+        let mut tx = db::query_with_timeout(pool.begin())
+            .await
+            .map_err(|e| e.into_api_error("starting upload batch transaction", "Database error"))?;
+
+        self.flush_with_transaction(&mut tx).await?;
+
+        db::query_with_timeout(tx.commit()).await.map_err(|e| {
+            e.into_api_error("committing upload batch transaction", "Database error")
+        })?;
+
         let batch_len = self.batch.len();
+        self.total_rows += batch_len;
+        self.batch.clear();
+        Ok(())
+    }
 
-        {
-            let conn = tx.acquire().await.map_err(|e| {
-                error!("Failed to acquire connection for batch insert: {}", e);
-                ApiError::internal("Database error")
-            })?;
+    async fn flush_with_transaction(
+        &mut self,
+        tx: &mut Transaction<'_, Sqlite>,
+    ) -> Result<(), ApiError> {
+        let conn = tx.acquire().await.map_err(|e| {
+            error!("Failed to acquire connection for batch insert: {}", e);
+            ApiError::internal("Database error")
+        })?;
 
-            self.resolve_species_ids(&mut *conn).await?;
+        self.resolve_species_ids(&mut *conn).await?;
 
-            // Compute tick flags
-            for sighting in &mut self.batch {
-                let species_id = sighting.species_id.expect("species_id should be set");
+        // Compute tick flags
+        for sighting in &mut self.batch {
+            let species_id = sighting.species_id.expect("species_id should be set");
 
-                // Check for lifer (first sighting of this species in this upload)
-                if !self.seen_species.contains(&species_id) {
-                    sighting.lifer = true;
-                    self.seen_species.insert(species_id);
-                }
+            // Check for lifer (first sighting of this species in this upload)
+            if !self.seen_species.contains(&species_id) {
+                sighting.lifer = true;
+                self.seen_species.insert(species_id);
+            }
 
-                // Check for year tick (first sighting of this species in this year)
-                let year_tick_key = (species_id, sighting.year);
-                if !self.seen_year_ticks.contains(&year_tick_key) {
-                    sighting.year_tick = true;
-                    self.seen_year_ticks.insert(year_tick_key);
-                }
+            // Check for year tick (first sighting of this species in this year)
+            let year_tick_key = (species_id, sighting.year);
+            if !self.seen_year_ticks.contains(&year_tick_key) {
+                sighting.year_tick = true;
+                self.seen_year_ticks.insert(year_tick_key);
+            }
 
-                // Check for country tick (first sighting of this species in this country)
-                if !sighting.country_code.is_empty() && sighting.country_code != "XX" {
-                    let country_tick_key = (species_id, sighting.country_code.to_string());
-                    if !self.seen_country_ticks.contains(&country_tick_key) {
-                        sighting.country_tick = true;
-                        self.seen_country_ticks.insert(country_tick_key);
-                    }
-                }
-
-                // Set vis_rank: 0 for lifers/year_ticks/country_ticks, pseudo-random otherwise
-                if sighting.lifer || sighting.year_tick || sighting.country_tick {
-                    sighting.vis_rank = 0;
-                } else {
-                    // Use hash of UUID for pseudo-random vis_rank (0-10000)
-                    let mut hasher = DefaultHasher::new();
-                    sighting.sighting_uuid.hash(&mut hasher);
-                    sighting.vis_rank = (hasher.finish() % 10001) as i32;
+            // Check for country tick (first sighting of this species in this country)
+            if !sighting.country_code.is_empty() && sighting.country_code != "XX" {
+                let country_tick_key = (species_id, sighting.country_code.to_string());
+                if !self.seen_country_ticks.contains(&country_tick_key) {
+                    sighting.country_tick = true;
+                    self.seen_country_ticks.insert(country_tick_key);
                 }
             }
 
-            // Clear buffer (O(1), keeps capacity) and serialize directly to it
-            // This avoids the allocation overhead of serde_json::to_string
-            self.json_buffer.clear();
-            serde_json::to_writer(&mut self.json_buffer, &self.batch).map_err(|e| {
-                error!("JSON serialization failed: {}", e);
-                ApiError::internal("Serialization failed")
-            })?;
-
-            // Convert buffer to str (zero-copy, just UTF-8 validation)
-            let json_str = std::str::from_utf8(&self.json_buffer).map_err(|e| {
-                error!("Invalid UTF-8 in JSON buffer: {}", e);
-                ApiError::internal("Invalid UTF-8 in JSON")
-            })?;
-
-            insert_batch(conn, &self.upload_id, json_str)
-                .await
-                .map_err(|e| {
-                    e.into_api_error("inserting sightings batch", "Failed to insert sightings")
-                })?;
+            // Set vis_rank: 0 for lifers/year_ticks/country_ticks, pseudo-random otherwise
+            if sighting.lifer || sighting.year_tick || sighting.country_tick {
+                sighting.vis_rank = 0;
+            } else {
+                // Use hash of UUID for pseudo-random vis_rank (0-10000)
+                let mut hasher = DefaultHasher::new();
+                sighting.sighting_uuid.hash(&mut hasher);
+                sighting.vis_rank = (hasher.finish() % 10001) as i32;
+            }
         }
 
-        self.total_rows += batch_len;
-        self.batch.clear();
+        // Clear buffer (O(1), keeps capacity) and serialize directly to it
+        // This avoids the allocation overhead of serde_json::to_string
+        self.json_buffer.clear();
+        serde_json::to_writer(&mut self.json_buffer, &self.batch).map_err(|e| {
+            error!("JSON serialization failed: {}", e);
+            ApiError::internal("Serialization failed")
+        })?;
+
+        // Convert buffer to str (zero-copy, just UTF-8 validation)
+        let json_str = std::str::from_utf8(&self.json_buffer).map_err(|e| {
+            error!("Invalid UTF-8 in JSON buffer: {}", e);
+            ApiError::internal("Invalid UTF-8 in JSON")
+        })?;
+
+        insert_batch(conn, &self.upload_id, json_str)
+            .await
+            .map_err(|e| {
+                e.into_api_error("inserting sightings batch", "Failed to insert sightings")
+            })?;
+
         Ok(())
     }
 

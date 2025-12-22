@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
-use crate::pipeline::{CsvParser, DbSink, Geocoder, BATCH_SIZE};
+use crate::pipeline::{CsvParser, DbSink, Geocoder, ParsedSighting, BATCH_SIZE};
 use crate::proto::{pb, Proto};
 use crate::tiles::invalidate_upload_cache;
 use serde::Deserialize;
@@ -160,9 +160,8 @@ where
 
     let mut parser = CsvParser::new(headers)?;
     let geocoder = Geocoder::new();
-
-    let mut pending_rows: Vec<crate::pipeline::ParsedSighting> = Vec::new();
-    let mut all_processed: Vec<crate::pipeline::ProcessedSighting> = Vec::new();
+    let mut sink = DbSink::new(upload_id.to_string());
+    let mut pending_rows: Vec<ParsedSighting> = Vec::new();
     let mut record = csv_async::ByteRecord::new();
 
     while csv_reader
@@ -174,37 +173,38 @@ where
             pending_rows.push(parsed);
 
             if pending_rows.len() >= BATCH_SIZE {
-                let processed = geocoder.geocode_batch(pending_rows).await?;
-                all_processed.extend(processed);
-                pending_rows = Vec::new();
+                process_pending_rows(&mut sink, pool, &geocoder, &mut pending_rows).await?;
             }
         }
     }
 
-    if !pending_rows.is_empty() {
-        let processed = geocoder.geocode_batch(pending_rows).await?;
-        all_processed.extend(processed);
+    process_pending_rows(&mut sink, pool, &geocoder, &mut pending_rows).await?;
+    sink.flush(pool).await?;
+
+    Ok(sink.total_rows())
+}
+
+async fn process_pending_rows(
+    sink: &mut DbSink,
+    pool: &sqlx::SqlitePool,
+    geocoder: &Geocoder,
+    pending_rows: &mut Vec<ParsedSighting>,
+) -> Result<(), ApiError> {
+    if pending_rows.is_empty() {
+        return Ok(());
     }
 
-    let mut tx = db::query_with_timeout(pool.begin())
-        .await
-        .map_err(|e| e.into_api_error("starting upload transaction", "Database error"))?;
+    let batch = std::mem::take(pending_rows);
+    let processed = geocoder.geocode_batch(batch).await?;
 
-    let mut sink = DbSink::new(upload_id.to_string());
-    for sighting in all_processed {
+    for sighting in processed {
         if sink.needs_flush() {
-            sink.flush(&mut tx).await?;
+            sink.flush(pool).await?;
         }
         sink.add(sighting)?;
     }
 
-    sink.flush(&mut tx).await?;
-
-    db::query_with_timeout(tx.commit())
-        .await
-        .map_err(|e| e.into_api_error("committing upload transaction", "Database error"))?;
-
-    Ok(sink.total_rows())
+    Ok(())
 }
 
 async fn compute_grid_cell_visibility(
