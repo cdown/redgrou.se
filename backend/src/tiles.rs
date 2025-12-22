@@ -8,6 +8,10 @@ use once_cell::sync::Lazy;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Semaphore;
+use tokio::time::timeout;
 use tracing::{debug, error};
 
 use crate::db;
@@ -20,6 +24,10 @@ const TILE_EXTENT: u32 = 4096;
 const MAX_VIS_RANK: i32 = 10000;
 // Tile cache size limit: ~50MB (assuming average tile size of ~10KB, cache ~5000 tiles)
 const TILE_CACHE_SIZE: u64 = 50 * 1024 * 1024;
+const TILE_ENCODER_MAX_CONCURRENCY: usize = 128;
+const TILE_ENCODER_WAIT_TIMEOUT_MS: u64 = 500;
+static TILE_ENCODER_GUARD: Lazy<Arc<Semaphore>> =
+    Lazy::new(|| Arc::new(Semaphore::new(TILE_ENCODER_MAX_CONCURRENCY)));
 const BBOX_CANDIDATE_LIMIT_MULTIPLIER: i64 = 4;
 const BBOX_CANDIDATE_LIMIT_MAX: i64 = 1_000_000;
 
@@ -367,6 +375,23 @@ pub async fn get_tile(
         z: path.z,
         x: path.x,
         y,
+    };
+
+    let _encoder_permit = match timeout(
+        Duration::from_millis(TILE_ENCODER_WAIT_TIMEOUT_MS),
+        TILE_ENCODER_GUARD.clone().acquire_owned(),
+    )
+    .await
+    {
+        Ok(Ok(permit)) => permit,
+        Ok(Err(_)) => {
+            return Err(ApiError::service_unavailable("Tile encoder unavailable"));
+        }
+        Err(_) => {
+            return Err(ApiError::service_unavailable(
+                "Tile renderer is busy, please retry",
+            ));
+        }
     };
 
     // Offload CPU-bound MVT encoding to a blocking thread pool
