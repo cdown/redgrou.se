@@ -120,10 +120,10 @@ fn compute_filter_hash(
         hasher.update(f.as_bytes());
     }
     if let Some(lo) = lifers_only {
-        hasher.update(&[if lo { 1 } else { 0 }]);
+        hasher.update([if lo { 1 } else { 0 }]);
     }
     if let Some(yt) = year_tick_year {
-        hasher.update(&yt.to_le_bytes());
+        hasher.update(yt.to_le_bytes());
     }
     if let Some(ct) = country_tick_country {
         hasher.update(ct.as_bytes());

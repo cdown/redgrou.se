@@ -64,10 +64,7 @@ pub async fn compute_and_store_bitmaps(
     let mut year_bitmaps: std::collections::HashMap<i32, RoaringBitmap> =
         std::collections::HashMap::new();
     for (year, id) in year_tick_rows {
-        year_bitmaps
-            .entry(year)
-            .or_insert_with(RoaringBitmap::new)
-            .insert(id as u32);
+        year_bitmaps.entry(year).or_default().insert(id as u32);
     }
 
     for (year, bitmap) in year_bitmaps {
@@ -105,7 +102,7 @@ pub async fn compute_and_store_bitmaps(
     for (country, id) in country_tick_rows {
         country_bitmaps
             .entry(country)
-            .or_insert_with(RoaringBitmap::new)
+            .or_default()
             .insert(id as u32);
     }
 
