@@ -30,7 +30,7 @@ use redgrouse::config;
 use redgrouse::error::ApiError;
 use redgrouse::filter::{build_filter_clause, CountQuery};
 use redgrouse::handlers;
-use redgrouse::limits::{UploadLimiter, UploadUsageTracker};
+use redgrouse::limits::{UploadLimitError, UploadLimiter, UploadUsageTracker};
 use redgrouse::proto::{pb, Proto};
 use redgrouse::{db, sightings, tiles, upload};
 
@@ -148,7 +148,6 @@ async fn main() -> anyhow::Result<()> {
         UPLOAD_WRITER_BUDGET_LIMIT,
         UPLOAD_WRITER_BUDGET_WINDOW,
     );
-
     let ingest_routes = Router::new()
         .route(api_constants::UPLOAD_ROUTE, post(upload::upload_csv))
         .route(api_constants::UPLOAD_DETAILS_ROUTE, put(upload::update_csv))
@@ -358,6 +357,12 @@ async fn enforce_upload_limit(
     req: Request<Body>,
     next: Next,
 ) -> Response {
+    let dominated_by_upload =
+        req.method() == axum::http::Method::POST || req.method() == axum::http::Method::PUT;
+    if !dominated_by_upload {
+        return next.run(req).await;
+    }
+
     #[cfg(feature = "disable-rate-limits")]
     {
         let mut req = req;
@@ -367,23 +372,33 @@ async fn enforce_upload_limit(
 
     #[cfg(not(feature = "disable-rate-limits"))]
     {
-        let dominated_by_upload =
-            req.method() == axum::http::Method::POST || req.method() == axum::http::Method::PUT;
-        if !dominated_by_upload {
-            return next.run(req).await;
-        }
-
         let client_key = extract_client_addr(&req, peer_addr, &trusted);
         let tracker = limiter.tracker(&client_key);
         let mut req = req;
         req.extensions_mut().insert(tracker.clone());
 
-        let _guard = match limiter.try_start(&client_key).await {
-            Ok(guard) => guard,
-            Err(msg) => return ApiError::too_many_requests(msg).into_response(),
-        };
-
-        next.run(req).await
+        match limiter.try_start(&client_key).await {
+            Ok(_guard) => next.run(req).await,
+            Err(err) => match err {
+                UploadLimitError::ActiveUpload => {
+                    ApiError::too_many_requests("Upload already in progress").into_response()
+                }
+                UploadLimitError::RateLimited => {
+                    ApiError::too_many_requests("Too many uploads, please wait").into_response()
+                }
+                UploadLimitError::WriterBudgetExceeded { retry_after } => {
+                    let mut response =
+                        ApiError::service_unavailable("Upload writer is busy, please retry")
+                            .into_response();
+                    if let Ok(value) =
+                        HeaderValue::from_str(&retry_after.as_secs().max(1).to_string())
+                    {
+                        response.headers_mut().insert(header::RETRY_AFTER, value);
+                    }
+                    response
+                }
+            },
+        }
     }
 }
 

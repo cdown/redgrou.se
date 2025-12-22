@@ -23,6 +23,13 @@ struct UploadState {
     writer_usage: Duration,
 }
 
+#[derive(Debug, Clone)]
+pub enum UploadLimitError {
+    ActiveUpload,
+    RateLimited,
+    WriterBudgetExceeded { retry_after: Duration },
+}
+
 #[derive(Clone)]
 pub struct UploadUsageTracker {
     inner: UploadUsageTrackerInner,
@@ -82,7 +89,7 @@ impl UploadLimiter {
         }
     }
 
-    pub async fn try_start(&self, key: &str) -> Result<UploadGuard, &'static str> {
+    pub async fn try_start(&self, key: &str) -> Result<UploadGuard, UploadLimitError> {
         let mut state = self.state.lock().await;
         let entry = state.entry(key.to_string()).or_insert(UploadState {
             active: 0,
@@ -96,15 +103,20 @@ impl UploadLimiter {
         Self::refresh_windows(entry, now, self.window, self.writer_window);
 
         if entry.active >= self.max_concurrent {
-            return Err("Upload already in progress");
+            return Err(UploadLimitError::ActiveUpload);
         }
 
         if entry.window_count >= self.rate_limit {
-            return Err("Too many uploads, please wait");
+            return Err(UploadLimitError::RateLimited);
         }
 
         if self.writer_budget != Duration::ZERO && entry.writer_usage >= self.writer_budget {
-            return Err("Upload writer budget exceeded, please wait");
+            let next_window = entry.writer_window_start + self.writer_window;
+            let retry_after = next_window
+                .checked_duration_since(now)
+                .unwrap_or_else(|| Duration::from_secs(1))
+                .max(Duration::from_secs(1));
+            return Err(UploadLimitError::WriterBudgetExceeded { retry_after });
         }
 
         entry.active += 1;
