@@ -7,7 +7,7 @@ use once_cell::sync::Lazy;
 use serde::{ser::SerializeTuple, Serialize, Serializer};
 use smartstring::{LazyCompact, SmartString};
 use sqlx::{Acquire, Executor, Sqlite, Transaction};
-use std::collections::{hash_map::DefaultHasher, HashSet};
+use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use tracing::error;
 use uuid::Uuid;
@@ -285,6 +285,7 @@ pub struct DbSink {
     seen_species: HashSet<i64>,
     seen_year_ticks: HashSet<(i64, i32)>,
     seen_country_ticks: HashSet<(i64, String)>,
+    species_cache: HashMap<(SString, SString), i64>,
 }
 
 impl DbSink {
@@ -298,6 +299,7 @@ impl DbSink {
             seen_species: HashSet::new(),
             seen_year_ticks: HashSet::new(),
             seen_country_ticks: HashSet::new(),
+            species_cache: HashMap::new(),
         }
     }
 
@@ -333,19 +335,31 @@ impl DbSink {
             // and compute tick flags
             for sighting in &mut self.batch {
                 if sighting.species_id.is_none() {
-                    match get_or_insert_species(
-                        &mut *conn,
-                        &sighting.common_name,
-                        &sighting.scientific_name,
-                    )
-                    .await
-                    {
-                        Ok(id) => sighting.species_id = Some(id),
-                        Err(e) => {
-                            return Err(e.into_api_error(
-                                "looking up species",
-                                "Failed to look up species",
-                            ));
+                    let cache_key = (
+                        sighting.common_name.clone(),
+                        sighting.scientific_name.clone(),
+                    );
+
+                    if let Some(&cached_id) = self.species_cache.get(&cache_key) {
+                        sighting.species_id = Some(cached_id);
+                    } else {
+                        match get_or_insert_species(
+                            &mut *conn,
+                            &sighting.common_name,
+                            &sighting.scientific_name,
+                        )
+                        .await
+                        {
+                            Ok(id) => {
+                                sighting.species_id = Some(id);
+                                self.species_cache.insert(cache_key, id);
+                            }
+                            Err(e) => {
+                                return Err(e.into_api_error(
+                                    "looking up species",
+                                    "Failed to look up species",
+                                ));
+                            }
                         }
                     }
                 }
