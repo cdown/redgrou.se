@@ -6,7 +6,7 @@ use csv_async::{ByteRecord, StringRecord};
 use once_cell::sync::Lazy;
 use serde::{ser::SerializeTuple, Serialize, Serializer};
 use smartstring::{LazyCompact, SmartString};
-use sqlx::{Acquire, Executor, Sqlite, Transaction};
+use sqlx::{Acquire, Executor, QueryBuilder, Sqlite, Transaction};
 use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use tracing::error;
@@ -26,6 +26,8 @@ pub const BATCH_SIZE: usize = 1000;
 pub const MAX_UPLOAD_ROWS: usize = 250_000;
 const MAX_CSV_COLUMNS: usize = 256;
 const MAX_RECORD_BYTES: usize = 8 * 1024; // 8 KiB per record to prevent line bombs
+const SQLITE_MAX_VARIABLES: usize = 999;
+const SPECIES_LOOKUP_BATCH_SIZE: usize = SQLITE_MAX_VARIABLES / 2;
 
 const COL_SIGHTING_ID: &str = "sightingId";
 const COL_DATE: &str = "date";
@@ -48,6 +50,7 @@ pub struct ParsedSighting {
 }
 
 type SString = SmartString<LazyCompact>;
+type SpeciesKey = (SString, SString);
 
 /// Fully processed sighting ready for database insertion
 #[derive(Debug, Clone)]
@@ -331,39 +334,10 @@ impl DbSink {
                 ApiError::internal("Database error")
             })?;
 
-            // Look up or insert species for all sightings in the batch
-            // and compute tick flags
+            self.resolve_species_ids(&mut *conn).await?;
+
+            // Compute tick flags
             for sighting in &mut self.batch {
-                if sighting.species_id.is_none() {
-                    let cache_key = (
-                        sighting.common_name.clone(),
-                        sighting.scientific_name.clone(),
-                    );
-
-                    if let Some(&cached_id) = self.species_cache.get(&cache_key) {
-                        sighting.species_id = Some(cached_id);
-                    } else {
-                        match get_or_insert_species(
-                            &mut *conn,
-                            &sighting.common_name,
-                            &sighting.scientific_name,
-                        )
-                        .await
-                        {
-                            Ok(id) => {
-                                sighting.species_id = Some(id);
-                                self.species_cache.insert(cache_key, id);
-                            }
-                            Err(e) => {
-                                return Err(e.into_api_error(
-                                    "looking up species",
-                                    "Failed to look up species",
-                                ));
-                            }
-                        }
-                    }
-                }
-
                 let species_id = sighting.species_id.expect("species_id should be set");
 
                 // Check for lifer (first sighting of this species in this upload)
@@ -425,76 +399,185 @@ impl DbSink {
         Ok(())
     }
 
+    async fn resolve_species_ids(
+        &mut self,
+        conn: &mut sqlx::SqliteConnection,
+    ) -> Result<(), ApiError> {
+        let mut pending: HashMap<SpeciesKey, Vec<usize>> = HashMap::new();
+
+        for (idx, sighting) in self.batch.iter_mut().enumerate() {
+            if sighting.species_id.is_some() {
+                continue;
+            }
+
+            let key = (
+                sighting.common_name.clone(),
+                sighting.scientific_name.clone(),
+            );
+
+            if let Some(&cached_id) = self.species_cache.get(&key) {
+                sighting.species_id = Some(cached_id);
+                continue;
+            }
+
+            pending.entry(key).or_default().push(idx);
+        }
+
+        if pending.is_empty() {
+            return Ok(());
+        }
+
+        let lookup_keys: Vec<SpeciesKey> = pending.keys().cloned().collect();
+        let existing = fetch_species_ids(conn, &lookup_keys)
+            .await
+            .map_err(|e| e.into_api_error("looking up species", "Failed to look up species"))?;
+        apply_resolved_species(
+            existing,
+            &mut pending,
+            &mut self.species_cache,
+            &mut self.batch,
+        );
+
+        if !pending.is_empty() {
+            let missing_keys: Vec<SpeciesKey> = pending.keys().cloned().collect();
+            let inserted = insert_species_batch(conn, &missing_keys)
+                .await
+                .map_err(|e| e.into_api_error("looking up species", "Failed to look up species"))?;
+            apply_resolved_species(
+                inserted,
+                &mut pending,
+                &mut self.species_cache,
+                &mut self.batch,
+            );
+        }
+
+        if !pending.is_empty() {
+            let retry_keys: Vec<SpeciesKey> = pending.keys().cloned().collect();
+            let resolved = fetch_species_ids(conn, &retry_keys)
+                .await
+                .map_err(|e| e.into_api_error("looking up species", "Failed to look up species"))?;
+            apply_resolved_species(
+                resolved,
+                &mut pending,
+                &mut self.species_cache,
+                &mut self.batch,
+            );
+        }
+
+        if !pending.is_empty() {
+            error!(
+                "Failed to resolve species IDs for {:?}",
+                pending.keys().collect::<Vec<_>>()
+            );
+            return Err(ApiError::internal("Failed to look up species"));
+        }
+
+        Ok(())
+    }
+
     pub fn total_rows(&self) -> usize {
         self.total_rows + self.batch.len()
     }
 }
 
-async fn get_or_insert_species(
-    executor: &mut sqlx::SqliteConnection,
-    common_name: &str,
-    scientific_name: &str,
-) -> Result<i64, DbQueryError> {
-    // Try to get existing species first
-    let existing_id: Option<i64> = db::query_with_timeout(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT id FROM species WHERE common_name = ? AND scientific_name = ?",
-        )
-        .bind(common_name)
-        .bind(scientific_name)
-        .fetch_optional(&mut *executor),
-    )
-    .await?;
-
-    if let Some(id) = existing_id {
-        return Ok(id);
+async fn fetch_species_ids(
+    conn: &mut sqlx::SqliteConnection,
+    keys: &[SpeciesKey],
+) -> Result<Vec<(SpeciesKey, i64)>, DbQueryError> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
     }
 
-    // Insert new species. If it fails due to unique constraint (race condition),
-    // fall back to selecting the existing one.
-    let insert_result = db::query_with_timeout(
-        sqlx::query_scalar::<_, i64>(
-            "INSERT INTO species (common_name, scientific_name) VALUES (?, ?) RETURNING id",
-        )
-        .bind(common_name)
-        .bind(scientific_name)
-        .fetch_optional(&mut *executor),
-    )
-    .await;
+    let mut resolved = Vec::new();
 
-    match insert_result {
-        Ok(Some(id)) => Ok(id),
-        Ok(None) => {
-            // Insert succeeded but RETURNING returned None (shouldn't happen, but handle it)
-            // Fall back to SELECT
-            db::query_with_timeout(
-                sqlx::query_scalar::<_, i64>(
-                    "SELECT id FROM species WHERE common_name = ? AND scientific_name = ?",
-                )
-                .bind(common_name)
-                .bind(scientific_name)
-                .fetch_optional(&mut *executor),
-            )
-            .await?
-            .ok_or_else(|| DbQueryError::Sqlx(sqlx::Error::RowNotFound))
+    for chunk in keys.chunks(SPECIES_LOOKUP_BATCH_SIZE.max(1)) {
+        let mut qb =
+            QueryBuilder::new("SELECT common_name, scientific_name, id FROM species WHERE ");
+
+        let mut first = true;
+        for key in chunk {
+            if !first {
+                qb.push(" OR ");
+            }
+            first = false;
+            qb.push("(common_name = ")
+                .push_bind(key.0.as_str())
+                .push(" AND scientific_name = ")
+                .push_bind(key.1.as_str())
+                .push(")");
         }
-        Err(DbQueryError::Sqlx(sqlx::Error::Database(db_err)))
-            if db_err.code().as_deref() == Some("2067") =>
-        {
-            // Unique constraint violation (SQLITE_CONSTRAINT_UNIQUE = 2067)
-            // Another thread inserted it, so fetch the existing one
-            db::query_with_timeout(
-                sqlx::query_scalar::<_, i64>(
-                    "SELECT id FROM species WHERE common_name = ? AND scientific_name = ?",
-                )
-                .bind(common_name)
-                .bind(scientific_name)
-                .fetch_optional(&mut *executor),
-            )
-            .await?
-            .ok_or_else(|| DbQueryError::Sqlx(sqlx::Error::RowNotFound))
+
+        let rows = db::query_with_timeout(
+            qb.build_query_as::<(String, String, i64)>()
+                .fetch_all(&mut *conn),
+        )
+        .await?;
+
+        resolved.extend(
+            rows.into_iter()
+                .map(|(common, scientific, id)| ((common.into(), scientific.into()), id)),
+        );
+    }
+
+    Ok(resolved)
+}
+
+async fn insert_species_batch(
+    conn: &mut sqlx::SqliteConnection,
+    keys: &[SpeciesKey],
+) -> Result<Vec<(SpeciesKey, i64)>, DbQueryError> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut inserted = Vec::new();
+
+    for chunk in keys.chunks(SPECIES_LOOKUP_BATCH_SIZE.max(1)) {
+        let mut qb =
+            QueryBuilder::new("INSERT INTO species (common_name, scientific_name) VALUES ");
+
+        let mut first = true;
+        for key in chunk {
+            if !first {
+                qb.push(", ");
+            }
+            first = false;
+            qb.push("(")
+                .push_bind(key.0.as_str())
+                .push(", ")
+                .push_bind(key.1.as_str())
+                .push(")");
         }
-        Err(e) => Err(e),
+        qb.push(" ON CONFLICT DO NOTHING RETURNING common_name, scientific_name, id");
+
+        let rows = db::query_with_timeout(
+            qb.build_query_as::<(String, String, i64)>()
+                .fetch_all(&mut *conn),
+        )
+        .await?;
+
+        inserted.extend(
+            rows.into_iter()
+                .map(|(common, scientific, id)| ((common.into(), scientific.into()), id)),
+        );
+    }
+
+    Ok(inserted)
+}
+
+fn apply_resolved_species(
+    resolved: Vec<(SpeciesKey, i64)>,
+    pending: &mut HashMap<SpeciesKey, Vec<usize>>,
+    cache: &mut HashMap<SpeciesKey, i64>,
+    batch: &mut [ProcessedSighting],
+) {
+    for (key, id) in resolved {
+        cache.insert(key.clone(), id);
+        if let Some(indices) = pending.remove(&key) {
+            for idx in indices {
+                batch[idx].species_id = Some(id);
+            }
+        }
     }
 }
 
