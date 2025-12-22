@@ -17,6 +17,7 @@ import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
 import { QueryBuilder } from "@/components/query-builder";
 import { ActionsMenu } from "@/components/actions-menu";
+import { ColorLegend } from "@/components/color-legend";
 import {
   apiFetch,
   buildApiUrl,
@@ -377,6 +378,8 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
           isPanel
         />
       </div>
+
+      <ColorLegend filterOpen={filterOpen} />
 
       <div
         ref={topRightControlsRef}
