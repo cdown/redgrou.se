@@ -253,7 +253,7 @@ pub async fn get_sightings(
         query.lifers_only,
         query.year_tick_year,
         query.country_tick_country.as_ref(),
-        None,
+        Some("s"),
     )
     .await?;
 

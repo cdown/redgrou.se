@@ -87,6 +87,8 @@ pub async fn get_filtered_count(
         false
     };
 
+    let table_prefix = if needs_join { Some("s") } else { None };
+
     let filter_result = build_filter_clause(
         pools.read(),
         &upload_uuid.as_bytes()[..],
@@ -94,7 +96,7 @@ pub async fn get_filtered_count(
         query.lifers_only,
         query.year_tick_year,
         query.country_tick_country.as_ref(),
-        None,
+        table_prefix,
     )
     .await?;
 
