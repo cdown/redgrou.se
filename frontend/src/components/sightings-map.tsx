@@ -34,7 +34,7 @@ import { useToast } from "@/components/ui/toast";
 interface SightingsMapProps {
   uploadId: string;
   filter: FilterGroup | null;
-  lifersOnly: boolean;
+  tickFilterParam: string | null;
   yearTickYear: number | null;
   countryTickCountry: string | null;
   dataVersion: number;
@@ -242,16 +242,16 @@ function showSpeciesPopup(
 function buildTileUrl(
   uploadId: string,
   filter: FilterGroup | null,
-  lifersOnly: boolean,
+  tickFilterParam: string | null,
   yearTickYear: number | null,
   countryTickCountry: string | null,
   dataVersion: number,
 ): string {
   const params = buildFilterParams(
     filter ? filterToJson(filter) : null,
-    lifersOnly,
+    tickFilterParam,
     yearTickYear,
-    countryTickCountry
+    countryTickCountry,
   );
   params.set("data_version", String(dataVersion));
   params.set("data_version", String(dataVersion));
@@ -426,7 +426,7 @@ function addSightingsLayer(
 export function SightingsMap({
   uploadId,
   filter,
-  lifersOnly,
+  tickFilterParam,
   yearTickYear,
   countryTickCountry,
   dataVersion,
@@ -637,7 +637,7 @@ export function SightingsMap({
       const tileUrl = buildTileUrl(
         uploadId,
         filter,
-        lifersOnly,
+        tickFilterParam,
         yearTickYear,
         countryTickCountry,
         dataVersion,
@@ -717,7 +717,7 @@ export function SightingsMap({
       map.remove();
       mapRef.current = null;
     };
-    // Filter props (filter, lifersOnly, yearTickYear) are intentionally omitted.
+    // Filter props (filter, tickFilterParam, yearTickYear, country) are intentionally omitted.
     // Map initialization only runs when uploadId changes. Filter changes are
     // handled by a separate effect that updates the tile source without
     // recreating the map, preserving the viewport.
@@ -733,7 +733,7 @@ export function SightingsMap({
     const tileUrl = buildTileUrl(
       uploadId,
       filter,
-      lifersOnly,
+      tickFilterParam,
       yearTickYear,
       countryTickCountry,
       dataVersion,
@@ -807,7 +807,14 @@ export function SightingsMap({
       bearing: bearing,
       pitch: pitch,
     });
-  }, [uploadId, filter, lifersOnly, yearTickYear, countryTickCountry, dataVersion]);
+  }, [
+    uploadId,
+    filter,
+    tickFilterParam,
+    yearTickYear,
+    countryTickCountry,
+    dataVersion,
+  ]);
 
 useEffect(() => {
   const map = mapRef.current;
@@ -817,9 +824,9 @@ useEffect(() => {
 
   const params = buildFilterParams(
     filter ? filterToJson(filter) : null,
-    lifersOnly,
+    tickFilterParam,
     yearTickYear,
-    countryTickCountry
+    countryTickCountry,
   );
 
   const url = `${buildApiUrl(UPLOAD_BBOX_ROUTE, { upload_id: uploadId })}?${params}`;
@@ -861,7 +868,7 @@ useEffect(() => {
   uploadId,
   countryTickCountry,
   filter,
-  lifersOnly,
+  tickFilterParam,
   yearTickYear,
   showToast,
   onRemoteVersionObserved,

@@ -43,7 +43,7 @@ export function buildApiUrl(
 
 export function buildFilterParams(
   filterString: string | null,
-  lifersOnly: boolean,
+  tickFilterParam: string | null,
   yearTickYear: number | null,
   countryTickCountry: string | null
 ): URLSearchParams {
@@ -51,8 +51,8 @@ export function buildFilterParams(
   if (filterString) {
     params.set("filter", filterString);
   }
-  if (lifersOnly) {
-    params.set("lifers_only", "true");
+  if (tickFilterParam !== null) {
+    params.set("tick_filter", tickFilterParam);
   }
   if (yearTickYear !== null) {
     params.set("year_tick_year", String(yearTickYear));

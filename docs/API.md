@@ -118,10 +118,24 @@ Deletes an upload and all associated sightings. Requires the edit token.
 
 **Response**: `DeleteResponse`
 
+### Tick filter query parameter
+
+Many endpoints support a `tick_filter` parameter to control which sighting categories are returned.
+Provide a comma-separated list of any of:
+
+- `normal` &mdash; regular sightings
+- `lifer` &mdash; first sighting of each species
+- `year` &mdash; first sighting of each species in a calendar year
+- `country` &mdash; first sighting of each species in a country
+
+All four categories are included by default. Passing an empty string matches no sightings. When
+`year_tick_year` or `country_tick_country` are provided, the backend automatically forces the
+corresponding tick category to remain included even if it is omitted from `tick_filter`.
+
 ### Get filtered count
 
 ```
-GET /api/uploads/{upload_id}/count?filter={json}&lifers_only={bool}&year_tick_year={int}&country_tick_country={string}
+GET /api/uploads/{upload_id}/count?filter={json}&tick_filter={string}&year_tick_year={int}&country_tick_country={string}
 ```
 
 Returns the count of sightings matching the provided filter criteria. The
@@ -133,7 +147,7 @@ documentation).
 ### Get bounding box
 
 ```
-GET /api/uploads/{upload_id}/bbox?filter={json}&lifers_only={bool}&year_tick_year={int}&country_tick_country={string}
+GET /api/uploads/{upload_id}/bbox?filter={json}&tick_filter={string}&year_tick_year={int}&country_tick_country={string}
 ```
 
 Returns the bounding box (min/max latitude and longitude) of all sightings
@@ -144,7 +158,7 @@ matching the filter criteria.
 ### Get sightings
 
 ```
-GET /api/uploads/{upload_id}/sightings?page_size={int}&cursor={string}&filter={json}&sort={string}&lifers_only={bool}&year_tick_year={int}&country_tick_country={string}
+GET /api/uploads/{upload_id}/sightings?page_size={int}&cursor={string}&filter={json}&sort={string}&tick_filter={string}&year_tick_year={int}&country_tick_country={string}
 ```
 
 Returns paginated sightings. Default page size is 100, maximum is 500.
@@ -161,7 +175,7 @@ those requests.
 ### Get vector tile
 
 ```
-GET /api/tiles/{upload_id}/{z}/{x}/{y}[.pbf]?filter={json}&lifers_only={bool}&year_tick_year={int}&country_tick_country={string}
+GET /api/tiles/{upload_id}/{z}/{x}/{y}[.pbf]?filter={json}&tick_filter={string}&year_tick_year={int}&country_tick_country={string}
 ```
 
 Returns a Mapbox Vector Tile (MVT) in Protobuf format for the specified tile

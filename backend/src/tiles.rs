@@ -16,7 +16,7 @@ use tracing::{debug, error};
 
 use crate::db;
 use crate::error::ApiError;
-use crate::filter::build_filter_clause;
+use crate::filter::{build_filter_clause, FilterRequest, TickVisibility};
 use crate::upload::get_upload_data_version;
 
 const TILE_EXTENT: u32 = 4096;
@@ -107,9 +107,16 @@ fn latlng_to_tile_coords(latlng: LatLng, tile_coords: TileCoordinates) -> TileCo
 #[derive(Debug, Deserialize)]
 pub struct TileQuery {
     filter: Option<String>,
-    lifers_only: Option<bool>,
     year_tick_year: Option<i32>,
     country_tick_country: Option<String>,
+    tick_filter: Option<String>,
+}
+
+impl TileQuery {
+    fn tick_visibility(&self) -> Result<TickVisibility, ApiError> {
+        TickVisibility::from_query(self.tick_filter.as_deref())
+            .map(|vis| vis.with_required(self.year_tick_year, self.country_tick_country.as_ref()))
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -122,7 +129,8 @@ pub struct TilePath {
 
 fn compute_filter_hash(
     filter: Option<&String>,
-    lifers_only: Option<bool>,
+    tick_filter: Option<&String>,
+    tick_visibility: &TickVisibility,
     year_tick_year: Option<i32>,
     country_tick_country: Option<&String>,
 ) -> String {
@@ -130,9 +138,17 @@ fn compute_filter_hash(
     if let Some(f) = filter {
         hasher.update(f.as_bytes());
     }
-    if let Some(lo) = lifers_only {
-        hasher.update([if lo { 1 } else { 0 }]);
+    if let Some(tf) = tick_filter {
+        hasher.update(tf.as_bytes());
     }
+    hasher.update([if tick_visibility.include_lifer { 1 } else { 0 }]);
+    hasher.update([if tick_visibility.include_year { 1 } else { 0 }]);
+    hasher.update([if tick_visibility.include_country {
+        1
+    } else {
+        0
+    }]);
+    hasher.update([if tick_visibility.include_normal { 1 } else { 0 }]);
     if let Some(yt) = year_tick_year {
         hasher.update(yt.to_le_bytes());
     }
@@ -175,6 +191,8 @@ pub async fn get_tile(
     };
     let bbox = tile_to_bbox(tile_pos);
 
+    let tick_visibility = query.tick_visibility()?;
+
     debug!(
         "Tile request: z={} x={} y={} bbox=[{},{},{},{}]",
         path.z, path.x, y, bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max
@@ -182,7 +200,8 @@ pub async fn get_tile(
 
     let filter_hash = compute_filter_hash(
         query.filter.as_ref(),
-        query.lifers_only,
+        query.tick_filter.as_ref(),
+        &tick_visibility,
         query.year_tick_year,
         query.country_tick_country.as_ref(),
     );
@@ -206,15 +225,15 @@ pub async fn get_tile(
         return Ok(response);
     }
 
-    let filter_result = build_filter_clause(
-        pools.read(),
-        &upload_uuid.as_bytes()[..],
-        query.filter.as_ref(),
-        query.lifers_only,
-        query.year_tick_year,
-        query.country_tick_country.as_ref(),
-        Some("s"),
-    )
+    let filter_result = build_filter_clause(FilterRequest {
+        pool: pools.read(),
+        upload_id: &upload_uuid.as_bytes()[..],
+        filter_json: query.filter.as_ref(),
+        year_tick_year: query.year_tick_year,
+        country_tick_country: query.country_tick_country.as_ref(),
+        table_prefix: Some("s"),
+        tick_visibility: &tick_visibility,
+    })
     .await?;
 
     // Use vis_rank-based sampling for efficient tile generation.

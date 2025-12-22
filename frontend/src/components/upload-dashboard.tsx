@@ -1,18 +1,10 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, ReactNode } from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useQueryState } from "nuqs";
-import { searchParamsCache } from "@/lib/search-params";
 import { FilterGroup } from "@/lib/filter-types";
-import {
-  Sparkles,
-  ChevronDown,
-  X,
-  Calendar,
-  Map,
-  List,
-} from "lucide-react";
+import { Sparkles, ChevronDown, Check, X, Calendar, Map, List } from "lucide-react";
 import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
 import { QueryBuilder } from "@/components/query-builder";
@@ -27,6 +19,7 @@ import {
   getErrorMessage,
 } from "@/lib/api";
 import { useToast } from "@/components/ui/toast";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   UPLOAD_COUNT_ROUTE,
   UPLOAD_DETAILS_ROUTE,
@@ -51,6 +44,17 @@ import {
   UPLOAD_EVENTS_CHANNEL,
   type UploadBroadcastEvent,
 } from "@/lib/uploads";
+import {
+  TickFilterSelection,
+  ensureTickLocks,
+  parseTickFilterParam,
+  serializeTickFilterSelection,
+} from "@/lib/tick-filters";
+import {
+  COLOUR_COUNTRY_TICK,
+  COLOUR_LIFER,
+  COLOUR_YEAR_TICK,
+} from "@/lib/colours";
 
 export type UploadMetadata = UploadMetadataMessage;
 
@@ -59,6 +63,153 @@ interface UploadDashboardProps {
 }
 
 type ViewMode = "map" | "table";
+
+type TickMode = "lifers" | "lifers_and_ticks" | "all";
+
+const TICK_MODE_PRESETS: Record<TickMode, TickFilterSelection> = {
+  lifers: { lifer: true, year: false, country: false, normal: false },
+  lifers_and_ticks: { lifer: true, year: true, country: true, normal: false },
+  all: { lifer: true, year: true, country: true, normal: true },
+};
+
+const TICK_MODE_DEFS: Array<{
+  key: TickMode;
+  label: string;
+  description: string;
+  swatches?: string[];
+}> = [
+  {
+    key: "lifers",
+    label: "Lifers only",
+    description: "Only the first sighting of each species",
+    swatches: [COLOUR_LIFER],
+  },
+  {
+    key: "lifers_and_ticks",
+    label: "Lifers + ticks",
+    description: "Includes lifers, year ticks, and country ticks",
+    swatches: [COLOUR_LIFER, COLOUR_YEAR_TICK, COLOUR_COUNTRY_TICK],
+  },
+  {
+    key: "all",
+    label: "All sightings",
+    description: "Highlights plus every other observation",
+  },
+];
+
+const TickFilterButtonBase = ({
+  tickIndicator,
+  tickMode,
+  onSelectMode,
+}: {
+  tickIndicator: ReactNode;
+  tickMode: TickMode;
+  onSelectMode: (mode: TickMode) => void;
+}) => (
+  <Popover>
+    <PopoverTrigger asChild>
+      <button
+        className="flex w-[180px] items-center gap-3 rounded-lg bg-white px-3 py-2 text-left text-sm font-medium text-stone-700 shadow-lg transition-colors hover:bg-stone-50"
+      >
+        <Sparkles className="h-4 w-4 text-stone-500" />
+        <div className="flex-1 text-left">
+          <span className="text-sm font-semibold text-stone-900">Sightings</span>
+        </div>
+        <div className="flex w-16 items-center justify-end gap-1">
+          <div className="flex max-w-[48px] justify-end">{tickIndicator}</div>
+          <ChevronDown className="h-3 w-3 text-stone-400 flex-shrink-0" />
+        </div>
+      </button>
+    </PopoverTrigger>
+    <PopoverContent
+      align="end"
+      className="w-64 rounded-xl border border-stone-200 bg-white p-3 shadow-xl"
+    >
+      <p className="px-1 pb-2 text-xs text-stone-500">
+        Choose which sightings appear on the map and in the table.
+      </p>
+      <div className="flex flex-col gap-1">
+        {TICK_MODE_DEFS.map((option) => {
+          const isSelected = tickMode === option.key;
+          return (
+            <button
+              key={option.key}
+              onClick={() => onSelectMode(option.key)}
+              className={`flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors ${
+                isSelected ? "bg-stone-100" : "hover:bg-stone-100"
+              }`}
+            >
+              <div className="flex items-center gap-1">
+                {option.swatches ? (
+                  option.swatches.map((color) => (
+                    <span
+                      key={color}
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: color }}
+                    />
+                  ))
+                ) : (
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+                    All
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-1 flex-col text-left">
+                <span className="font-medium text-stone-900">{option.label}</span>
+                <span className="text-xs text-stone-500">{option.description}</span>
+              </div>
+              {isSelected && <Check className="h-4 w-4 text-stone-900" />}
+            </button>
+          );
+        })}
+      </div>
+    </PopoverContent>
+  </Popover>
+);
+
+const TickFilterButtonFallback = () => (
+  <button
+    className="flex w-[180px] items-center gap-3 rounded-lg bg-white px-3 py-2 text-left text-sm font-medium text-stone-400 shadow-lg"
+    disabled
+  >
+    <Sparkles className="h-4 w-4 opacity-50" />
+    <div className="flex-1 text-left">
+      <span className="text-sm font-semibold">Sightings</span>
+    </div>
+    <div className="flex w-16 items-center justify-end gap-1">
+      <div className="h-2.5 w-12 rounded-full bg-stone-200" />
+      <ChevronDown className="h-3 w-3 opacity-50" />
+    </div>
+  </button>
+);
+
+const ClientTickFilterButton = dynamic(
+  () => Promise.resolve({ default: TickFilterButtonBase }),
+  {
+    ssr: false,
+    loading: () => <TickFilterButtonFallback />,
+  },
+);
+
+function modeFromSelection(selection: TickFilterSelection): TickMode {
+  if (selection.normal) {
+    return "all";
+  }
+  if (selection.year || selection.country) {
+    return "lifers_and_ticks";
+  }
+  return "lifers";
+}
+
+function selectionFromMode(mode: TickMode): TickFilterSelection {
+  const preset = TICK_MODE_PRESETS[mode];
+  return {
+    normal: preset.normal,
+    lifer: preset.lifer,
+    year: preset.year,
+    country: preset.country,
+  };
+}
 
 function getEditToken(uploadId: string): string | null {
   if (typeof window === "undefined") return null;
@@ -87,15 +238,18 @@ async function fetchNameIndex(uploadId: string): Promise<Species[]> {
 export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   const { showToast } = useToast();
   const searchParams = useSearchParams();
+  const parseYearParam = useCallback(
+    (value: string | null) => (value ? parseInt(value, 10) : null),
+    [],
+  );
   const uploadId = initialUpload.uploadId;
   const router = useRouter();
 
   const [upload, setUpload] = useState<UploadMetadata>(initialUpload);
   const [pendingDataVersion, setPendingDataVersion] = useState<number | null>(null);
   const [isDeleted, setIsDeleted] = useState(false);
-  const [filterString, setFilterString] = useQueryState(
-    "filter",
-    searchParamsCache.filter.withOptions({ history: "push" })
+  const [filterString, setFilterString] = useState<string | null>(
+    searchParams.get("filter")
   );
   const currentDataVersion = upload.dataVersion ?? 1;
 
@@ -140,20 +294,79 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   const [filteredCount, setFilteredCount] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("map");
   const [filterOpen, setFilterOpen] = useState(false);
-  const [lifersOnly, setLifersOnly] = useQueryState(
-    "lifers_only",
-    searchParamsCache.lifers_only
+  const [tickFilterParam, setTickFilterParam] = useState<string | null>(
+    searchParams.get("tick_filter")
   );
-  const [yearTickYear, setYearTickYear] = useQueryState(
-    "year_tick_year",
-    searchParamsCache.year_tick_year
+  const [yearTickYear, setYearTickYear] = useState<number | null>(
+    parseYearParam(searchParams.get("year_tick_year"))
   );
   const [availableYears, setAvailableYears] = useState<number[]>([]);
-  const [countryTickCountry, setCountryTickCountry] = useQueryState(
-    "country_tick_country",
-    searchParamsCache.country_tick_country
+  const [countryTickCountry, setCountryTickCountry] = useState<string | null>(
+    searchParams.get("country_tick_country")
   );
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
+  const tickLocks = useMemo(
+    () => ({
+      year: yearTickYear !== null,
+      country: countryTickCountry !== null,
+    }),
+    [yearTickYear, countryTickCountry],
+  );
+  const baseTickSelection = useMemo(
+    () => parseTickFilterParam(tickFilterParam),
+    [tickFilterParam],
+  );
+  const tickSelection = useMemo(
+    () => ensureTickLocks(baseTickSelection, tickLocks),
+    [baseTickSelection, tickLocks],
+  );
+  const effectiveTickFilterParam = useMemo(
+    () => serializeTickFilterSelection(tickSelection),
+    [tickSelection],
+  );
+  const tickMode = useMemo(
+    () => modeFromSelection(tickSelection),
+    [tickSelection],
+  );
+  const tickIndicator = useMemo(() => {
+    switch (tickMode) {
+      case "all":
+        return (
+          <span className="w-full text-right text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+            All
+          </span>
+        );
+      case "lifers_and_ticks":
+        return (
+          <div className="flex w-full justify-end gap-1">
+            {[COLOUR_LIFER, COLOUR_YEAR_TICK, COLOUR_COUNTRY_TICK].map((color) => (
+              <span
+                key={color}
+                className="h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: color }}
+              />
+            ))}
+          </div>
+        );
+      case "lifers":
+      default:
+        return (
+          <div className="flex w-full justify-end">
+            <span
+              className="h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: COLOUR_LIFER }}
+            />
+          </div>
+        );
+    }
+  }, [tickMode]);
+  const handleTickModeChange = useCallback(
+    (mode: TickMode) => {
+      const nextSelection = ensureTickLocks(selectionFromMode(mode), tickLocks);
+      setTickFilterParam(serializeTickFilterSelection(nextSelection));
+    },
+    [tickLocks, setTickFilterParam],
+  );
   const [nameIndex, setNameIndex] = useState<Species[]>([]);
   const resolvedTitle = useMemo(() => {
     if (upload.title && upload.title.trim().length > 0) {
@@ -327,7 +540,12 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
     if (!uploadId || isDeleted) return;
 
     let cancelled = false;
-    const params = buildFilterParams(filterString, lifersOnly, yearTickYear, countryTickCountry);
+    const params = buildFilterParams(
+      filterString,
+      effectiveTickFilterParam,
+      yearTickYear,
+      countryTickCountry
+    );
 
     const url = `${buildApiUrl(UPLOAD_COUNT_ROUTE, { upload_id: uploadId })}?${params}`;
 
@@ -366,7 +584,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   }, [
     uploadId,
     filterString,
-    lifersOnly,
+    effectiveTickFilterParam,
     yearTickYear,
     countryTickCountry,
     showToast,
@@ -437,7 +655,10 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   );
 
   const showingFiltered =
-    (filter || lifersOnly || yearTickYear !== null || countryTickCountry !== null) &&
+    (filter ||
+      tickMode !== "all" ||
+      yearTickYear !== null ||
+      countryTickCountry !== null) &&
     filteredCount !== null &&
     filteredCount !== upload.rowCount;
 
@@ -490,7 +711,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
         <SightingsMap
           uploadId={upload.uploadId}
           filter={filter}
-          lifersOnly={lifersOnly}
+          tickFilterParam={effectiveTickFilterParam}
           yearTickYear={yearTickYear}
           countryTickCountry={countryTickCountry}
           dataVersion={currentDataVersion}
@@ -527,7 +748,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
             <SightingsTable
               uploadId={upload.uploadId}
               filter={filter}
-              lifersOnly={lifersOnly}
+              tickFilterParam={effectiveTickFilterParam}
               yearTickYear={yearTickYear}
               countryTickCountry={countryTickCountry}
               nameIndex={nameIndex}
@@ -562,24 +783,12 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
           filterOpen ? "opacity-0 pointer-events-none" : "opacity-100"
         }`}
       >
-        <div className="flex gap-2">
-          <button
-            onClick={() => {
-              const newLifersOnly = !lifersOnly;
-              setLifersOnly(newLifersOnly);
-              setYearTickYear(null);
-              setCountryTickCountry(null);
-            }}
-            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors shadow-lg ${
-              lifersOnly
-                ? "bg-stone-900 text-white"
-                : "bg-white text-stone-600 hover:bg-stone-50"
-            }`}
-            title={lifersOnly ? "Show all sightings" : "Show lifers only"}
-          >
-            <Sparkles className="h-4 w-4" />
-            Lifers
-          </button>
+        <div className="flex flex-wrap gap-2">
+          <ClientTickFilterButton
+            tickIndicator={tickIndicator}
+            tickMode={tickMode}
+            onSelectMode={handleTickModeChange}
+          />
           {availableYears.length > 0 && (
             <div className="relative">
               <select
@@ -589,7 +798,6 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
                     ? parseInt(e.target.value, 10)
                     : null;
                   setYearTickYear(year);
-                  setLifersOnly(false);
                   setCountryTickCountry(null);
                 }}
                 className={`flex items-center gap-2 rounded-lg pl-9 pr-8 py-2 text-sm font-medium transition-colors shadow-lg cursor-pointer ${
@@ -633,7 +841,6 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
                 onChange={(e) => {
                   const country = e.target.value || null;
                   setCountryTickCountry(country);
-                  setLifersOnly(false);
                   setYearTickYear(null);
                 }}
                 className={`flex items-center gap-2 rounded-lg pl-9 pr-8 py-2 text-sm font-medium transition-colors shadow-lg cursor-pointer ${

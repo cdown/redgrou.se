@@ -6,7 +6,9 @@ use crate::bind_filter_params;
 use crate::db;
 use crate::db::DbPools;
 use crate::error::ApiError;
-use crate::filter::{build_filter_clause, get_distinct_values, get_field_metadata, CountQuery};
+use crate::filter::{
+    build_filter_clause, get_distinct_values, get_field_metadata, CountQuery, FilterRequest,
+};
 use crate::proto::{pb, Proto};
 use crate::upload::{effective_display_name, get_upload_data_version};
 
@@ -89,15 +91,16 @@ pub async fn get_filtered_count(
 
     let table_prefix = if needs_join { Some("s") } else { None };
 
-    let filter_result = build_filter_clause(
-        pools.read(),
-        &upload_uuid.as_bytes()[..],
-        query.filter.as_ref(),
-        query.lifers_only,
-        query.year_tick_year,
-        query.country_tick_country.as_ref(),
+    let tick_visibility = query.tick_visibility()?;
+    let filter_result = build_filter_clause(FilterRequest {
+        pool: pools.read(),
+        upload_id: &upload_uuid.as_bytes()[..],
+        filter_json: query.filter.as_ref(),
+        year_tick_year: query.year_tick_year,
+        country_tick_country: query.country_tick_country.as_ref(),
         table_prefix,
-    )
+        tick_visibility: &tick_visibility,
+    })
     .await?;
 
     let mut filter_clause = filter_result.filter_clause;

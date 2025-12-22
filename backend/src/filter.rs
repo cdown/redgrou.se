@@ -344,12 +344,133 @@ impl TryFrom<&String> for FilterGroup {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TickVisibility {
+    pub include_normal: bool,
+    pub include_lifer: bool,
+    pub include_year: bool,
+    pub include_country: bool,
+}
+
+impl TickVisibility {
+    pub fn all() -> Self {
+        Self {
+            include_normal: true,
+            include_lifer: true,
+            include_year: true,
+            include_country: true,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            include_normal: false,
+            include_lifer: false,
+            include_year: false,
+            include_country: false,
+        }
+    }
+
+    pub fn from_query(tick_filter: Option<&str>) -> Result<Self, ApiError> {
+        if let Some(raw) = tick_filter {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Ok(Self::empty());
+            }
+
+            let mut visibility = Self::empty();
+            for value in trimmed.split(',') {
+                let token = value.trim().to_ascii_lowercase();
+                if token.is_empty() {
+                    continue;
+                }
+                match token.as_str() {
+                    "normal" | "default" => visibility.include_normal = true,
+                    "lifer" | "lifers" => visibility.include_lifer = true,
+                    "year" | "year_tick" | "year_ticks" => visibility.include_year = true,
+                    "country" | "country_tick" | "country_ticks" => {
+                        visibility.include_country = true
+                    }
+                    _ => {
+                        return Err(ApiError::bad_request(format!(
+                            "Invalid tick_filter value: {}",
+                            token
+                        )));
+                    }
+                }
+            }
+            return Ok(visibility);
+        }
+
+        Ok(Self::all())
+    }
+
+    pub fn with_required(
+        mut self,
+        year_tick_year: Option<i32>,
+        country_tick_country: Option<&String>,
+    ) -> Self {
+        if year_tick_year.is_some() {
+            self.include_year = true;
+        }
+        if country_tick_country.is_some() {
+            self.include_country = true;
+        }
+        self
+    }
+
+    pub fn is_all(&self) -> bool {
+        self.include_normal && self.include_lifer && self.include_year && self.include_country
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.include_normal && !self.include_lifer && !self.include_year && !self.include_country
+    }
+
+    pub fn to_sql_clause(&self, table_prefix: Option<&str>) -> Option<String> {
+        if self.is_all() {
+            return None;
+        }
+
+        if self.is_empty() {
+            return Some("0 = 1".to_string());
+        }
+
+        let prefix = table_prefix.map(|p| format!("{p}.")).unwrap_or_default();
+
+        let mut clauses = Vec::new();
+        if self.include_lifer {
+            clauses.push(format!("{prefix}lifer = 1"));
+        }
+        if self.include_year {
+            clauses.push(format!("{prefix}year_tick = 1"));
+        }
+        if self.include_country {
+            clauses.push(format!("{prefix}country_tick = 1"));
+        }
+        if self.include_normal {
+            clauses.push(format!(
+                "({prefix}lifer = 0 AND {prefix}year_tick = 0 AND {prefix}country_tick = 0)"
+            ));
+        }
+
+        Some(format!("({})", clauses.join(" OR ")))
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CountQuery {
     pub filter: Option<String>,
-    pub lifers_only: Option<bool>,
     pub year_tick_year: Option<i32>,
     pub country_tick_country: Option<String>,
+    pub tick_filter: Option<String>,
+}
+
+impl CountQuery {
+    pub fn tick_visibility(&self) -> Result<TickVisibility, ApiError> {
+        TickVisibility::from_query(self.tick_filter.as_deref())
+            .map(|vis| vis.with_required(self.year_tick_year, self.country_tick_country.as_ref()))
+    }
 }
 
 pub struct FilterClauseResult {
@@ -362,50 +483,63 @@ const SQLITE_SAFE_PARAM_LIMIT: u64 = 30_000;
 /// Builds filter SQL clauses and parameters using roaring bitmaps for tick filters.
 /// Returns filter_clause (a string like " AND (...)" or empty string) and params.
 pub async fn build_filter_clause(
-    pool: &sqlx::SqlitePool,
-    upload_id_blob: &[u8],
-    filter_json: Option<&String>,
-    lifers_only: Option<bool>,
-    year_tick_year: Option<i32>,
-    country_tick_country: Option<&String>,
-    table_prefix: Option<&str>,
+    request: FilterRequest<'_>,
 ) -> Result<FilterClauseResult, ApiError> {
-    let mut params: Vec<String> = Vec::new();
-    let mut clauses: Vec<String> = Vec::new();
+    request.build().await
+}
 
-    if let Some(filter_json) = filter_json {
-        let filter: FilterGroup = filter_json.try_into()?;
-        if let Some(sql) = filter.to_sql(&mut params) {
-            clauses.push(sql);
+pub struct FilterRequest<'a> {
+    pub pool: &'a sqlx::SqlitePool,
+    pub upload_id: &'a [u8],
+    pub filter_json: Option<&'a String>,
+    pub year_tick_year: Option<i32>,
+    pub country_tick_country: Option<&'a String>,
+    pub table_prefix: Option<&'a str>,
+    pub tick_visibility: &'a TickVisibility,
+}
+
+impl<'a> FilterRequest<'a> {
+    pub async fn build(self) -> Result<FilterClauseResult, ApiError> {
+        let mut params: Vec<String> = Vec::new();
+        let mut clauses: Vec<String> = Vec::new();
+
+        if let Some(filter_json) = self.filter_json {
+            let filter: FilterGroup = filter_json.try_into()?;
+            if let Some(sql) = filter.to_sql(&mut params) {
+                clauses.push(sql);
+            }
         }
-    }
 
-    if lifers_only == Some(true) || year_tick_year.is_some() || country_tick_country.is_some() {
-        if let Some(bitmap_clause) = build_bitmap_clause(
-            pool,
-            upload_id_blob,
-            lifers_only,
-            year_tick_year,
-            country_tick_country,
-            table_prefix,
-            &mut params,
-        )
-        .await?
-        {
-            clauses.push(bitmap_clause);
+        if self.year_tick_year.is_some() || self.country_tick_country.is_some() {
+            if let Some(bitmap_clause) = build_bitmap_clause(
+                self.pool,
+                self.upload_id,
+                self.year_tick_year,
+                self.country_tick_country,
+                self.table_prefix,
+                &mut params,
+            )
+            .await?
+            {
+                clauses.push(bitmap_clause);
+            }
         }
+
+        if let Some(tick_clause) = self.tick_visibility.to_sql_clause(self.table_prefix) {
+            clauses.push(tick_clause);
+        }
+
+        let filter_clause = if clauses.is_empty() {
+            String::new()
+        } else {
+            format!(" AND {}", clauses.join(" AND "))
+        };
+
+        Ok(FilterClauseResult {
+            filter_clause,
+            params,
+        })
     }
-
-    let filter_clause = if clauses.is_empty() {
-        String::new()
-    } else {
-        format!(" AND {}", clauses.join(" AND "))
-    };
-
-    Ok(FilterClauseResult {
-        filter_clause,
-        params,
-    })
 }
 
 async fn load_bitmap_or_fail(
@@ -463,26 +597,12 @@ fn bitmap_to_clause(
 async fn build_bitmap_clause(
     pool: &sqlx::SqlitePool,
     upload_id_blob: &[u8],
-    lifers_only: Option<bool>,
     year_tick_year: Option<i32>,
     country_tick_country: Option<&String>,
     table_prefix: Option<&str>,
     params: &mut Vec<String>,
 ) -> Result<Option<String>, ApiError> {
     let mut final_bitmap: Option<RoaringBitmap> = None;
-
-    if lifers_only == Some(true) {
-        let bitmap = load_bitmap_or_fail(
-            pool,
-            upload_id_blob,
-            "lifer",
-            None,
-            "loading lifer bitmap",
-            "lifer",
-        )
-        .await?;
-        merge_bitmap(&mut final_bitmap, bitmap);
-    }
 
     if let Some(year) = year_tick_year {
         let year_key = year.to_string();

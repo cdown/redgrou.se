@@ -34,7 +34,7 @@ import { useToast } from "@/components/ui/toast";
 interface SightingsTableProps {
   uploadId: string;
   filter: FilterGroup | null;
-  lifersOnly: boolean;
+  tickFilterParam: string | null;
   yearTickYear: number | null;
   countryTickCountry: string | null;
   nameIndex: Species[];
@@ -85,7 +85,7 @@ function getNameFromIndex(
 export function SightingsTable({
   uploadId,
   filter,
-  lifersOnly,
+  tickFilterParam,
   yearTickYear,
   countryTickCountry,
   nameIndex,
@@ -120,9 +120,9 @@ export function SightingsTable({
 
       const params = buildFilterParams(
         filter ? filterToJson(filter) : null,
-        lifersOnly,
+        tickFilterParam,
         yearTickYear,
-        countryTickCountry
+        countryTickCountry,
       );
       params.set("sort_field", sortField);
       params.set("sort_dir", sortDir);
@@ -203,10 +203,10 @@ export function SightingsTable({
     [
       uploadId,
       filter,
+      tickFilterParam,
       sortField,
       sortDir,
       groupBy,
-      lifersOnly,
       yearTickYear,
       countryTickCountry,
       showToast,
@@ -228,7 +228,16 @@ export function SightingsTable({
     hasMoreRef.current = true;
     fetchPage(1, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uploadId, filter, sortField, sortDir, groupBy, lifersOnly, yearTickYear, countryTickCountry]);
+  }, [
+    uploadId,
+    filter,
+    tickFilterParam,
+    sortField,
+    sortDir,
+    groupBy,
+    yearTickYear,
+    countryTickCountry,
+  ]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;

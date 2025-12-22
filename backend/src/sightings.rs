@@ -9,7 +9,7 @@ use crate::api_constants;
 use crate::bind_filter_params;
 use crate::db;
 use crate::error::ApiError;
-use crate::filter::build_filter_clause;
+use crate::filter::{build_filter_clause, FilterRequest, TickVisibility};
 use crate::proto::{pb, Proto};
 use crate::upload::get_upload_data_version;
 use tracing::warn;
@@ -133,10 +133,17 @@ pub struct SightingsQuery {
     page: Option<u32>,
     page_size: Option<u32>,
     group_by: Option<String>,
-    lifers_only: Option<bool>,
     year_tick_year: Option<i32>,
     country_tick_country: Option<String>,
+    tick_filter: Option<String>,
     cursor: Option<String>,
+}
+
+impl SightingsQuery {
+    fn tick_visibility(&self) -> Result<TickVisibility, ApiError> {
+        TickVisibility::from_query(self.tick_filter.as_deref())
+            .map(|vis| vis.with_required(self.year_tick_year, self.country_tick_country.as_ref()))
+    }
 }
 
 #[derive(Debug, FromRow)]
@@ -246,15 +253,17 @@ pub async fn get_sightings(
     let offset_i64 = i64::try_from(offset).unwrap_or(i64::MAX);
 
     // Collect filter params separately so upload_id stays first and field names remain enum-whitelisted.
-    let filter_result = build_filter_clause(
-        pools.read(),
-        &upload_uuid.as_bytes()[..],
-        query.filter.as_ref(),
-        query.lifers_only,
-        query.year_tick_year,
-        query.country_tick_country.as_ref(),
-        Some("s"),
-    )
+    let tick_visibility = query.tick_visibility()?;
+
+    let filter_result = build_filter_clause(FilterRequest {
+        pool: pools.read(),
+        upload_id: &upload_uuid.as_bytes()[..],
+        filter_json: query.filter.as_ref(),
+        year_tick_year: query.year_tick_year,
+        country_tick_country: query.country_tick_country.as_ref(),
+        table_prefix: Some("s"),
+        tick_visibility: &tick_visibility,
+    })
     .await?;
 
     if let Some(group_by_str) = &query.group_by {

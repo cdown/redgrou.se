@@ -28,7 +28,7 @@ use tracing_subscriber::EnvFilter;
 use redgrouse::api_constants;
 use redgrouse::config;
 use redgrouse::error::ApiError;
-use redgrouse::filter::{build_filter_clause, CountQuery};
+use redgrouse::filter::{build_filter_clause, CountQuery, FilterRequest};
 use redgrouse::handlers;
 use redgrouse::limits::{UploadLimitError, UploadLimiter, UploadUsageTracker};
 use redgrouse::proto::{pb, Proto};
@@ -636,15 +636,17 @@ async fn get_bbox(
         .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
     let data_version = upload::get_upload_data_version(pools.read(), &upload_uuid).await?;
 
-    let filter_result = build_filter_clause(
-        pools.read(),
-        &upload_uuid.as_bytes()[..],
-        query.filter.as_ref(),
-        query.lifers_only,
-        query.year_tick_year,
-        query.country_tick_country.as_ref(),
-        None,
-    )
+    let tick_visibility = query.tick_visibility()?;
+
+    let filter_result = build_filter_clause(FilterRequest {
+        pool: pools.read(),
+        upload_id: &upload_uuid.as_bytes()[..],
+        filter_json: query.filter.as_ref(),
+        year_tick_year: query.year_tick_year,
+        country_tick_country: query.country_tick_country.as_ref(),
+        table_prefix: None,
+        tick_visibility: &tick_visibility,
+    })
     .await?;
 
     let sql = format!(

@@ -614,30 +614,34 @@ fn benchmark_tick_filtering(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("tick_filtering");
 
-    // Benchmark lifers_only filter
-    group.bench_function("lifers_only", |b| {
-        b.to_async(&rt).iter(|| async {
-            use axum::body::Body;
-            use axum::http::Request;
-            use tower::ServiceExt;
+    let tick_filter_cases = [
+        ("lifers", "tick_filter=lifer"),
+        ("lifers_and_ticks", "tick_filter=lifer,year,country"),
+        ("all_sightings", "tick_filter=normal,lifer,year,country"),
+    ];
 
-            let uri = format!(
-                "/api/uploads/{}/count?lifers_only=true",
-                upload_result.upload_id
-            );
-            let req = Request::builder()
-                .method("GET")
-                .uri(&uri)
-                .body(Body::empty())
-                .unwrap();
+    for (label, query) in tick_filter_cases {
+        group.bench_function(label, |b| {
+            b.to_async(&rt).iter(|| async {
+                use axum::body::Body;
+                use axum::http::Request;
+                use tower::ServiceExt;
 
-            let response = app.clone().oneshot(req).await.unwrap();
-            assert_eq!(response.status(), 200);
-            let _body = axum::body::to_bytes(response.into_body(), usize::MAX)
-                .await
-                .unwrap();
+                let uri = format!("/api/uploads/{}/count?{}", upload_result.upload_id, query);
+                let req = Request::builder()
+                    .method("GET")
+                    .uri(&uri)
+                    .body(Body::empty())
+                    .unwrap();
+
+                let response = app.clone().oneshot(req).await.unwrap();
+                assert_eq!(response.status(), 200);
+                let _body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+            });
         });
-    });
+    }
 
     // Benchmark year_tick filter
     group.bench_function("year_tick", |b| {
