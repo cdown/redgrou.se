@@ -79,6 +79,12 @@ const UPLOAD_WRITER_BUDGET_LIMIT: Duration = Duration::from_secs(120);
 /// Sliding window for enforcing writer time budgets.
 const UPLOAD_WRITER_BUDGET_WINDOW: Duration = Duration::from_secs(900);
 
+/// Maximum total sightings that can be uploaded by a single IP within the sighting window.
+const UPLOAD_SIGHTING_LIMIT_PER_DAY: u64 = 100_000;
+
+/// Sliding window for sighting quotas (24 hours).
+const UPLOAD_SIGHTING_LIMIT_WINDOW: Duration = Duration::from_secs(60 * 60 * 24);
+
 /// Window duration for per-IP rate limiting (used with GLOBAL_RATE_LIMIT_PER_MINUTE).
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 const CLOUDFRONT_IP_RANGES_URL: &str = "https://ip-ranges.amazonaws.com/ip-ranges.json";
@@ -147,6 +153,8 @@ async fn main() -> anyhow::Result<()> {
         RATE_LIMIT_WINDOW,
         UPLOAD_WRITER_BUDGET_LIMIT,
         UPLOAD_WRITER_BUDGET_WINDOW,
+        UPLOAD_SIGHTING_LIMIT_PER_DAY,
+        UPLOAD_SIGHTING_LIMIT_WINDOW,
     );
     let ingest_routes = Router::new()
         .route(api_constants::UPLOAD_ROUTE, post(upload::upload_csv))
@@ -390,6 +398,18 @@ async fn enforce_upload_limit(
                     let mut response =
                         ApiError::service_unavailable("Upload writer is busy, please retry")
                             .into_response();
+                    if let Ok(value) =
+                        HeaderValue::from_str(&retry_after.as_secs().max(1).to_string())
+                    {
+                        response.headers_mut().insert(header::RETRY_AFTER, value);
+                    }
+                    response
+                }
+                UploadLimitError::SightingsQuotaExceeded { retry_after } => {
+                    let mut response = ApiError::too_many_requests(
+                        "Daily sighting quota reached, please wait before uploading again",
+                    )
+                    .into_response();
                     if let Ok(value) =
                         HeaderValue::from_str(&retry_after.as_secs().max(1).to_string())
                     {

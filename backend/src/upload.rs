@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use crate::db::{self, DbQueryError};
 use crate::error::ApiError;
-use crate::limits::UploadUsageTracker;
+use crate::limits::{UploadLimitError, UploadUsageTracker};
 use crate::pipeline::{CsvParser, DbSink, Geocoder, ParsedSighting, BATCH_SIZE};
 use crate::proto::{pb, Proto};
 use crate::tiles::invalidate_upload_cache;
@@ -134,6 +134,20 @@ fn size_limit_failure(err: &csv_async::Error) -> Option<ApiError> {
     None
 }
 
+fn map_quota_error(err: UploadLimitError) -> ApiError {
+    match err {
+        UploadLimitError::SightingsQuotaExceeded { .. } => ApiError::too_many_requests(
+            "Daily sighting quota reached (100000 rows). Please wait before uploading again.",
+        ),
+        UploadLimitError::WriterBudgetExceeded { .. } => {
+            ApiError::service_unavailable("Upload writer is busy, please retry")
+        }
+        UploadLimitError::ActiveUpload | UploadLimitError::RateLimited => {
+            ApiError::too_many_requests("Too many uploads, please wait")
+        }
+    }
+}
+
 async fn ingest_csv_field(
     field: Field<'_>,
     pool: &sqlx::SqlitePool,
@@ -178,6 +192,10 @@ where
         .map_err(|err| map_csv_error(err, "Failed to read CSV row", "Invalid CSV data"))?
     {
         if let Some(parsed) = parser.parse_row(&record)? {
+            writer_tracker
+                .reserve_sightings(1)
+                .await
+                .map_err(map_quota_error)?;
             pending_rows.push(parsed);
 
             if pending_rows.len() >= BATCH_SIZE {
