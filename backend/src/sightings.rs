@@ -1,8 +1,12 @@
 use crate::db::DbPools;
 use axum::extract::{Path, Query, State};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use dashmap::mapref::entry::Entry;
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row};
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api_constants;
@@ -12,7 +16,7 @@ use crate::error::ApiError;
 use crate::filter::{build_filter_clause, FilterRequest, TickVisibility};
 use crate::proto::{pb, Proto};
 use crate::upload::get_upload_data_version;
-use tracing::warn;
+use tracing::{trace, warn};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
@@ -54,7 +58,25 @@ struct NameIndexResult {
     species_id_to_index: std::collections::HashMap<i64, u32>,
 }
 
-async fn build_name_index(
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+struct NameIndexKey {
+    upload_id: Uuid,
+    data_version: i64,
+}
+
+impl NameIndexKey {
+    const fn new(upload_id: Uuid, data_version: i64) -> Self {
+        Self {
+            upload_id,
+            data_version,
+        }
+    }
+}
+
+static NAME_INDEX_CACHE: Lazy<DashMap<NameIndexKey, Arc<NameIndexResult>>> =
+    Lazy::new(DashMap::new);
+
+async fn load_name_index(
     pool: &sqlx::SqlitePool,
     upload_uuid: &[u8],
 ) -> Result<NameIndexResult, ApiError> {
@@ -89,6 +111,52 @@ async fn build_name_index(
         name_index,
         species_id_to_index,
     })
+}
+
+async fn get_or_build_name_index(
+    pool: &sqlx::SqlitePool,
+    upload_uuid: &Uuid,
+    data_version: i64,
+) -> Result<Arc<NameIndexResult>, ApiError> {
+    let key = NameIndexKey::new(*upload_uuid, data_version);
+
+    if let Some(existing) = NAME_INDEX_CACHE.get(&key) {
+        trace!(%upload_uuid, data_version, "name index cache hit");
+        return Ok(existing.clone());
+    }
+
+    let loaded = Arc::new(load_name_index(pool, &upload_uuid.as_bytes()[..]).await?);
+
+    match NAME_INDEX_CACHE.entry(key) {
+        Entry::Occupied(entry) => {
+            trace!(%upload_uuid, data_version, "name index cache populated concurrently");
+            Ok(entry.get().clone())
+        }
+        Entry::Vacant(entry) => {
+            trace!(%upload_uuid, data_version, "name index cache miss");
+            Ok(entry.insert(loaded).clone())
+        }
+    }
+}
+
+pub fn invalidate_name_index_cache(upload_id: &str) {
+    let Ok(uuid) = Uuid::parse_str(upload_id) else {
+        warn!(
+            "Ignoring invalid upload_id while clearing name index cache: {}",
+            upload_id
+        );
+        return;
+    };
+
+    let mut removed = 0usize;
+    NAME_INDEX_CACHE.retain(|key, _| {
+        let keep = key.upload_id != uuid;
+        if !keep {
+            removed += 1;
+        }
+        keep
+    });
+    trace!(%uuid, removed, "evicted cached name index entries");
 }
 
 impl Sighting {
@@ -393,7 +461,8 @@ pub async fn get_sightings(
             .await
             .map_err(|e| e.into_api_error("loading grouped sightings", "Database error"))?;
 
-        let index_result = build_name_index(pools.read(), &upload_uuid.as_bytes()[..]).await?;
+        let index_result =
+            get_or_build_name_index(pools.read(), &upload_uuid, data_version).await?;
 
         let mut groups = Vec::new();
         for row in rows {
@@ -455,7 +524,7 @@ pub async fn get_sightings(
             .collect();
 
         return Ok(Proto::new(pb::SightingsResponse {
-            name_index: index_result.name_index,
+            name_index: index_result.name_index.clone(),
             sightings: Vec::new(),
             groups: groups_pb,
             total,
@@ -563,7 +632,7 @@ pub async fn get_sightings(
         next_cursor = Some(encode_cursor(&sort_val_str, id));
     }
 
-    let index_result = build_name_index(pools.read(), &upload_uuid.as_bytes()[..]).await?;
+    let index_result = get_or_build_name_index(pools.read(), &upload_uuid, data_version).await?;
 
     let sightings_pb = sightings
         .into_iter()
@@ -571,7 +640,7 @@ pub async fn get_sightings(
         .collect();
 
     Ok(Proto::new(pb::SightingsResponse {
-        name_index: index_result.name_index,
+        name_index: index_result.name_index.clone(),
         sightings: sightings_pb,
         groups: Vec::new(),
         total,

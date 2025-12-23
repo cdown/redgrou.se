@@ -22,6 +22,7 @@ use crate::error::ApiError;
 use crate::limits::{UploadLimitError, UploadUsageTracker};
 use crate::pipeline::{CsvParser, DbSink, Geocoder, ParsedSighting, BATCH_SIZE};
 use crate::proto::{pb, Proto};
+use crate::sightings::invalidate_name_index_cache;
 use crate::tiles::invalidate_upload_cache;
 use serde::Deserialize;
 use sqlx::Row;
@@ -617,6 +618,7 @@ pub async fn update_csv(
         }
 
         invalidate_upload_cache(&upload_id).await;
+        invalidate_name_index_cache(&upload_id);
 
         let data_version = match db::query_with_timeout(
             sqlx::query_scalar::<_, i64>("SELECT data_version FROM uploads WHERE id = ?")
@@ -683,6 +685,7 @@ pub async fn delete_upload(
     {
         Ok(_) => {
             invalidate_upload_cache(&upload_id).await;
+            invalidate_name_index_cache(&upload_id);
 
             info!("Deleted upload: {}", upload_id);
             (
@@ -789,6 +792,7 @@ pub async fn delete_old_uploads(
             {
                 Ok(_) => {
                     invalidate_upload_cache(&upload_id).await;
+                    invalidate_name_index_cache(&upload_id);
                     deleted_count += 1;
                     info!("Auto-deleted old upload: {}", upload_id);
                 }
