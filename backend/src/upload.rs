@@ -195,7 +195,7 @@ async fn ingest_field(
             })
             .try_collect::<Vec<_>>()
             .await
-            .map_err(|e| ApiError::internal(format!("Failed to read ZIP stream: {}", e)))?
+            .map_err(|e| ApiError::bad_request(format!("Failed to read upload: {}", e)))?
             .into_iter()
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| {
