@@ -120,3 +120,11 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Make MapLibre popup close button larger */
+.maplibregl-popup-close-button {
+  width: 24px;
+  height: 24px;
+  font-size: 18px;
+  padding: 4px;
+}
