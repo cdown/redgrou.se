@@ -24,6 +24,7 @@ use crate::pipeline::{CsvParser, DbSink, Geocoder, ParsedSighting, BATCH_SIZE};
 use crate::proto::{pb, Proto};
 use crate::sightings::invalidate_name_index_cache;
 use crate::tiles::invalidate_upload_cache;
+use crate::zip_extract;
 use serde::Deserialize;
 use sqlx::Row;
 
@@ -161,6 +162,62 @@ async fn ingest_csv_field(
     let limited_stream = SizeLimitedStream::new(stream, MAX_UPLOAD_BYTES);
     let reader = StreamReader::new(limited_stream);
     read_csv(reader, pool, upload_id, writer_tracker).await
+}
+
+async fn ingest_field(
+    field: Field<'_>,
+    pool: &sqlx::SqlitePool,
+    upload_id: &str,
+    writer_tracker: &UploadUsageTracker,
+) -> Result<(usize, String), ApiError> {
+    let filename = field
+        .file_name()
+        .map_or_else(|| "unknown".to_string(), ToString::to_string);
+
+    if is_zip_file(&filename) {
+        let stream = field
+            .into_stream()
+            .map(|result| result.map_err(io::Error::other));
+
+        let mut size_tracker = 0u64;
+        let chunks: Vec<Bytes> = stream
+            .map(|result| {
+                result.map(|chunk| {
+                    size_tracker += chunk.len() as u64;
+                    if size_tracker > MAX_UPLOAD_BYTES as u64 {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            UploadSizeExceeded,
+                        ));
+                    }
+                    Ok(chunk)
+                })
+            })
+            .try_collect::<Vec<_>>()
+            .await
+            .map_err(|e| ApiError::internal(format!("Failed to read ZIP stream: {}", e)))?
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| {
+                ApiError::bad_request(format!("ZIP exceeds {UPLOAD_LIMIT_MB} MB upload limit"))
+            })?;
+
+        let combined = chunks
+            .iter()
+            .flat_map(|c| c.iter().copied())
+            .collect::<Vec<u8>>();
+        let cursor = io::Cursor::new(combined);
+        let extracted = zip_extract::extract_csv_from_zip(cursor, size_tracker).await?;
+
+        let csv_reader = io::Cursor::new(extracted.data);
+        let rows = read_csv(csv_reader, pool, upload_id, writer_tracker).await?;
+        Ok((rows, extracted.filename))
+    } else if is_csv_file(&filename) {
+        let rows = ingest_csv_field(field, pool, upload_id, writer_tracker).await?;
+        Ok((rows, filename))
+    } else {
+        Err(ApiError::bad_request("File must be a CSV or ZIP file"))
+    }
 }
 
 async fn read_csv<R>(
@@ -309,9 +366,9 @@ pub async fn upload_csv(
     while let Ok(Some(field)) = multipart.next_field().await {
         let filename = field
             .file_name()
-            .map_or_else(|| "unknown.csv".to_string(), ToString::to_string);
+            .map_or_else(|| "unknown".to_string(), ToString::to_string);
 
-        if !is_csv_file(&filename) {
+        if !is_csv_or_zip_file(&filename) {
             continue;
         }
 
@@ -321,6 +378,7 @@ pub async fn upload_csv(
         let edit_token = Uuid::new_v4().to_string();
         let edit_token_hash = hash_token(&edit_token);
 
+        // Create upload record first (needed for foreign key in sightings)
         if let Err(e) = db::query_with_timeout(
             sqlx::query(
                 "INSERT INTO uploads (id, filename, edit_token_hash, data_version) VALUES (?, ?, ?, ?)",
@@ -338,9 +396,9 @@ pub async fn upload_csv(
                 .into_response();
         }
 
-        let total_rows =
-            match ingest_csv_field(field, pools.write(), &upload_id, &writer_tracker).await {
-                Ok(rows) => rows,
+        let (total_rows, actual_filename) =
+            match ingest_field(field, pools.write(), &upload_id, &writer_tracker).await {
+                Ok(result) => result,
                 Err(err) => {
                     if let Err(db_err) = db::query_with_timeout(
                         sqlx::query("DELETE FROM uploads WHERE id = ?")
@@ -354,6 +412,20 @@ pub async fn upload_csv(
                     return err.into_response();
                 }
             };
+
+        // Update filename if it was extracted from ZIP
+        if actual_filename != filename {
+            if let Err(e) = db::query_with_timeout(
+                sqlx::query("UPDATE uploads SET filename = ? WHERE id = ?")
+                    .bind(&actual_filename)
+                    .bind(&upload_id_blob[..])
+                    .execute(pools.write()),
+            )
+            .await
+            {
+                e.log("updating filename after ZIP extraction");
+            }
+        }
 
         let mut tx = match db::query_with_timeout(pools.write().begin()).await {
             Ok(tx) => tx,
@@ -423,6 +495,16 @@ fn is_csv_file(filename: &str) -> bool {
     std::path::Path::new(filename)
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("csv"))
+}
+
+fn is_zip_file(filename: &str) -> bool {
+    std::path::Path::new(filename)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
+}
+
+fn is_csv_or_zip_file(filename: &str) -> bool {
+    is_csv_file(filename) || is_zip_file(filename)
 }
 
 fn extract_edit_token(headers: &axum::http::HeaderMap) -> Option<String> {
@@ -568,9 +650,9 @@ pub async fn update_csv(
     while let Ok(Some(field)) = multipart.next_field().await {
         let filename = field
             .file_name()
-            .map_or_else(|| "unknown.csv".to_string(), ToString::to_string);
+            .map_or_else(|| "unknown".to_string(), ToString::to_string);
 
-        if !is_csv_file(&filename) {
+        if !is_csv_or_zip_file(&filename) {
             continue;
         }
 
@@ -586,9 +668,9 @@ pub async fn update_csv(
                 .into_response();
         }
 
-        let total_rows =
-            match ingest_csv_field(field, pools.write(), &upload_id, &writer_tracker).await {
-                Ok(rows) => rows,
+        let (total_rows, actual_filename) =
+            match ingest_field(field, pools.write(), &upload_id, &writer_tracker).await {
+                Ok(result) => result,
                 Err(err) => return err.into_response(),
             };
 
@@ -597,7 +679,7 @@ pub async fn update_csv(
                 "UPDATE uploads SET row_count = ?, filename = ?, data_version = data_version + 1 WHERE id = ?",
             )
             .bind(i64::try_from(total_rows).unwrap_or(i64::MAX))
-            .bind(&filename)
+            .bind(&actual_filename)
             .bind(&upload_id_blob[..])
             .execute(pools.write()),
         )

@@ -23,7 +23,7 @@ serde_json = "1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7", features = ["io"] }
+tokio-util = { version = "0.7", features = ["io", "io-util"] }
 tower = { version = "0.5", features = ["limit", "timeout"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "set-header", "limit", "timeout", "catch-panic", "add-extension"] }
 tracing = "0.1"
@@ -44,6 +44,7 @@ dashmap = "6"
 base64 = "0.22"
 moka = { version = "0.12", features = ["future"] }
 roaring = "0.11"
+zip = "2"
 
 [build-dependencies]
 chrono = "0.4"

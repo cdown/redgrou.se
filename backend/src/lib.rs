@@ -11,6 +11,7 @@ pub mod proto;
 pub mod sightings;
 pub mod tiles;
 pub mod upload;
+pub mod zip_extract;
 
 #[macro_use]
 mod macros {

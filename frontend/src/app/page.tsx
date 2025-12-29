@@ -39,7 +39,7 @@ export default function Home() {
               Visualise your sightings
             </h2>
             <p className="mb-6 text-sm text-stone-600">
-              Upload a CSV export from{" "}
+              Upload a CSV or ZIP export from{" "}
               <a
                 href="https://app.birda.org/exports"
                 target="_blank"

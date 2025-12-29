@@ -27,8 +27,11 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
 
   const handleUpload = useCallback(
     async (file: File) => {
-      if (!file.name.endsWith(".csv")) {
-        setError("Please upload a CSV file");
+      const isCSV = file.name.endsWith(".csv");
+      const isZIP = file.name.endsWith(".zip");
+
+      if (!isCSV && !isZIP) {
+        setError("Please upload a CSV or ZIP file");
         return;
       }
 
@@ -101,14 +104,14 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
             <Upload className="h-5 w-5 text-stone-500" />
           </div>
           <p className="mb-4 text-sm text-stone-600">
-            Drag and drop your CSV file here, or
+            Drag and drop your CSV or ZIP file here, or
           </p>
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-stone-800 hover:shadow-md active:scale-[0.98]">
             <FileText className="h-4 w-4" />
             Choose file
             <input
               type="file"
-              accept=".csv"
+              accept=".csv,.zip"
               className="hidden"
               onChange={handleFileSelect}
             />
@@ -123,7 +126,7 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
             >
               Birda
             </a>
-            . In order to display your data, it will be stored in a database.{" "}
+            , either as a CSV file or the ZIP file directly. In order to display your data, it will be stored in a database.{" "}
             <Link
               href="/privacy"
               className="underline hover:text-stone-300"

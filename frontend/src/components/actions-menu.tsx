@@ -199,8 +199,10 @@ export function ActionsMenu({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
-        if (!file.name.endsWith(".csv")) {
-          setUpdateError("Please select a CSV file");
+        const isCSV = file.name.endsWith(".csv");
+        const isZIP = file.name.endsWith(".zip");
+        if (!isCSV && !isZIP) {
+          setUpdateError("Please select a CSV or ZIP file");
           return;
         }
         handleUpdate(file);
@@ -444,7 +446,7 @@ export function ActionsMenu({
               Replace data
             </h3>
             <p className="mb-6 text-sm text-stone-600">
-              Upload a new CSV file to replace all existing sightings. The URL
+              Upload a new CSV or ZIP file to replace all existing sightings. The URL
               will remain the same.
             </p>
 
@@ -457,7 +459,7 @@ export function ActionsMenu({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
+              accept=".csv,.zip"
               className="hidden"
               onChange={handleFileSelect}
             />
