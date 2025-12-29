@@ -511,6 +511,9 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
         const countries = data.values
           .filter((c) => c && c.trim() !== "")
           .sort((a, b) => {
+            // Sort "XX" (Unknown) to the end
+            if (a === "XX") return 1;
+            if (b === "XX") return -1;
             const nameA = getCountryName(a);
             const nameB = getCountryName(b);
             return nameA.localeCompare(nameB);
@@ -551,11 +554,33 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
 
     apiFetch(url)
       .then(async (res) => {
-        if (res.status === 404) {
-          setIsDeleted(true);
-          return null;
+        if (!res.ok) {
+          // Check error code before assuming upload is deleted
+          const { getApiErrorInfo } = await import("@/lib/api");
+          const errorInfo = await getApiErrorInfo(res, "Failed to load filtered count");
+          // If it's a missing bitmap error, handle it directly without throwing
+          if (errorInfo.code === "MISSING_BITMAP") {
+            if (!cancelled) {
+              // Clear the selection to stop retries
+              setCountryTickCountry(null);
+              setFilteredCount(null);
+              // Show a user-friendly message
+              showToast(errorInfo.message, "error");
+            }
+            return null;
+          }
+          // Only treat 404 as deleted if the message is "Upload not found"
+          if (res.status === 404 && errorInfo.message === "Upload not found") {
+            setIsDeleted(true);
+            return null;
+          }
+          // For other errors, throw to be caught below
+          const error = new Error(errorInfo.message) as { apiErrorCode?: string };
+          if (errorInfo.code) {
+            error.apiErrorCode = errorInfo.code;
+          }
+          throw error;
         }
-        await checkApiResponse(res, "Failed to load filtered count");
         return parseProtoResponse(res, CountResponse);
       })
       .then((data) => {
@@ -564,10 +589,10 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
         setFilteredCount(Number(data.count));
       })
       .catch((err) => {
-        console.error("Failed to fetch filtered count:", err);
         if (cancelled) {
           return;
         }
+        console.error("Failed to fetch filtered count:", err);
         const message = getErrorMessage(err, "Failed to load filtered count");
         if (message === "Upload not found") {
           setIsDeleted(true);

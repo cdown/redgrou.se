@@ -193,7 +193,12 @@ export function SightingsTable({
         if (message === "Upload not found") {
           onUploadDeleted?.();
         } else {
-          showToast(message, "error");
+          // Don't show error toast for missing bitmap errors - it will be handled by the count fetch
+          // This prevents duplicate error messages
+          const apiErrorCode = (e as { apiErrorCode?: string })?.apiErrorCode;
+          if (apiErrorCode !== "MISSING_BITMAP") {
+            showToast(message, "error");
+          }
         }
       } finally {
         loadingRef.current = false;

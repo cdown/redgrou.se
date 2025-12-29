@@ -64,28 +64,55 @@ export function buildFilterParams(
 }
 
 /**
+ * Extracts error information from an API error response.
+ * @param res - The fetch Response object
+ * @param defaultMessage - Default error message if API doesn't provide one
+ * @returns Object with error message and code
+ */
+export async function getApiErrorInfo(
+  res: Response,
+  defaultMessage: string
+): Promise<{ message: string; code?: string }> {
+  let message = defaultMessage;
+  let code: string | undefined;
+  try {
+    const buffer = await res.arrayBuffer();
+    if (buffer.byteLength > 0) {
+      const data = ApiErrorBody.decode(new Uint8Array(buffer));
+      message = data.error || defaultMessage;
+      code = data.code;
+    }
+  } catch {
+    message = defaultMessage;
+  }
+  return { message, code };
+}
+
+/**
  * Checks if a response is OK and throws an error with the API error message if not.
  * @param res - The fetch Response object
  * @param defaultMessage - Default error message if API doesn't provide one
- * @throws Error with the API error message or defaultMessage
+ * @throws Error with the API error message or defaultMessage. The error has an `apiErrorCode` property if available.
  */
 export async function checkApiResponse(
   res: Response,
   defaultMessage: string
 ): Promise<void> {
   if (!res.ok) {
-    let message = defaultMessage;
-    try {
-      const buffer = await res.arrayBuffer();
-      if (buffer.byteLength > 0) {
-        const data = ApiErrorBody.decode(new Uint8Array(buffer));
-        message = data.error || defaultMessage;
-      }
-    } catch {
-      message = defaultMessage;
+    const { message, code } = await getApiErrorInfo(res, defaultMessage);
+    const error = new Error(message) as ApiError;
+    if (code) {
+      error.apiErrorCode = code;
     }
-    throw new Error(message);
+    throw error;
   }
+}
+
+/**
+ * Error with optional API error code attached
+ */
+export interface ApiError extends Error {
+  apiErrorCode?: string;
 }
 
 /**

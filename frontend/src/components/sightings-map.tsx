@@ -12,8 +12,8 @@ import {
   apiFetch,
   buildFilterParams,
   parseProtoResponse,
-  checkApiResponse,
   getErrorMessage,
+  type ApiError,
 } from "@/lib/api";
 import { FilterGroup, filterToJson } from "@/lib/filter-types";
 import { fetchSpeciesInfo } from "@/lib/species-api";
@@ -836,11 +836,25 @@ useEffect(() => {
       if (res.status === 204) {
         return null;
       }
-      if (res.status === 404) {
-        onUploadDeleted?.();
-        return null;
+      if (!res.ok) {
+        // Check error code before assuming upload is deleted
+        const { getApiErrorInfo } = await import("@/lib/api");
+        const errorInfo = await getApiErrorInfo(res, "Failed to load map bounds");
+        // If it's a missing bitmap error, just return null (no bounds to fit)
+        if (errorInfo.code === "MISSING_BITMAP") {
+          return null;
+        }
+        if (res.status === 404 && errorInfo.message === "Upload not found") {
+          onUploadDeleted?.();
+          return null;
+        }
+        // For other errors, throw to be caught below
+        const error = new Error(errorInfo.message) as ApiError;
+        if (errorInfo.code) {
+          error.apiErrorCode = errorInfo.code;
+        }
+        throw error;
       }
-      await checkApiResponse(res, "Failed to load map bounds");
       return parseProtoResponse(res, BboxResponse);
     })
     .then((bbox) => {

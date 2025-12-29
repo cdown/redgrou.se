@@ -1,6 +1,9 @@
 const displayNames = new Intl.DisplayNames(["en"], { type: "region" });
 
 export function getCountryName(code: string): string {
+  if (code === "XX") {
+    return "Unknown";
+  }
   try {
     return displayNames.of(code.toUpperCase()) || code;
   } catch (err) {
@@ -10,6 +13,9 @@ export function getCountryName(code: string): string {
 }
 
 export function getCountryFlag(code: string): string {
+  if (code === "XX") {
+    return "🏴‍☠️";
+  }
   const upperCode = code.toUpperCase();
   const codePoints = [...upperCode].map(
     (char) => 0x1f1e6 + char.charCodeAt(0) - 65

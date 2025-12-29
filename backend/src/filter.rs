@@ -553,7 +553,13 @@ async fn load_bitmap_or_fail(
     let bitmap = bitmaps::load_bitmap(pool, upload_id_blob, bitmap_type, bitmap_key)
         .await
         .map_err(|e| e.into_api_error(context, "Database error"))?
-        .ok_or_else(|| ApiError::internal(format!("Missing tick bitmap {}", missing_label)))?;
+        .ok_or_else(|| {
+            ApiError::with_code(
+                axum::http::StatusCode::NOT_FOUND,
+                format!("Missing tick bitmap {}", missing_label),
+                "MISSING_BITMAP",
+            )
+        })?;
     Ok(bitmap)
 }
 

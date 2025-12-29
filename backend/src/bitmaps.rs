@@ -88,7 +88,7 @@ pub async fn compute_and_store_bitmaps(
     // Compute country tick bitmaps (one per country)
     let country_tick_rows: Vec<(String, i64)> = db::query_with_timeout(
         sqlx::query_as::<_, (String, i64)>(
-            "SELECT country_code, id FROM sightings WHERE upload_id = ? AND country_tick = 1 AND country_code IS NOT NULL AND country_code != '' AND country_code != 'XX'",
+            "SELECT country_code, id FROM sightings WHERE upload_id = ? AND country_tick = 1 AND country_code IS NOT NULL AND country_code != ''",
         )
         .bind(upload_id_blob)
         .fetch_all(&mut *tx),
