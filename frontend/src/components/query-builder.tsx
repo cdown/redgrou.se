@@ -41,7 +41,7 @@ import {
   isFreeformOperator,
   Operator,
 } from "@/lib/filter-types";
-import { formatCountry } from "@/lib/countries";
+import { formatCountry, getCountryName } from "@/lib/countries";
 import {
   FIELDS_ROUTE,
   FIELD_VALUES_ROUTE,
@@ -115,7 +115,17 @@ export function QueryBuilder({
           return;
         }
         const data = await parseProtoResponse(res, FieldValuesDecoder);
-        setFieldValues((prev) => ({ ...prev, [field]: data.values }));
+        let sortedValues = data.values;
+        if (field === "country_code") {
+          sortedValues = [...data.values].sort((a, b) => {
+            if (a === "XX") return 1;
+            if (b === "XX") return -1;
+            const nameA = getCountryName(a);
+            const nameB = getCountryName(b);
+            return nameA.localeCompare(nameB);
+          });
+        }
+        setFieldValues((prev) => ({ ...prev, [field]: sortedValues }));
       } catch (e) {
         console.error("Failed to fetch field values:", e);
         showToast(getErrorMessage(e, "Failed to load field values"), "error");
