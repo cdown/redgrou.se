@@ -833,6 +833,9 @@ useEffect(() => {
 
   apiFetch(url)
     .then(async (res) => {
+      if (res.status === 204) {
+        return null;
+      }
       if (res.status === 404) {
         onUploadDeleted?.();
         return null;

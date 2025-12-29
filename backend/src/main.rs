@@ -1,7 +1,7 @@
 use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::{ConnectInfo, Extension, Path, Query, State};
-use axum::http::{header, HeaderValue, Request};
+use axum::http::{header, HeaderValue, Request, StatusCode};
 use axum::middleware::{from_fn, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
@@ -651,7 +651,7 @@ async fn get_bbox(
     State(pools): State<DbPools>,
     Path(upload_id): Path<String>,
     Query(query): Query<CountQuery>,
-) -> Result<Proto<pb::BboxResponse>, ApiError> {
+) -> Result<impl axum::response::IntoResponse, ApiError> {
     let upload_uuid = uuid::Uuid::parse_str(&upload_id)
         .map_err(|_| ApiError::bad_request("Invalid upload_id format"))?;
     let data_version = upload::get_upload_data_version(pools.read(), &upload_uuid).await?;
@@ -682,8 +682,15 @@ async fn get_bbox(
 
     let row = db::query_with_timeout(db_query.fetch_optional(pools.read()))
         .await
-        .map_err(|e| e.into_api_error("getting bounding box", "Database error"))?
-        .ok_or_else(|| ApiError::not_found("No sightings found"))?;
+        .map_err(|e| e.into_api_error("getting bounding box", "Database error"))?;
+
+    let Some(row) = row else {
+        return Ok(Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .header("x-upload-version", data_version.to_string())
+            .body(Body::empty())
+            .unwrap());
+    };
 
     let min_lng: Option<f64> = row.get("min_lng");
     let min_lat: Option<f64> = row.get("min_lat");
@@ -691,7 +698,11 @@ async fn get_bbox(
     let max_lat: Option<f64> = row.get("max_lat");
 
     if min_lng.is_none() || min_lat.is_none() || max_lng.is_none() || max_lat.is_none() {
-        return Err(ApiError::not_found("No sightings found"));
+        return Ok(Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .header("x-upload-version", data_version.to_string())
+            .body(Body::empty())
+            .unwrap());
     }
 
     Ok(Proto::new(pb::BboxResponse {
@@ -700,5 +711,6 @@ async fn get_bbox(
         max_lng: max_lng.unwrap(),
         max_lat: max_lat.unwrap(),
         data_version,
-    }))
+    })
+    .into_response())
 }
