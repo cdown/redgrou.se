@@ -46,7 +46,7 @@ export function useMapInstance({
 
     mapRef.current = map;
     if (onReady) {
-      map.once("load", () => onReady(map));
+      map.once("style.load", () => onReady(map));
     }
 
     return () => {
