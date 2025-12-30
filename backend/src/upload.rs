@@ -34,6 +34,207 @@ const UPLOAD_LIMIT_MB: usize = MAX_UPLOAD_BYTES / (1024 * 1024);
 const MAX_DISPLAY_NAME_LENGTH: usize = 128;
 const INITIAL_DATA_VERSION: i64 = 1;
 
+fn row_count_value(total_rows: usize) -> i64 {
+    i64::try_from(total_rows).unwrap_or(i64::MAX)
+}
+
+struct UploadIngestor<'a> {
+    pools: &'a DbPools,
+    writer_tracker: &'a UploadUsageTracker,
+}
+
+struct CreateOutcome {
+    upload_id: String,
+    filename: String,
+    total_rows: usize,
+    edit_token: String,
+    data_version: i64,
+}
+
+struct ReplaceOutcome {
+    upload_id: String,
+    filename: String,
+    total_rows: usize,
+    data_version: i64,
+}
+
+impl<'a> UploadIngestor<'a> {
+    fn new(pools: &'a DbPools, writer_tracker: &'a UploadUsageTracker) -> Self {
+        Self {
+            pools,
+            writer_tracker,
+        }
+    }
+
+    async fn create(&self, field: Field<'_>, filename: String) -> Result<CreateOutcome, ApiError> {
+        let upload_uuid = Uuid::new_v4();
+        let upload_id = upload_uuid.to_string();
+        let upload_id_blob = upload_uuid.as_bytes();
+        let edit_token = Uuid::new_v4().to_string();
+        let edit_token_hash = hash_token(&edit_token);
+
+        db::query_with_timeout(
+            sqlx::query(
+                "INSERT INTO uploads (id, filename, edit_token_hash, data_version) VALUES (?, ?, ?, ?)",
+            )
+            .bind(&upload_id_blob[..])
+            .bind(&filename)
+            .bind(&edit_token_hash)
+            .bind(INITIAL_DATA_VERSION)
+            .execute(self.pools.write()),
+        )
+        .await
+        .map_err(|e| e.into_api_error("creating upload record", "Database error"))?;
+
+        let (total_rows, actual_filename) =
+            match ingest_field(field, self.pools.write(), &upload_id, self.writer_tracker).await {
+                Ok(result) => result,
+                Err(err) => {
+                    if let Err(db_err) = db::query_with_timeout(
+                        sqlx::query("DELETE FROM uploads WHERE id = ?")
+                            .bind(&upload_id_blob[..])
+                            .execute(self.pools.write()),
+                    )
+                    .await
+                    {
+                        db_err.log("deleting failed upload record");
+                    }
+                    return Err(err);
+                }
+            };
+
+        if actual_filename != filename {
+            if let Err(e) = db::query_with_timeout(
+                sqlx::query("UPDATE uploads SET filename = ? WHERE id = ?")
+                    .bind(&actual_filename)
+                    .bind(&upload_id_blob[..])
+                    .execute(self.pools.write()),
+            )
+            .await
+            {
+                e.log("updating filename after ZIP extraction");
+            }
+        }
+
+        let mut tx = db::query_with_timeout(self.pools.write().begin())
+            .await
+            .map_err(|e| {
+                e.into_api_error("starting upload metadata transaction", "Database error")
+            })?;
+
+        db::query_with_timeout(
+            sqlx::query("UPDATE uploads SET row_count = ? WHERE id = ?")
+                .bind(row_count_value(total_rows))
+                .bind(&upload_id_blob[..])
+                .execute(&mut *tx),
+        )
+        .await
+        .map_err(|e| e.into_api_error("updating upload row_count", "Database error"))?;
+
+        compute_grid_cell_visibility_tx(&mut tx, &upload_id_blob[..])
+            .await
+            .map_err(|e| e.into_api_error("computing grid cell visibility", "Database error"))?;
+
+        db::query_with_timeout(tx.commit()).await.map_err(|e| {
+            e.into_api_error("committing upload metadata transaction", "Database error")
+        })?;
+
+        if let Err(e) =
+            crate::bitmaps::compute_and_store_bitmaps(self.pools.write(), &upload_id_blob[..]).await
+        {
+            error!("Failed to compute tick bitmaps: {}", e.body.error);
+        }
+
+        info!(
+            "Upload complete: {} rows from {} (upload_id: {})",
+            total_rows, filename, upload_id
+        );
+
+        Ok(CreateOutcome {
+            upload_id,
+            filename,
+            total_rows,
+            edit_token,
+            data_version: INITIAL_DATA_VERSION,
+        })
+    }
+
+    async fn replace(
+        &self,
+        upload_uuid: Uuid,
+        field: Field<'_>,
+        filename: String,
+    ) -> Result<ReplaceOutcome, ApiError> {
+        let upload_id = upload_uuid.to_string();
+        let upload_id_blob = upload_uuid.as_bytes();
+
+        db::query_with_timeout(
+            sqlx::query("DELETE FROM sightings WHERE upload_id = ?")
+                .bind(&upload_id_blob[..])
+                .execute(self.pools.write()),
+        )
+        .await
+        .map_err(|e| e.into_api_error("deleting existing sightings", "Database error"))?;
+
+        let (total_rows, actual_filename) =
+            ingest_field(field, self.pools.write(), &upload_id, self.writer_tracker).await?;
+
+        let mut tx = db::query_with_timeout(self.pools.write().begin())
+            .await
+            .map_err(|e| {
+                e.into_api_error("starting upload metadata transaction", "Database error")
+            })?;
+
+        if let Err(e) = db::query_with_timeout(
+            sqlx::query(
+                "UPDATE uploads SET row_count = ?, filename = ?, data_version = data_version + 1 WHERE id = ?",
+            )
+            .bind(row_count_value(total_rows))
+            .bind(&actual_filename)
+            .bind(&upload_id_blob[..])
+            .execute(&mut *tx),
+        )
+        .await
+        {
+            e.log("updating upload metadata after replace");
+        }
+
+        compute_grid_cell_visibility_tx(&mut tx, &upload_id_blob[..])
+            .await
+            .map_err(|e| e.into_api_error("computing grid cell visibility", "Database error"))?;
+
+        db::query_with_timeout(tx.commit()).await.map_err(|e| {
+            e.into_api_error("committing upload metadata transaction", "Database error")
+        })?;
+
+        if let Err(e) =
+            crate::bitmaps::compute_and_store_bitmaps(self.pools.write(), &upload_id_blob[..]).await
+        {
+            error!("Failed to compute tick bitmaps: {}", e.body.error);
+        }
+
+        let data_version = db::query_with_timeout(
+            sqlx::query_scalar::<_, i64>("SELECT data_version FROM uploads WHERE id = ?")
+                .bind(&upload_id_blob[..])
+                .fetch_one(self.pools.read()),
+        )
+        .await
+        .map_err(|e| e.into_api_error("loading upload data_version", "Database error"))?;
+
+        info!(
+            "Update complete: {} rows from {} (upload_id: {})",
+            total_rows, filename, upload_id
+        );
+
+        Ok(ReplaceOutcome {
+            upload_id,
+            filename,
+            total_rows,
+            data_version,
+        })
+    }
+}
+
 // No salt needed: tokens are 122-bit random UUIDs, not user-chosen passwords.
 // Salting prevents rainbow table attacks on low-entropy secrets, but rainbow
 // tables for random UUIDs don't exist and never will (2^122 entries).
@@ -317,19 +518,6 @@ async fn flush_with_tracking(
     Ok(())
 }
 
-async fn compute_grid_cell_visibility(
-    pool: &sqlx::SqlitePool,
-    upload_id_blob: &[u8],
-) -> Result<(), DbQueryError> {
-    let mut tx = db::query_with_timeout(pool.begin()).await?;
-
-    compute_grid_cell_visibility_tx(&mut tx, upload_id_blob).await?;
-
-    db::query_with_timeout(tx.commit()).await?;
-
-    Ok(())
-}
-
 async fn compute_grid_cell_visibility_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     upload_id_blob: &[u8],
@@ -363,129 +551,32 @@ pub async fn upload_csv(
     Extension(writer_tracker): Extension<UploadUsageTracker>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
+    let ingestor = UploadIngestor::new(&pools, &writer_tracker);
     while let Ok(Some(field)) = multipart.next_field().await {
         let filename = field
             .file_name()
             .map_or_else(|| "unknown".to_string(), ToString::to_string);
 
-        if !is_csv_or_zip_file(&filename) {
-            continue;
-        }
-
-        let upload_uuid = Uuid::new_v4();
-        let upload_id = upload_uuid.to_string();
-        let upload_id_blob = upload_uuid.as_bytes();
-        let edit_token = Uuid::new_v4().to_string();
-        let edit_token_hash = hash_token(&edit_token);
-
-        // Create upload record first (needed for foreign key in sightings)
-        if let Err(e) = db::query_with_timeout(
-            sqlx::query(
-                "INSERT INTO uploads (id, filename, edit_token_hash, data_version) VALUES (?, ?, ?, ?)",
-            )
-            .bind(&upload_id_blob[..])
-            .bind(&filename)
-            .bind(&edit_token_hash)
-            .bind(INITIAL_DATA_VERSION)
-            .execute(pools.write()),
-        )
-        .await
-        {
-            return e
-                .into_api_error("creating upload record", "Database error")
-                .into_response();
-        }
-
-        let (total_rows, actual_filename) =
-            match ingest_field(field, pools.write(), &upload_id, &writer_tracker).await {
-                Ok(result) => result,
-                Err(err) => {
-                    if let Err(db_err) = db::query_with_timeout(
-                        sqlx::query("DELETE FROM uploads WHERE id = ?")
-                            .bind(&upload_id_blob[..])
-                            .execute(pools.write()),
+        if is_csv_or_zip_file(&filename) {
+            match ingestor.create(field, filename.clone()).await {
+                Ok(result) => {
+                    let response_title = default_display_name(&result.filename);
+                    return (
+                        axum::http::StatusCode::OK,
+                        Proto::new(pb::UploadResponse {
+                            upload_id: result.upload_id,
+                            filename: result.filename,
+                            row_count: row_count_value(result.total_rows),
+                            edit_token: result.edit_token,
+                            title: response_title,
+                            data_version: result.data_version,
+                        }),
                     )
-                    .await
-                    {
-                        db_err.log("deleting failed upload record");
-                    }
-                    return err.into_response();
+                        .into_response();
                 }
-            };
-
-        // Update filename if it was extracted from ZIP
-        if actual_filename != filename {
-            if let Err(e) = db::query_with_timeout(
-                sqlx::query("UPDATE uploads SET filename = ? WHERE id = ?")
-                    .bind(&actual_filename)
-                    .bind(&upload_id_blob[..])
-                    .execute(pools.write()),
-            )
-            .await
-            {
-                e.log("updating filename after ZIP extraction");
+                Err(err) => return err.into_response(),
             }
         }
-
-        let mut tx = match db::query_with_timeout(pools.write().begin()).await {
-            Ok(tx) => tx,
-            Err(e) => {
-                return e
-                    .into_api_error("starting upload metadata transaction", "Database error")
-                    .into_response();
-            }
-        };
-
-        if let Err(e) = db::query_with_timeout(
-            sqlx::query("UPDATE uploads SET row_count = ? WHERE id = ?")
-                .bind(i64::try_from(total_rows).unwrap_or(i64::MAX))
-                .bind(&upload_id_blob[..])
-                .execute(&mut *tx),
-        )
-        .await
-        {
-            return e
-                .into_api_error("updating upload row_count", "Database error")
-                .into_response();
-        }
-
-        if let Err(e) = compute_grid_cell_visibility_tx(&mut tx, &upload_id_blob[..]).await {
-            return e
-                .into_api_error("computing grid cell visibility", "Database error")
-                .into_response();
-        }
-
-        if let Err(e) = db::query_with_timeout(tx.commit()).await {
-            return e
-                .into_api_error("committing upload metadata transaction", "Database error")
-                .into_response();
-        }
-
-        if let Err(e) =
-            crate::bitmaps::compute_and_store_bitmaps(pools.write(), &upload_id_blob[..]).await
-        {
-            error!("Failed to compute tick bitmaps: {}", e.body.error);
-        }
-
-        info!(
-            "Upload complete: {} rows from {} (upload_id: {})",
-            total_rows, filename, upload_id
-        );
-
-        let response_title = default_display_name(&filename);
-
-        return (
-            axum::http::StatusCode::OK,
-            Proto::new(pb::UploadResponse {
-                upload_id,
-                filename,
-                row_count: i64::try_from(total_rows).unwrap_or(i64::MAX),
-                edit_token,
-                title: response_title,
-                data_version: INITIAL_DATA_VERSION,
-            }),
-        )
-            .into_response();
     }
 
     ApiError::bad_request("No CSV file found in upload").into_response()
@@ -635,6 +726,7 @@ pub async fn update_csv(
     Extension(writer_tracker): Extension<UploadUsageTracker>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
+    let ingestor = UploadIngestor::new(&pools, &writer_tracker);
     if let Err(response) = verify_edit_token(pools.read(), &headers, &upload_id).await {
         return response;
     }
@@ -645,96 +737,32 @@ pub async fn update_csv(
             return ApiError::bad_request("Invalid upload_id format").into_response();
         }
     };
-    let upload_id_blob = upload_uuid.as_bytes();
-
     while let Ok(Some(field)) = multipart.next_field().await {
         let filename = field
             .file_name()
             .map_or_else(|| "unknown".to_string(), ToString::to_string);
 
-        if !is_csv_or_zip_file(&filename) {
-            continue;
-        }
-
-        if let Err(e) = db::query_with_timeout(
-            sqlx::query("DELETE FROM sightings WHERE upload_id = ?")
-                .bind(&upload_id_blob[..])
-                .execute(pools.write()),
-        )
-        .await
-        {
-            return e
-                .into_api_error("deleting existing sightings", "Database error")
-                .into_response();
-        }
-
-        let (total_rows, actual_filename) =
-            match ingest_field(field, pools.write(), &upload_id, &writer_tracker).await {
-                Ok(result) => result,
+        if is_csv_or_zip_file(&filename) {
+            match ingestor.replace(upload_uuid, field, filename.clone()).await {
+                Ok(result) => {
+                    invalidate_upload_cache(&result.upload_id).await;
+                    invalidate_name_index_cache(&result.upload_id);
+                    let response_title = default_display_name(&result.filename);
+                    return (
+                        axum::http::StatusCode::OK,
+                        Proto::new(pb::UpdateResponse {
+                            upload_id: result.upload_id,
+                            filename: result.filename,
+                            row_count: row_count_value(result.total_rows),
+                            title: response_title,
+                            data_version: result.data_version,
+                        }),
+                    )
+                        .into_response();
+                }
                 Err(err) => return err.into_response(),
-            };
-
-        if let Err(e) = db::query_with_timeout(
-            sqlx::query(
-                "UPDATE uploads SET row_count = ?, filename = ?, data_version = data_version + 1 WHERE id = ?",
-            )
-            .bind(i64::try_from(total_rows).unwrap_or(i64::MAX))
-            .bind(&actual_filename)
-            .bind(&upload_id_blob[..])
-            .execute(pools.write()),
-        )
-        .await
-        {
-            e.log("updating upload metadata after replace");
-        }
-
-        if let Err(e) = compute_grid_cell_visibility(pools.write(), &upload_id_blob[..]).await {
-            e.log("computing grid cell visibility");
-        }
-
-        // Compute and store Roaring bitmaps for efficient tick filtering
-        if let Err(e) =
-            crate::bitmaps::compute_and_store_bitmaps(pools.write(), &upload_id_blob[..]).await
-        {
-            error!("Failed to compute tick bitmaps: {}", e.body.error);
-        }
-
-        invalidate_upload_cache(&upload_id).await;
-        invalidate_name_index_cache(&upload_id);
-
-        let data_version = match db::query_with_timeout(
-            sqlx::query_scalar::<_, i64>("SELECT data_version FROM uploads WHERE id = ?")
-                .bind(&upload_id_blob[..])
-                .fetch_one(pools.read()),
-        )
-        .await
-        {
-            Ok(version) => version,
-            Err(e) => {
-                return e
-                    .into_api_error("loading upload data_version", "Database error")
-                    .into_response();
             }
-        };
-
-        info!(
-            "Update complete: {} rows from {} (upload_id: {})",
-            total_rows, filename, upload_id
-        );
-
-        let response_title = default_display_name(&filename);
-
-        return (
-            axum::http::StatusCode::OK,
-            Proto::new(pb::UpdateResponse {
-                upload_id,
-                filename,
-                row_count: i64::try_from(total_rows).unwrap_or(i64::MAX),
-                title: response_title,
-                data_version,
-            }),
-        )
-            .into_response();
+        }
     }
 
     ApiError::bad_request("No CSV file found in upload").into_response()
