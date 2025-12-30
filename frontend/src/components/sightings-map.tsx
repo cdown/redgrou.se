@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot, Root } from "react-dom/client";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -63,6 +63,8 @@ export function SightingsMap({
     [],
   );
 
+  const [tileManagerReadyVersion, setTileManagerReadyVersion] = useState(0);
+
   const handleMapReady = useCallback(
     (map: maplibregl.Map) => {
       mapRef.current = map;
@@ -75,6 +77,7 @@ export function SightingsMap({
         onFeatureClick: (feature) => handleSightingFeature(map, feature),
         isClickEnabled: () => !(clusterControllerRef.current?.isActive() ?? false),
       });
+      setTileManagerReadyVersion((version) => version + 1);
 
       clusterControllerRef.current = new ClusterController({
         map,
@@ -114,7 +117,15 @@ export function SightingsMap({
       dataVersion,
     };
     manager.setParams(params);
-  }, [uploadId, filter, tickFilterParam, yearTickYear, countryTickCountry, dataVersion]);
+  }, [
+    uploadId,
+    filter,
+    tickFilterParam,
+    yearTickYear,
+    countryTickCountry,
+    dataVersion,
+    tileManagerReadyVersion,
+  ]);
 
   useEffect(() => {
     const controllers = abortControllersRef.current;

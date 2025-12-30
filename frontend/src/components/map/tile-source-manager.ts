@@ -41,6 +41,9 @@ export class TileSourceManager {
   ) {}
 
   setParams(params: TileSourceParams) {
+    if (!this.map.getStyle()) {
+      return;
+    }
     const tileUrl = buildTileUrl(params);
     if (!this.map.getSource(SOURCE_ID)) {
       this.initialiseSource(tileUrl);
@@ -55,12 +58,12 @@ export class TileSourceManager {
   }
 
   dispose() {
-    if (!this.map?.getStyle()) {
-      return;
-    }
     this.disposeFns.forEach((fn) => fn());
     this.disposeFns = [];
 
+    if (!this.map?.getStyle()) {
+      return;
+    }
     if (this.map.getLayer(HIT_LAYER_ID)) {
       this.map.removeLayer(HIT_LAYER_ID);
     }

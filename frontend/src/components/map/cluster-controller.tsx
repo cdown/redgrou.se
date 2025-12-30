@@ -80,7 +80,11 @@ export class ClusterController {
     this.cleanups = [];
 
     const { map } = this.options;
+    const canvas = map.getCanvas();
     if (!map.getStyle()) {
+      if (canvas) {
+        canvas.style.cursor = "";
+      }
       return;
     }
     if (map.getLayer(CLUSTER_POINTS_LAYER_ID)) {
@@ -95,7 +99,9 @@ export class ClusterController {
     if (map.getSource(CLUSTER_SOURCE_ID)) {
       map.removeSource(CLUSTER_SOURCE_ID);
     }
-    map.getCanvas().style.cursor = "";
+    if (canvas) {
+      canvas.style.cursor = "";
+    }
   }
 
   private initialise() {
