@@ -4,9 +4,8 @@ use crate::tiles::LatLng;
 use country_boundaries::{CountryBoundaries, LatLon, BOUNDARIES_ODBL_360X180};
 use csv_async::{ByteRecord, StringRecord};
 use once_cell::sync::Lazy;
-use serde::{ser::SerializeTuple, Serialize, Serializer};
 use smartstring::{LazyCompact, SmartString};
-use sqlx::{Acquire, Executor, QueryBuilder, Sqlite, Transaction};
+use sqlx::{Acquire, QueryBuilder, Sqlite, Transaction};
 use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use tracing::error;
@@ -75,37 +74,6 @@ pub struct ProcessedSighting {
     pub year_tick: bool,
     pub country_tick: bool,
     pub vis_rank: i32,
-}
-
-impl Serialize for ProcessedSighting {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // Serialize as tuple (array) instead of object to eliminate field name overhead.
-        // This removes serialize_field calls that write field names for every single row,
-        // reducing payload size by ~40% and serialization time.
-        // Serialization order: [uuid, species_id, country_code, region_code,
-        //                        observed_at, count, latitude, longitude, year, lifer, year_tick, country_tick, vis_rank]
-        // SELECT order must match INSERT column order exactly.
-        let mut tup = serializer.serialize_tuple(13)?;
-
-        tup.serialize_element(&self.sighting_uuid)?; // Index 0
-        tup.serialize_element(&self.species_id)?; // Index 1
-        tup.serialize_element(&self.country_code)?; // Index 2
-        tup.serialize_element(&self.region_code)?; // Index 3
-        tup.serialize_element(&self.observed_at)?; // Index 4
-        tup.serialize_element(&self.count)?; // Index 5
-        tup.serialize_element(&self.latitude)?; // Index 6
-        tup.serialize_element(&self.longitude)?; // Index 7
-        tup.serialize_element(&self.year)?; // Index 8
-        tup.serialize_element(&(if self.lifer { 1 } else { 0 }))?; // Index 9
-        tup.serialize_element(&(if self.year_tick { 1 } else { 0 }))?; // Index 10
-        tup.serialize_element(&(if self.country_tick { 1 } else { 0 }))?; // Index 11
-        tup.serialize_element(&self.vis_rank)?; // Index 12
-
-        tup.end()
-    }
 }
 
 pub struct CsvParser {
@@ -282,8 +250,6 @@ pub struct DbSink {
     upload_id: String,
     batch: Vec<ProcessedSighting>,
     total_rows: usize,
-    // Reusable buffer for JSON serialization to avoid per-batch allocations
-    json_buffer: Vec<u8>,
     // Track seen species/years/countries for tick calculation
     seen_species: HashSet<i64>,
     seen_year_ticks: HashSet<(i64, i32)>,
@@ -297,8 +263,6 @@ impl DbSink {
             upload_id,
             batch: Vec::with_capacity(BATCH_SIZE),
             total_rows: 0,
-            // Pre-allocate ~1MB to avoid growing during serialization
-            json_buffer: Vec::with_capacity(1024 * 1024),
             seen_species: HashSet::new(),
             seen_year_ticks: HashSet::new(),
             seen_country_ticks: HashSet::new(),
@@ -390,21 +354,7 @@ impl DbSink {
             }
         }
 
-        // Clear buffer (O(1), keeps capacity) and serialize directly to it
-        // This avoids the allocation overhead of serde_json::to_string
-        self.json_buffer.clear();
-        serde_json::to_writer(&mut self.json_buffer, &self.batch).map_err(|e| {
-            error!("JSON serialization failed: {}", e);
-            ApiError::internal("Serialization failed")
-        })?;
-
-        // Convert buffer to str (zero-copy, just UTF-8 validation)
-        let json_str = std::str::from_utf8(&self.json_buffer).map_err(|e| {
-            error!("Invalid UTF-8 in JSON buffer: {}", e);
-            ApiError::internal("Invalid UTF-8 in JSON")
-        })?;
-
-        insert_batch(conn, &self.upload_id, json_str)
+        insert_batch(conn, &self.upload_id, &self.batch)
             .await
             .map_err(|e| {
                 e.into_api_error("inserting sightings batch", "Failed to insert sightings")
@@ -595,60 +545,70 @@ fn apply_resolved_species(
     }
 }
 
-async fn insert_batch<'e, E>(
-    executor: E,
+async fn insert_batch(
+    conn: &mut sqlx::SqliteConnection,
     upload_id: &str,
-    json_str: &str,
-) -> Result<(), DbQueryError>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
-    if json_str.is_empty() || json_str == "[]" {
+    rows: &[ProcessedSighting],
+) -> Result<(), DbQueryError> {
+    if rows.is_empty() {
         return Ok(());
     }
 
-    // Convert UUID string to BLOB for database storage
     let upload_uuid = Uuid::parse_str(upload_id)
         .map_err(|_| DbQueryError::Sqlx(sqlx::Error::Decode("Invalid UUID format".into())))?;
-    let upload_id_blob = &upload_uuid.as_bytes()[..];
+    let upload_blob = upload_uuid.as_bytes();
+    const COLUMNS_PER_ROW: usize = 14;
+    let max_rows_per_chunk = (SQLITE_MAX_VARIABLES / COLUMNS_PER_ROW).max(1);
 
-    // SQLite parses JSON arrays natively. We use array indices instead of field names
-    // to eliminate the overhead of writing field names in JSON serialization.
-    // Serialization order: [uuid, species_id, country_code, region_code,
-    //                        observed_at, count, latitude, longitude, year]
-    // SELECT order must match INSERT column order exactly.
-    // UUIDs are stored as BLOB, so we convert the JSON-extracted UUID string to BLOB.
-    let sql = r#"
-    INSERT INTO sightings (
-        upload_id, sighting_uuid, species_id,
-        count, latitude, longitude, country_code,
-        region_code, observed_at, year, lifer, year_tick, country_tick, vis_rank
-    )
-    SELECT
-        ?1,
-        CAST('X' || UPPER(REPLACE(value->>0, '-', '')) AS BLOB), -- sighting_uuid: convert UUID string to BLOB
-        CAST(value->>1 AS INTEGER), -- species_id
-        CAST(value->>5 AS INTEGER), -- count
-        CAST(value->>6 AS REAL), -- latitude
-        CAST(value->>7 AS REAL), -- longitude
-        value->>2, -- country_code
-        value->>3, -- region_code
-        value->>4, -- observed_at
-        CAST(value->>8 AS INTEGER), -- year
-        CAST(value->>9 AS INTEGER), -- lifer
-        CAST(value->>10 AS INTEGER), -- year_tick
-        CAST(value->>11 AS INTEGER), -- country_tick
-        CAST(value->>12 AS INTEGER) -- vis_rank
-    FROM json_each(?2)
-    "#;
+    for chunk in rows.chunks(max_rows_per_chunk) {
+        let mut qb = QueryBuilder::<Sqlite>::new(
+            "INSERT INTO sightings (upload_id, sighting_uuid, species_id, count, latitude, longitude, country_code, region_code, observed_at, year, lifer, year_tick, country_tick, vis_rank) VALUES ",
+        );
 
-    db::query_with_timeout(
-        sqlx::query(sql)
-            .bind(upload_id_blob)
-            .bind(json_str)
-            .execute(executor),
-    )
-    .await?;
+        for (idx, sighting) in chunk.iter().enumerate() {
+            let species_id = sighting
+                .species_id
+                .expect("species_id should be set before insert");
+
+            if idx > 0 {
+                qb.push(", ");
+            }
+
+            qb.push("(");
+            qb.push_bind(upload_blob.as_ref());
+            qb.push(", ");
+            qb.push_bind(&sighting.sighting_uuid.as_bytes()[..]);
+            qb.push(", ");
+            qb.push_bind(species_id);
+            qb.push(", ");
+            qb.push_bind(sighting.count);
+            qb.push(", ");
+            qb.push_bind(sighting.latitude);
+            qb.push(", ");
+            qb.push_bind(sighting.longitude);
+            qb.push(", ");
+            qb.push_bind(sighting.country_code.as_str());
+            qb.push(", ");
+            qb.push_bind(sighting.region_code.as_deref());
+            qb.push(", ");
+            qb.push_bind(sighting.observed_at.as_str());
+            qb.push(", ");
+            qb.push_bind(sighting.year);
+            qb.push(", ");
+            qb.push_bind(i32::from(sighting.lifer));
+            qb.push(", ");
+            qb.push_bind(i32::from(sighting.year_tick));
+            qb.push(", ");
+            qb.push_bind(i32::from(sighting.country_tick));
+            qb.push(", ");
+            qb.push_bind(sighting.vis_rank);
+            qb.push(")");
+        }
+
+        let query = qb.build();
+        db::query_with_timeout(query.execute(&mut *conn)).await?;
+    }
+
     Ok(())
 }
 
