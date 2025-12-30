@@ -335,7 +335,9 @@ impl DbSink {
             }
 
             // Check for country tick (first sighting of this species in this country)
-            if !sighting.country_code.is_empty() && sighting.country_code != "XX" {
+            if !sighting.country_code.is_empty()
+                && !sighting.country_code.eq_ignore_ascii_case("XX")
+            {
                 let country_tick_key = (species_id, sighting.country_code.to_string());
                 if !self.seen_country_ticks.contains(&country_tick_key) {
                     sighting.country_tick = true;

@@ -438,7 +438,16 @@ export function useCountries(
     },
   );
 
-  const countries = useMemo(() => values.filter((code) => code && code.trim().length > 0), [values]);
+  const countries = useMemo(
+    () =>
+      values.filter(
+        (code) =>
+          code &&
+          code.trim().length > 0 &&
+          code.toUpperCase() !== "XX",
+      ),
+    [values],
+  );
 
   return { countries, dataVersion, isLoading, error, refresh };
 }
