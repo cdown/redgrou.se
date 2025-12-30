@@ -25,6 +25,8 @@ import {
 } from "@/components/map/tile-source-manager";
 import { ClusterController } from "@/components/map/cluster-controller";
 
+const FOCUS_ZOOM = 16;
+
 interface SightingsMapProps {
   uploadId: string;
   filter: FilterGroup | null;
@@ -269,16 +271,52 @@ function showPopupBySightingId(
   lng: number,
   featuresById: Map<number, maplibregl.MapGeoJSONFeature>,
 ) {
-  const feature = featuresById.get(sightingId);
-  if (!feature) {
+  const tryShow = () => {
+    const feature = featuresById.get(sightingId);
+    if (!feature) {
+      return false;
+    }
+    const hasOverride = Number.isFinite(lat) && Number.isFinite(lng);
+    const overrideLocation =
+      hasOverride && typeof lat === "number" && typeof lng === "number"
+        ? { lat, lng }
+        : undefined;
+    handleSightingFeature(map, feature, overrideLocation);
+    return true;
+  };
+
+  if (tryShow()) {
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      map.easeTo({
+        center: [lng, lat],
+        zoom: Math.max(map.getZoom(), FOCUS_ZOOM),
+        duration: 600,
+      });
+    }
     return;
   }
-  const hasOverride = Number.isFinite(lat) && Number.isFinite(lng);
-  const overrideLocation =
-    hasOverride && typeof lat === "number" && typeof lng === "number"
-      ? { lat, lng }
-      : undefined;
-  handleSightingFeature(map, feature, overrideLocation);
+
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    map.easeTo({
+      center: [lng, lat],
+      zoom: Math.max(map.getZoom(), FOCUS_ZOOM),
+      duration: 600,
+    });
+  }
+
+  let attempts = 0;
+  const maxAttempts = 5;
+  const handleSourceData = (event: maplibregl.MapSourceDataEvent) => {
+    if (event.sourceId !== "sightings" || !event.isSourceLoaded) {
+      return;
+    }
+    attempts += 1;
+    if (tryShow() || attempts >= maxAttempts) {
+      map.off("sourcedata", handleSourceData);
+    }
+  };
+
+  map.on("sourcedata", handleSourceData);
 }
 
 function createPopupContent(
