@@ -112,6 +112,75 @@ struct FilterStats {
     rules: usize,
 }
 
+#[derive(Clone, Copy)]
+pub struct TableAliases<'a> {
+    pub sightings: Option<&'a str>,
+    pub species: Option<&'a str>,
+}
+
+impl<'a> TableAliases<'a> {
+    pub const fn new(sightings: Option<&'a str>, species: Option<&'a str>) -> Self {
+        Self { sightings, species }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FilterSql {
+    clause: String,
+    params: Vec<String>,
+}
+
+impl FilterSql {
+    const fn new(clause: String, params: Vec<String>) -> Self {
+        Self { clause, params }
+    }
+
+    pub fn clause(&self) -> &str {
+        &self.clause
+    }
+
+    pub fn params(&self) -> &[String] {
+        &self.params
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.clause.is_empty()
+    }
+}
+
+struct ColumnResolver<'a> {
+    sightings_alias: Option<&'a str>,
+    species_alias: Option<&'a str>,
+}
+
+impl<'a> ColumnResolver<'a> {
+    fn new(aliases: TableAliases<'a>) -> Self {
+        Self {
+            sightings_alias: aliases.sightings,
+            species_alias: aliases.species,
+        }
+    }
+
+    fn column(&self, field: FilterField) -> String {
+        match field {
+            FilterField::CommonName | FilterField::ScientificName => {
+                if let Some(species) = self.species_alias {
+                    return format!("{species}.{}", field.as_sql_column());
+                }
+                self.format_with_alias(self.sightings_alias, field.as_sql_column())
+            }
+            _ => self.format_with_alias(self.sightings_alias, field.as_sql_column()),
+        }
+    }
+
+    fn format_with_alias(&self, alias: Option<&str>, column: &str) -> String {
+        match alias {
+            Some(prefix) => format!("{prefix}.{column}"),
+            None => column.to_string(),
+        }
+    }
+}
+
 impl FilterGroup {
     pub fn validate(&self) -> Result<(), FilterValidationError> {
         let mut stats = FilterStats::default();
@@ -134,7 +203,7 @@ impl FilterGroup {
         self.rules.iter().any(check_rule)
     }
 
-    pub fn to_sql(&self, params: &mut Vec<String>) -> Option<String> {
+    fn to_sql(&self, resolver: &ColumnResolver<'_>, params: &mut Vec<String>) -> Option<String> {
         if self.rules.is_empty() {
             return None;
         }
@@ -142,7 +211,7 @@ impl FilterGroup {
         let clauses: Vec<String> = self
             .rules
             .iter()
-            .filter_map(|rule| rule.to_sql(params))
+            .filter_map(|rule| rule.to_sql(resolver, params))
             .collect();
 
         if clauses.is_empty() {
@@ -159,10 +228,10 @@ impl FilterGroup {
 }
 
 impl Rule {
-    fn to_sql(&self, params: &mut Vec<String>) -> Option<String> {
+    fn to_sql(&self, resolver: &ColumnResolver<'_>, params: &mut Vec<String>) -> Option<String> {
         match self {
-            Self::Condition(c) => c.to_sql(params),
-            Self::Group(g) => g.to_sql(params),
+            Self::Condition(c) => c.to_sql(resolver, params),
+            Self::Group(g) => g.to_sql(resolver, params),
         }
     }
 }
@@ -179,8 +248,8 @@ impl Condition {
         }
     }
 
-    fn to_sql(&self, params: &mut Vec<String>) -> Option<String> {
-        let field = self.field.as_sql_column();
+    fn to_sql(&self, resolver: &ColumnResolver<'_>, params: &mut Vec<String>) -> Option<String> {
+        let field = resolver.column(self.field);
 
         match (&self.operator, &self.value) {
             (Operator::Eq, FilterValue::String(v)) => {
@@ -473,18 +542,11 @@ impl CountQuery {
     }
 }
 
-pub struct FilterClauseResult {
-    pub filter_clause: String,
-    pub params: Vec<String>,
-}
-
 const SQLITE_SAFE_PARAM_LIMIT: u64 = 30_000;
 
 /// Builds filter SQL clauses and parameters using roaring bitmaps for tick filters.
 /// Returns filter_clause (a string like " AND (...)" or empty string) and params.
-pub async fn build_filter_clause(
-    request: FilterRequest<'_>,
-) -> Result<FilterClauseResult, ApiError> {
+pub async fn build_filter_clause(request: FilterRequest<'_>) -> Result<FilterSql, ApiError> {
     request.build().await
 }
 
@@ -494,18 +556,19 @@ pub struct FilterRequest<'a> {
     pub filter_json: Option<&'a String>,
     pub year_tick_year: Option<i32>,
     pub country_tick_country: Option<&'a String>,
-    pub table_prefix: Option<&'a str>,
+    pub aliases: TableAliases<'a>,
     pub tick_visibility: &'a TickVisibility,
 }
 
 impl<'a> FilterRequest<'a> {
-    pub async fn build(self) -> Result<FilterClauseResult, ApiError> {
+    pub async fn build(self) -> Result<FilterSql, ApiError> {
         let mut params: Vec<String> = Vec::new();
         let mut clauses: Vec<String> = Vec::new();
+        let resolver = ColumnResolver::new(self.aliases);
 
         if let Some(filter_json) = self.filter_json {
             let filter: FilterGroup = filter_json.try_into()?;
-            if let Some(sql) = filter.to_sql(&mut params) {
+            if let Some(sql) = filter.to_sql(&resolver, &mut params) {
                 clauses.push(sql);
             }
         }
@@ -516,7 +579,7 @@ impl<'a> FilterRequest<'a> {
                 self.upload_id,
                 self.year_tick_year,
                 self.country_tick_country,
-                self.table_prefix,
+                self.aliases.sightings,
                 &mut params,
             )
             .await?
@@ -525,7 +588,7 @@ impl<'a> FilterRequest<'a> {
             }
         }
 
-        if let Some(tick_clause) = self.tick_visibility.to_sql_clause(self.table_prefix) {
+        if let Some(tick_clause) = self.tick_visibility.to_sql_clause(self.aliases.sightings) {
             clauses.push(tick_clause);
         }
 
@@ -535,10 +598,7 @@ impl<'a> FilterRequest<'a> {
             format!(" AND {}", clauses.join(" AND "))
         };
 
-        Ok(FilterClauseResult {
-            filter_clause,
-            params,
-        })
+        Ok(FilterSql::new(filter_clause, params))
     }
 }
 
@@ -576,7 +636,7 @@ fn merge_bitmap(target: &mut Option<RoaringBitmap>, bitmap: RoaringBitmap) {
 
 fn bitmap_to_clause(
     bitmap: &RoaringBitmap,
-    table_prefix: Option<&str>,
+    sightings_alias: Option<&str>,
     params: &mut Vec<String>,
 ) -> Result<String, ApiError> {
     if bitmap.is_empty() {
@@ -590,7 +650,7 @@ fn bitmap_to_clause(
         ));
     }
 
-    let prefix = table_prefix.map(|p| format!("{p}.")).unwrap_or_default();
+    let prefix = sightings_alias.map(|p| format!("{p}.")).unwrap_or_default();
     let mut placeholders = Vec::with_capacity(bitmap_len as usize);
     for id in bitmap.iter() {
         placeholders.push("?".to_string());
@@ -605,7 +665,7 @@ async fn build_bitmap_clause(
     upload_id_blob: &[u8],
     year_tick_year: Option<i32>,
     country_tick_country: Option<&String>,
-    table_prefix: Option<&str>,
+    sightings_alias: Option<&str>,
     params: &mut Vec<String>,
 ) -> Result<Option<String>, ApiError> {
     let mut final_bitmap: Option<RoaringBitmap> = None;
@@ -638,7 +698,7 @@ async fn build_bitmap_clause(
     }
 
     if let Some(bitmap) = final_bitmap {
-        let clause = bitmap_to_clause(&bitmap, table_prefix, params)?;
+        let clause = bitmap_to_clause(&bitmap, sightings_alias, params)?;
         Ok(Some(clause))
     } else {
         Ok(None)

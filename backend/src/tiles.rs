@@ -16,7 +16,7 @@ use tracing::{debug, error};
 
 use crate::db;
 use crate::error::ApiError;
-use crate::filter::{build_filter_clause, FilterRequest, TickVisibility};
+use crate::filter::{build_filter_clause, FilterRequest, TableAliases, TickVisibility};
 use crate::upload::get_upload_data_version;
 
 const TILE_EXTENT: u32 = 4096;
@@ -225,13 +225,13 @@ pub async fn get_tile(
         return Ok(response);
     }
 
-    let filter_result = build_filter_clause(FilterRequest {
+    let filter_sql = build_filter_clause(FilterRequest {
         pool: pools.read(),
         upload_id: &upload_uuid.as_bytes()[..],
         filter_json: query.filter.as_ref(),
         year_tick_year: query.year_tick_year,
         country_tick_country: query.country_tick_country.as_ref(),
-        table_prefix: Some("s"),
+        aliases: TableAliases::new(Some("s"), Some("sp")),
         tick_visibility: &tick_visibility,
     })
     .await?;
@@ -295,7 +295,7 @@ pub async fn get_tile(
             WHERE s.upload_id = ?{}
             LIMIT ?
             "#,
-            filter_result.filter_clause
+            filter_sql.clause()
         );
 
         let mut db_query = sqlx::query(&sql)
@@ -306,7 +306,7 @@ pub async fn get_tile(
             .bind(candidate_limit)
             .bind(&upload_uuid.as_bytes()[..]);
 
-        for param in &filter_result.params {
+        for param in filter_sql.params() {
             db_query = db_query.bind(param);
         }
         db_query = db_query.bind(i64::from(max_points));
@@ -338,7 +338,7 @@ pub async fn get_tile(
             {}
             LIMIT ?
             "#,
-            filter_result.filter_clause
+            filter_sql.clause()
         );
 
         let mut db_query = sqlx::query(&sql)
@@ -349,7 +349,7 @@ pub async fn get_tile(
             .bind(bbox.lon_min)
             .bind(bbox.lon_max);
 
-        for param in &filter_result.params {
+        for param in filter_sql.params() {
             db_query = db_query.bind(param);
         }
         db_query = db_query.bind(i64::from(max_points));

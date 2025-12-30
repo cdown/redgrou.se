@@ -13,21 +13,6 @@ pub mod tiles;
 pub mod upload;
 pub mod zip_extract;
 
-#[macro_use]
-mod macros {
-    #[macro_export]
-    macro_rules! bind_filter_params {
-        ($query:expr, $upload_id:expr, $filter_params:expr) => {{
-            let mut q = $query;
-            q = q.bind($upload_id);
-            for param in $filter_params {
-                q = q.bind(param);
-            }
-            q
-        }};
-    }
-}
-
 use crate::db::DbPools;
 use crate::limits::UploadUsageTracker;
 use axum::routing::{get, post};

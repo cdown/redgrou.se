@@ -10,10 +10,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api_constants;
-use crate::bind_filter_params;
 use crate::db;
 use crate::error::ApiError;
-use crate::filter::{build_filter_clause, FilterRequest, TickVisibility};
+use crate::filter::{build_filter_clause, FilterRequest, TableAliases, TickVisibility};
 use crate::proto::{pb, Proto};
 use crate::upload::get_upload_data_version;
 use tracing::{trace, warn};
@@ -323,13 +322,13 @@ pub async fn get_sightings(
     // Collect filter params separately so upload_id stays first and field names remain enum-whitelisted.
     let tick_visibility = query.tick_visibility()?;
 
-    let filter_result = build_filter_clause(FilterRequest {
+    let filter_sql = build_filter_clause(FilterRequest {
         pool: pools.read(),
         upload_id: &upload_uuid.as_bytes()[..],
         filter_json: query.filter.as_ref(),
         year_tick_year: query.year_tick_year,
         country_tick_country: query.country_tick_country.as_ref(),
-        table_prefix: Some("s"),
+        aliases: TableAliases::new(Some("s"), Some("sp")),
         tick_visibility: &tick_visibility,
     })
     .await?;
@@ -380,14 +379,16 @@ pub async fn get_sightings(
 
         let count_sql = format!(
             "SELECT COUNT(*) FROM (SELECT {} FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ?{} GROUP BY {})",
-            select_clause_with_aliases_str, filter_result.filter_clause, group_by_clause_with_aliases_str
+            select_clause_with_aliases_str,
+            filter_sql.clause(),
+            group_by_clause_with_aliases_str
         );
 
-        let count_query = bind_filter_params!(
-            sqlx::query_scalar::<_, i64>(&count_sql),
-            &upload_uuid.as_bytes()[..],
-            &filter_result.params
-        );
+        let mut count_query =
+            sqlx::query_scalar::<_, i64>(&count_sql).bind(&upload_uuid.as_bytes()[..]);
+        for param in filter_sql.params() {
+            count_query = count_query.bind(param);
+        }
 
         let total = db::query_with_timeout(count_query.fetch_one(pools.read()))
             .await
@@ -443,17 +444,16 @@ pub async fn get_sightings(
         let select_sql = format!(
             "SELECT {}, COUNT(*) as count, COUNT(DISTINCT sp.scientific_name) as species_count FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ?{} GROUP BY {} ORDER BY {} {} LIMIT ? OFFSET ?",
             select_clause_with_aliases_str,
-            filter_result.filter_clause,
+            filter_sql.clause(),
             group_by_clause_with_aliases_str,
             sort_field_with_alias,
             sort_dir
         );
 
-        let mut select_query = bind_filter_params!(
-            sqlx::query(&select_sql),
-            &upload_uuid.as_bytes()[..],
-            &filter_result.params
-        );
+        let mut select_query = sqlx::query(&select_sql).bind(&upload_uuid.as_bytes()[..]);
+        for param in filter_sql.params() {
+            select_query = select_query.bind(param);
+        }
         select_query = select_query.bind(i64::from(page_size));
         select_query = select_query.bind(offset_i64);
 
@@ -544,13 +544,13 @@ pub async fn get_sightings(
 
     let count_sql = format!(
         "SELECT COUNT(*) FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ?{}",
-        filter_result.filter_clause
+        filter_sql.clause()
     );
-    let count_query = bind_filter_params!(
-        sqlx::query_scalar::<_, i64>(&count_sql),
-        &upload_uuid.as_bytes()[..],
-        &filter_result.params
-    );
+    let mut count_query =
+        sqlx::query_scalar::<_, i64>(&count_sql).bind(&upload_uuid.as_bytes()[..]);
+    for param in filter_sql.params() {
+        count_query = count_query.bind(param);
+    }
 
     let total = db::query_with_timeout(count_query.fetch_one(pools.read()))
         .await
@@ -587,17 +587,16 @@ pub async fn get_sightings(
             ORDER BY {} {}
             LIMIT ?",
         sort_field_for_select,
-        filter_result.filter_clause,
+        filter_sql.clause(),
         keyset_clause,
         sort_field_for_order,
         sort_dir
     );
 
-    let mut select_query = bind_filter_params!(
-        sqlx::query(&select_sql),
-        &upload_uuid.as_bytes()[..],
-        &filter_result.params
-    );
+    let mut select_query = sqlx::query(&select_sql).bind(&upload_uuid.as_bytes()[..]);
+    for param in filter_sql.params() {
+        select_query = select_query.bind(param);
+    }
 
     if let Some(cursor_data) = &cursor {
         select_query = select_query.bind(&cursor_data.sort_value);

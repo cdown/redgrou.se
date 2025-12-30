@@ -28,7 +28,7 @@ use tracing_subscriber::EnvFilter;
 use redgrouse::api_constants;
 use redgrouse::config;
 use redgrouse::error::ApiError;
-use redgrouse::filter::{build_filter_clause, CountQuery, FilterRequest};
+use redgrouse::filter::{build_filter_clause, CountQuery, FilterRequest, TableAliases};
 use redgrouse::handlers;
 use redgrouse::limits::{UploadLimitError, UploadLimiter, UploadUsageTracker};
 use redgrouse::proto::{pb, Proto};
@@ -658,25 +658,25 @@ async fn get_bbox(
 
     let tick_visibility = query.tick_visibility()?;
 
-    let filter_result = build_filter_clause(FilterRequest {
+    let filter_sql = build_filter_clause(FilterRequest {
         pool: pools.read(),
         upload_id: &upload_uuid.as_bytes()[..],
         filter_json: query.filter.as_ref(),
         year_tick_year: query.year_tick_year,
         country_tick_country: query.country_tick_country.as_ref(),
-        table_prefix: None,
+        aliases: TableAliases::new(None, None),
         tick_visibility: &tick_visibility,
     })
     .await?;
 
     let sql = format!(
         "SELECT MIN(longitude) as min_lng, MIN(latitude) as min_lat, MAX(longitude) as max_lng, MAX(latitude) as max_lat FROM sightings WHERE upload_id = ?{}",
-        filter_result.filter_clause
+        filter_sql.clause()
     );
 
     let mut db_query = sqlx::query(&sql);
     db_query = db_query.bind(&upload_uuid.as_bytes()[..]);
-    for param in &filter_result.params {
+    for param in filter_sql.params() {
         db_query = db_query.bind(param);
     }
 

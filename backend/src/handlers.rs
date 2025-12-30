@@ -2,12 +2,12 @@ use axum::extract::{Path, Query, State};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-use crate::bind_filter_params;
 use crate::db;
 use crate::db::DbPools;
 use crate::error::ApiError;
 use crate::filter::{
     build_filter_clause, get_distinct_values, get_field_metadata, CountQuery, FilterRequest,
+    TableAliases,
 };
 use crate::proto::{pb, Proto};
 use crate::upload::{effective_display_name, get_upload_data_version};
@@ -89,44 +89,40 @@ pub async fn get_filtered_count(
         false
     };
 
-    let table_prefix = if needs_join { Some("s") } else { None };
+    let aliases = if needs_join {
+        TableAliases::new(Some("s"), Some("sp"))
+    } else {
+        TableAliases::new(None, None)
+    };
 
     let tick_visibility = query.tick_visibility()?;
-    let filter_result = build_filter_clause(FilterRequest {
+    let filter_sql = build_filter_clause(FilterRequest {
         pool: pools.read(),
         upload_id: &upload_uuid.as_bytes()[..],
         filter_json: query.filter.as_ref(),
         year_tick_year: query.year_tick_year,
         country_tick_country: query.country_tick_country.as_ref(),
-        table_prefix,
+        aliases,
         tick_visibility: &tick_visibility,
     })
     .await?;
 
-    let mut filter_clause = filter_result.filter_clause;
-    if needs_join {
-        filter_clause = filter_clause
-            .replace("common_name", "sp.common_name")
-            .replace("scientific_name", "sp.scientific_name");
-    }
-
     let sql = if needs_join {
         format!(
             "SELECT COUNT(*) as cnt FROM sightings s JOIN species sp ON s.species_id = sp.id WHERE s.upload_id = ?{}",
-            filter_clause
+            filter_sql.clause()
         )
     } else {
         format!(
             "SELECT COUNT(*) as cnt FROM sightings WHERE upload_id = ?{}",
-            filter_clause
+            filter_sql.clause()
         )
     };
 
-    let db_query = bind_filter_params!(
-        sqlx::query_scalar::<_, i64>(&sql),
-        &upload_uuid.as_bytes()[..],
-        &filter_result.params
-    );
+    let mut db_query = sqlx::query_scalar::<_, i64>(&sql).bind(&upload_uuid.as_bytes()[..]);
+    for param in filter_sql.params() {
+        db_query = db_query.bind(param);
+    }
 
     let count = db::query_with_timeout(db_query.fetch_one(pools.read()))
         .await
