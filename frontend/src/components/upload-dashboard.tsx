@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryState, parseAsInteger, parseAsString } from "nuqs";
 import { FilterGroup } from "@/lib/filter-types";
-import { Sparkles, ChevronDown, Check, X } from "lucide-react";
+import { Sparkles, ChevronDown, Check, X, Sliders } from "lucide-react";
 import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
 import { QueryBuilder } from "@/components/query-builder";
@@ -93,13 +93,13 @@ const TickFilterButtonBase = ({
   <Popover>
     <PopoverTrigger asChild>
       <button
-        className="flex w-[180px] items-center gap-3 rounded-lg bg-white px-3 py-2 text-left text-sm font-medium text-stone-700 shadow-lg transition-colors hover:bg-stone-50"
+        className="flex w-full sm:w-[180px] items-center gap-2 sm:gap-3 rounded-lg bg-white px-3 py-2 text-left text-sm font-medium text-stone-700 shadow-lg transition-colors hover:bg-stone-50"
       >
-        <Sparkles className="h-4 w-4 text-stone-500" />
-        <div className="flex-1 text-left">
+        <Sparkles className="h-4 w-4 text-stone-500 flex-shrink-0" />
+        <div className="flex-1 text-left min-w-0">
           <span className="text-sm font-semibold text-stone-900">Sightings</span>
         </div>
-        <div className="flex w-16 items-center justify-end gap-1">
+        <div className="flex items-center justify-end gap-1 flex-shrink-0">
           <div className="flex max-w-[48px] justify-end">{tickIndicator}</div>
           <ChevronDown className="h-3 w-3 text-stone-400 flex-shrink-0" />
         </div>
@@ -153,14 +153,14 @@ const TickFilterButtonBase = ({
 
 const TickFilterButtonFallback = () => (
   <button
-    className="flex w-[180px] items-center gap-3 rounded-lg bg-white px-3 py-2 text-left text-sm font-medium text-stone-400 shadow-lg"
+    className="flex w-full sm:w-[180px] items-center gap-2 sm:gap-3 rounded-lg bg-white px-3 py-2 text-left text-sm font-medium text-stone-400 shadow-lg"
     disabled
   >
-    <Sparkles className="h-4 w-4 opacity-50" />
-    <div className="flex-1 text-left">
+    <Sparkles className="h-4 w-4 opacity-50 flex-shrink-0" />
+    <div className="flex-1 text-left min-w-0">
       <span className="text-sm font-semibold">Sightings</span>
     </div>
-    <div className="flex w-16 items-center justify-end gap-1">
+    <div className="flex items-center justify-end gap-1 flex-shrink-0">
       <div className="h-2.5 w-12 rounded-full bg-stone-200" />
       <ChevronDown className="h-3 w-3 opacity-50" />
     </div>
@@ -252,6 +252,7 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   );
   const [viewMode, setViewMode] = useState<ViewMode>("map");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const handleFieldValuesError = useCallback(
     (message: string, err?: unknown) => {
       if (err) {
@@ -583,11 +584,28 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
 
       <ColorLegend filterOpen={filterOpen} />
 
-      <div
-        ref={topRightControlsRef}
-        className={`absolute right-4 top-4 flex flex-col gap-2 z-50 transition-opacity ${
+      {/* Mobile filter/close button - only visible on mobile */}
+      <button
+        onClick={() => setMobileFiltersOpen(!mobileFiltersOpen)}
+        className={`absolute right-2 top-2 z-[60] flex h-10 w-10 items-center justify-center rounded-lg bg-white shadow-lg md:hidden ${
           filterOpen ? "opacity-0 pointer-events-none" : "opacity-100"
         }`}
+      >
+        {mobileFiltersOpen ? (
+          <X className="h-5 w-5 text-stone-700" />
+        ) : (
+          <Sliders className="h-5 w-5 text-stone-700" />
+        )}
+      </button>
+
+      {/* Controls - expandable on mobile, always visible on desktop */}
+      <div
+        ref={topRightControlsRef}
+        className={`absolute right-2 sm:right-4 top-14 sm:top-4 left-2 sm:left-auto flex flex-col gap-2 z-50 transition-opacity max-w-full sm:max-w-none ${
+          filterOpen ? "opacity-0 pointer-events-none" : "opacity-100"
+        } ${
+          mobileFiltersOpen ? "flex" : "hidden"
+        } md:flex`}
       >
         <TickControls
           tickButton={
