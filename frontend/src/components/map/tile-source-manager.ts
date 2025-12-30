@@ -183,9 +183,9 @@ export class TileSourceManager {
       if (!this.options.isClickEnabled() || !event.features?.length) {
         return;
       }
-      const [feature] = [...event.features].sort(
-        (a, b) => getFeaturePriority(b) - getFeaturePriority(a),
-      );
+      const [feature] = [...event.features]
+        .filter((f) => typeof f.id === "number")
+        .sort((a, b) => getFeaturePriority(b) - getFeaturePriority(a));
       if (feature && typeof feature.id === "number") {
         this.options.featuresById.set(feature.id, feature);
         this.options.onFeatureClick(feature);

@@ -209,8 +209,10 @@ export class ClusterController {
       if (!this.clusterMode || !event.features?.length) {
         return;
       }
-      const feature = event.features[0];
-      if (feature.geometry.type !== "Point" || !feature.geometry.coordinates) {
+      const feature = [...event.features]
+        .filter((f) => f.geometry.type === "Point" && f.geometry.coordinates)
+        .sort((a, b) => getFeaturePriority(b) - getFeaturePriority(a))[0];
+      if (!feature || feature.geometry.type !== "Point" || !feature.geometry.coordinates) {
         return;
       }
       const coordinates = feature.geometry.coordinates as [number, number];
@@ -262,9 +264,9 @@ export class ClusterController {
       if (!this.clusterMode || !event.features?.length) {
         return;
       }
-      const [feature] = [...event.features].sort(
-        (a, b) => getFeaturePriority(b) - getFeaturePriority(a),
-      );
+      const feature = [...event.features]
+        .filter((f) => f.geometry.type === "Point")
+        .sort((a, b) => getFeaturePriority(b) - getFeaturePriority(a))[0];
       if (!feature || feature.geometry.type !== "Point") {
         return;
       }
