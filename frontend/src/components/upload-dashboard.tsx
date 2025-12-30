@@ -252,6 +252,15 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
   );
   const [viewMode, setViewMode] = useState<ViewMode>("map");
   const [filterOpen, setFilterOpen] = useState(false);
+  const handleFieldValuesError = useCallback(
+    (message: string, err?: unknown) => {
+      if (err) {
+        console.error(message, err);
+      }
+      showToast(message, "error");
+    },
+    [showToast],
+  );
   const tickLocks = useMemo(
     () => ({
       year: yearTickYear !== null,
@@ -333,35 +342,46 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
     dataVersion: yearsVersion,
   } = useYears(!isDeleted ? uploadId : null, {
     enabled: !isDeleted,
-    onError: (message) => showToast(message, "error"),
+    onError: handleFieldValuesError,
   });
   const {
     countries: availableCountries,
     dataVersion: countriesVersion,
   } = useCountries(!isDeleted ? uploadId : null, {
     enabled: !isDeleted,
-    onError: (message) => showToast(message, "error"),
+    onError: handleFieldValuesError,
   });
   const {
     nameIndex,
     refresh: refreshNameIndex,
   } = useNameIndex(!isDeleted ? uploadId : null, {
     enabled: !isDeleted,
-    onError: (message) => showToast(message, "error"),
+    onError: handleFieldValuesError,
     onUploadDeleted: markDeleted,
     onVersionObserved: observeVersion,
   });
+  const handleMissingBitmap = useCallback(
+    (message: string) => {
+      showToast(message, "error");
+      void setCountryTickCountry(null);
+    },
+    [showToast, setCountryTickCountry],
+  );
+  const handleCountError = useCallback(
+    (message: string, err?: unknown) => {
+      console.error("Failed to load filtered count:", err);
+      showToast(message, "error");
+    },
+    [showToast],
+  );
   const { count: filteredCount } = useFilteredCount(!isDeleted ? uploadId : null, {
     filterString: filterParam,
     tickFilterParam: effectiveTickFilterParam,
     yearTickYear,
     countryTickCountry,
     enabled: !isDeleted,
-    onMissingBitmap: (message) => {
-      showToast(message, "error");
-      void setCountryTickCountry(null);
-    },
-    onError: (message) => showToast(message, "error"),
+    onMissingBitmap: handleMissingBitmap,
+    onError: handleCountError,
     onUploadDeleted: markDeleted,
     onVersionObserved: observeVersion,
   });

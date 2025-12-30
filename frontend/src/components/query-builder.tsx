@@ -1,14 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { X } from "lucide-react";
-import {
-  apiFetch,
-  buildApiUrl,
-  checkApiResponse,
-  getErrorMessage,
-  parseProtoResponse,
-} from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,17 +34,15 @@ import {
   isFreeformOperator,
   Operator,
 } from "@/lib/filter-types";
-import { formatCountry, getCountryName } from "@/lib/countries";
-import {
-  FIELDS_ROUTE,
-  FIELD_VALUES_ROUTE,
-} from "@/lib/generated/api_constants";
-import {
-  FieldMetadataList,
-  FieldValues as FieldValuesDecoder,
-} from "@/lib/proto/redgrouse_api";
+import { formatCountry } from "@/lib/countries";
 import { formatDisplayDate } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
+import {
+  useFieldMetadata,
+  useFieldValues,
+  sortCountries,
+  sortYears,
+} from "@/lib/hooks/fields";
 
 function toComboboxOptions(
   values: string[],
@@ -78,60 +69,19 @@ export function QueryBuilder({
 }: QueryBuilderProps) {
   const { showToast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
-  const [fields, setFields] = useState<FieldMetadata[]>([]);
   const [filter, setFilter] = useState<FilterGroup>(createGroup());
-  const [fieldValues, setFieldValues] = useState<Record<string, string[]>>({});
-
-  useEffect(() => {
-    apiFetch(FIELDS_ROUTE)
-      .then(async (res) => {
-        await checkApiResponse(res, "Failed to load field metadata");
-        const data = await parseProtoResponse(res, FieldMetadataList);
-        return data.fields.map((field) => ({
-          name: field.name,
-          label: field.label,
-          field_type: field.fieldType as FieldMetadata["field_type"],
-        }));
-      })
-      .then(setFields)
-      .catch((err) => {
-        console.error("Failed to fetch field metadata:", err);
-        showToast(getErrorMessage(err, "Failed to load field metadata"), "error");
-      });
-  }, [showToast]);
-
-  const fetchFieldValues = useCallback(
-    async (field: string) => {
-      if (fieldValues[field]) return;
-      try {
-        const url = buildApiUrl(FIELD_VALUES_ROUTE, {
-          upload_id: uploadId,
-          field,
-        });
-        const res = await apiFetch(url);
-        if (!res.ok) {
-          const readableName = field.split("_").join(" ");
-          showToast(`Failed to load values for ${readableName}`, "error");
-          return;
-        }
-        const data = await parseProtoResponse(res, FieldValuesDecoder);
-        let sortedValues = data.values;
-        if (field === "country_code") {
-          sortedValues = [...data.values].sort((a, b) => {
-            if (a === "XX") return 1;
-            if (b === "XX") return -1;
-            const nameA = getCountryName(a);
-            const nameB = getCountryName(b);
-            return nameA.localeCompare(nameB);
-          });
-        }
-        setFieldValues((prev) => ({ ...prev, [field]: sortedValues }));
-      } catch (e) {
-        console.error("Failed to fetch field values:", e);
-        showToast(getErrorMessage(e, "Failed to load field values"), "error");
-      }
+  const { fields } = useFieldMetadata({
+    onError: (message, err) => {
+      console.error("Failed to fetch field metadata:", err);
+      showToast(message, "error");
     },
-    [uploadId, fieldValues, showToast],
+  });
+  const handleFieldValuesError = useCallback(
+    (message: string, err?: unknown) => {
+      console.error("Failed to load field values:", err);
+      showToast(message, "error");
+    },
+    [showToast],
   );
 
   const updateRule = useCallback(
@@ -259,14 +209,14 @@ export function QueryBuilder({
             group={filter}
             path={[]}
             fields={fields}
-            fieldValues={fieldValues}
-            fetchFieldValues={fetchFieldValues}
             updateRule={updateRule}
             addRule={addRule}
             removeRule={removeRule}
             setCombinator={setCombinator}
             isRoot
             depth={0}
+          uploadId={uploadId}
+          onFieldValuesError={handleFieldValuesError}
           />
         </div>
 
@@ -314,14 +264,14 @@ export function QueryBuilder({
             group={filter}
             path={[]}
             fields={fields}
-            fieldValues={fieldValues}
-            fetchFieldValues={fetchFieldValues}
             updateRule={updateRule}
             addRule={addRule}
             removeRule={removeRule}
             setCombinator={setCombinator}
             isRoot
             depth={0}
+          uploadId={uploadId}
+          onFieldValuesError={handleFieldValuesError}
           />
 
           <div className="mt-4 flex gap-2">
@@ -350,28 +300,28 @@ interface GroupBuilderProps {
   group: FilterGroup;
   path: number[];
   fields: FieldMetadata[];
-  fieldValues: Record<string, string[]>;
-  fetchFieldValues: (field: string) => void;
   updateRule: (path: number[], updater: (rule: Rule) => Rule) => void;
   addRule: (path: number[], rule: Rule) => void;
   removeRule: (path: number[]) => void;
   setCombinator: (path: number[], combinator: "and" | "or") => void;
   isRoot?: boolean;
   depth?: number;
+  uploadId: string;
+  onFieldValuesError: (message: string, error?: unknown) => void;
 }
 
 function GroupBuilder({
   group,
   path,
   fields,
-  fieldValues,
-  fetchFieldValues,
   updateRule,
   addRule,
   removeRule,
   setCombinator,
   isRoot,
   depth = 0,
+  uploadId,
+  onFieldValuesError,
 }: GroupBuilderProps) {
   const bgColour = GROUP_COLOURS[depth % GROUP_COLOURS.length];
 
@@ -404,13 +354,13 @@ function GroupBuilder({
                 group={rule}
                 path={[...path, index]}
                 fields={fields}
-                fieldValues={fieldValues}
-                fetchFieldValues={fetchFieldValues}
                 updateRule={updateRule}
                 addRule={addRule}
                 removeRule={removeRule}
                 setCombinator={setCombinator}
                 depth={depth + 1}
+                uploadId={uploadId}
+                onFieldValuesError={onFieldValuesError}
               />
               <Button
                 variant="ghost"
@@ -426,10 +376,10 @@ function GroupBuilder({
               condition={rule}
               path={[...path, index]}
               fields={fields}
-              fieldValues={fieldValues}
-              fetchFieldValues={fetchFieldValues}
               updateRule={updateRule}
               removeRule={removeRule}
+              uploadId={uploadId}
+              onFieldValuesError={onFieldValuesError}
             />
           )}
         </div>
@@ -461,25 +411,39 @@ interface ConditionBuilderProps {
   condition: Condition;
   path: number[];
   fields: FieldMetadata[];
-  fieldValues: Record<string, string[]>;
-  fetchFieldValues: (field: string) => void;
   updateRule: (path: number[], updater: (rule: Rule) => Rule) => void;
   removeRule: (path: number[]) => void;
+  uploadId: string;
+  onFieldValuesError: (message: string, error?: unknown) => void;
 }
 
 function ConditionBuilder({
   condition,
   path,
   fields,
-  fieldValues,
-  fetchFieldValues,
   updateRule,
   removeRule,
+  uploadId,
+  onFieldValuesError,
 }: ConditionBuilderProps) {
   const field = fields.find((f) => f.name === condition.field);
   const fieldType = field?.field_type || "string";
   const operators = field ? getOperatorsForType(fieldType) : [];
-  const values = fieldValues[condition.field] || [];
+  const sortStrategy =
+    condition.field === "year"
+      ? sortYears
+      : condition.field === "country_code"
+        ? sortCountries
+        : undefined;
+  const { values } = useFieldValues(
+    condition.field ? uploadId : null,
+    condition.field || null,
+    {
+      enabled: Boolean(condition.field),
+      sort: sortStrategy,
+      onError: onFieldValuesError,
+    },
+  );
   const isFreeform = isFreeformOperator(condition.operator);
   const isMultiValue =
     condition.operator === "in" || condition.operator === "not_in";
@@ -492,7 +456,6 @@ function ConditionBuilder({
         <Select
           value={condition.field}
           onValueChange={(v) => {
-            fetchFieldValues(v);
             const newField = fields.find((f) => f.name === v);
             const newFieldType = newField?.field_type || "string";
             let defaultOp: Operator = "eq";

@@ -8,11 +8,112 @@ import {
   getErrorMessage,
   parseProtoResponse,
 } from "@/lib/api";
-import { FIELD_VALUES_ROUTE } from "@/lib/generated/api_constants";
-import { FieldValues as FieldValuesDecoder } from "@/lib/proto/redgrouse_api";
+import { FIELDS_ROUTE, FIELD_VALUES_ROUTE } from "@/lib/generated/api_constants";
+import {
+  FieldMetadataList,
+  FieldValues as FieldValuesDecoder,
+} from "@/lib/proto/redgrouse_api";
 import { getCountryName } from "@/lib/countries";
+import type { FieldMetadata } from "@/lib/filter-types";
 
 type ErrorHandler = (message: string, error: unknown) => void;
+
+let metadataCache: FieldMetadata[] | null = null;
+let metadataPromise: Promise<FieldMetadata[]> | null = null;
+
+async function loadFieldMetadata(): Promise<FieldMetadata[]> {
+  if (metadataCache) {
+    return metadataCache;
+  }
+  if (!metadataPromise) {
+    metadataPromise = apiFetch(FIELDS_ROUTE)
+      .then(async (res) => {
+        await checkApiResponse(res, "Failed to load field metadata");
+        const data = await parseProtoResponse(res, FieldMetadataList);
+        const mapped: FieldMetadata[] = data.fields.map((field) => ({
+          name: field.name,
+          label: field.label,
+          field_type: field.fieldType as FieldMetadata["field_type"],
+        }));
+        metadataCache = mapped;
+        return mapped;
+      })
+      .finally(() => {
+        metadataPromise = null;
+      });
+  }
+  return metadataPromise!;
+}
+
+export interface UseFieldMetadataOptions {
+  onError?: ErrorHandler;
+}
+
+export interface UseFieldMetadataResult {
+  fields: FieldMetadata[];
+  isLoading: boolean;
+  error: string | null;
+  refresh: () => Promise<FieldMetadata[] | null>;
+}
+
+export function useFieldMetadata(options: UseFieldMetadataOptions = {}): UseFieldMetadataResult {
+  const { onError } = options;
+  const [fields, setFields] = useState<FieldMetadata[]>(() => metadataCache ?? []);
+  const [isLoading, setIsLoading] = useState(!metadataCache);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    metadataCache = null;
+    setIsLoading(true);
+    try {
+      const data = await loadFieldMetadata();
+      setFields(data);
+      setError(null);
+      return data;
+    } catch (err) {
+      const message = getErrorMessage(err, "Failed to load field metadata");
+      setError(message);
+      onError?.(message, err);
+      return null;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [onError]);
+
+  useEffect(() => {
+    if (metadataCache) {
+      return;
+    }
+    let cancelled = false;
+    loadFieldMetadata()
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+        setFields(data);
+        setError(null);
+      })
+      .catch((err) => {
+        if (cancelled) {
+          return;
+        }
+        const message = getErrorMessage(err, "Failed to load field metadata");
+        setError(message);
+        onError?.(message, err);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onError]);
+
+  return { fields, isLoading, error, refresh };
+}
 
 export interface FieldValuesEntry {
   values: string[];
