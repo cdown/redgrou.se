@@ -8,6 +8,7 @@ export const UPLOAD_DETAILS_ROUTE = "/api/uploads/{upload_id}";
 export const UPLOAD_COUNT_ROUTE = "/api/uploads/{upload_id}/count";
 export const UPLOAD_BBOX_ROUTE = "/api/uploads/{upload_id}/bbox";
 export const UPLOAD_SIGHTINGS_ROUTE = "/api/uploads/{upload_id}/sightings";
+export const UPLOAD_STATS_ROUTE = "/api/uploads/{upload_id}/stats";
 export const TILE_ROUTE = "/api/tiles/{upload_id}/{z}/{x}/{y}";
 export const FIELDS_ROUTE = "/api/fields";
 export const FIELD_VALUES_ROUTE = "/api/uploads/{upload_id}/fields/{field}";

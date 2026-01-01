@@ -1,7 +1,7 @@
 "use client";
 
 import { ReactNode } from "react";
-import { Calendar, ChevronDown, List, Map as MapIcon } from "lucide-react";
+import { Calendar, ChevronDown, List, Map as MapIcon, BarChart3 } from "lucide-react";
 import { getCountryName } from "@/lib/countries";
 
 interface TickControlsProps {
@@ -12,8 +12,8 @@ interface TickControlsProps {
   availableCountries: string[];
   selectedCountry: string | null;
   onCountryChange: (country: string | null) => void;
-  viewMode: "map" | "table";
-  onViewModeChange: (mode: "map" | "table") => void;
+  viewMode: "map" | "table" | "stats";
+  onViewModeChange: (mode: "map" | "table" | "stats") => void;
 }
 
 export function TickControls({
@@ -117,6 +117,15 @@ export function TickControls({
         >
           <List className="h-4 w-4" />
           List
+        </button>
+        <button
+          onClick={() => onViewModeChange("stats")}
+          className={`flex flex-1 items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            viewMode === "stats" ? "bg-stone-900 text-white" : "text-stone-600 hover:bg-stone-50"
+          }`}
+        >
+          <BarChart3 className="h-4 w-4" />
+          Stats
         </button>
       </div>
     </div>

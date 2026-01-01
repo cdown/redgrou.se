@@ -9,6 +9,7 @@ pub mod limits;
 pub mod pipeline;
 pub mod proto;
 pub mod sightings;
+pub mod stats;
 pub mod tiles;
 pub mod upload;
 pub mod zip_extract;
@@ -23,6 +24,7 @@ pub async fn create_test_router(pools: DbPools) -> Router {
     use crate::api_constants;
     use crate::handlers;
     use crate::sightings::get_sightings;
+    use crate::stats::get_stats;
     use crate::tiles::get_tile;
     use crate::upload::{delete_upload, update_csv, upload_csv};
 
@@ -39,6 +41,7 @@ pub async fn create_test_router(pools: DbPools) -> Router {
             get(handlers::get_filtered_count),
         )
         .route(api_constants::UPLOAD_SIGHTINGS_ROUTE, get(get_sightings))
+        .route(api_constants::UPLOAD_STATS_ROUTE, get(get_stats))
         .route(api_constants::TILE_ROUTE, get(get_tile))
         .route(api_constants::FIELDS_ROUTE, get(handlers::fields_metadata))
         .route(

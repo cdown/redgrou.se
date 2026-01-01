@@ -103,3 +103,41 @@ message VersionInfo {
   string build_date = 2;
   string rustc_version = 3;
 }
+
+message SpeciesCount {
+  string common_name = 1;
+  string scientific_name = 2;
+  int64 count = 3;
+}
+
+message CountryStats {
+  string country_code = 1;
+  int64 sightings = 2;
+  int64 lifers = 3;
+}
+
+message TimelinePoint {
+  string date = 1;
+  int64 count = 2;
+}
+
+message StatsResponse {
+  int64 total_sightings = 1;
+  int64 total_lifers = 2;
+  int64 total_year_ticks = 3;
+  int64 total_country_ticks = 4;
+  int64 total_species = 5;
+  int64 total_countries = 6;
+  int64 total_regions = 7;
+  int64 hours_birding_minutes = 8;
+  optional string first_sighting_date = 9;
+  optional string latest_sighting_date = 10;
+  repeated SpeciesCount top_species = 11;
+  repeated CountryStats country_stats = 12;
+  int64 data_version = 13;
+  int64 total_individuals = 14;
+  optional double total_distance_km = 15;
+  repeated TimelinePoint lifers_timeline = 16;
+  repeated TimelinePoint sightings_timeline = 17;
+  int64 longest_streak_days = 18;
+}

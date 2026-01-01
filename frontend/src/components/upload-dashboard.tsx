@@ -8,6 +8,7 @@ import { FilterGroup } from "@/lib/filter-types";
 import { Sparkles, ChevronDown, Check, X, Sliders } from "lucide-react";
 import { SightingsMap } from "@/components/sightings-map";
 import { SightingsTable } from "@/components/sightings-table";
+import { StatsView } from "@/components/stats-view";
 import { QueryBuilder } from "@/components/query-builder";
 import { ActionsMenu } from "@/components/actions-menu";
 import { ColorLegend } from "@/components/color-legend";
@@ -37,6 +38,7 @@ import {
   useNameIndex,
   useYears,
   useCountries,
+  useUploadStats,
 } from "@/lib/hooks/upload";
 import { TickControls } from "@/components/upload/tick-controls";
 
@@ -46,7 +48,7 @@ interface UploadDashboardProps {
   initialUpload: UploadMetadata;
 }
 
-type ViewMode = "map" | "table";
+type ViewMode = "map" | "table" | "stats";
 
 type TickMode = "lifers" | "lifers_and_ticks" | "all";
 
@@ -386,6 +388,19 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
     onUploadDeleted: markDeleted,
     onVersionObserved: observeVersion,
   });
+  const { stats: uploadStats, isLoading: statsLoading } = useUploadStats(
+    !isDeleted ? uploadId : null,
+    {
+      filterString: null,
+      tickFilterParam: null,
+      yearTickYear: null,
+      countryTickCountry: null,
+      enabled: !isDeleted && viewMode === "stats",
+      onError: handleCountError,
+      onUploadDeleted: markDeleted,
+      onVersionObserved: observeVersion,
+    },
+  );
   const resolvedTitle = useMemo(() => {
     if (upload.title && upload.title.trim().length > 0) {
       return upload.title;
@@ -563,6 +578,28 @@ export function UploadDashboard({ initialUpload }: UploadDashboardProps) {
               onRemoteVersionObserved={observeVersion}
             onUploadDeleted={markDeleted}
             />
+          </div>
+        </div>
+      </div>
+
+      <div
+        className={`absolute inset-x-0 bottom-0 bg-white shadow-2xl transition-transform duration-300 ease-out ${
+          viewMode === "stats" ? "translate-y-0" : "translate-y-full"
+        }`}
+        style={{ top: `${tableTopOffset}px`, borderRadius: "16px 16px 0 0" }}
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex items-center justify-between border-b px-4 py-3">
+            <span className="font-medium text-stone-900">Statistics</span>
+            <button
+              onClick={() => setViewMode("map")}
+              className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-stone-100 transition-colors"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="relative flex-1 overflow-hidden">
+            <StatsView stats={uploadStats} isLoading={statsLoading} />
           </div>
         </div>
       </div>

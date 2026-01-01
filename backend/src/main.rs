@@ -32,7 +32,7 @@ use redgrouse::filter::{build_filter_clause, CountQuery, FilterRequest, TableAli
 use redgrouse::handlers;
 use redgrouse::limits::{UploadLimitError, UploadLimiter, UploadUsageTracker};
 use redgrouse::proto::{pb, Proto};
-use redgrouse::{db, sightings, tiles, upload};
+use redgrouse::{db, sightings, stats, tiles, upload};
 
 const BUILD_VERSION: &str = env!("BUILD_VERSION");
 const BUILD_DATE: &str = env!("BUILD_DATE");
@@ -217,6 +217,7 @@ async fn main() -> anyhow::Result<()> {
             api_constants::UPLOAD_SIGHTINGS_ROUTE,
             get(sightings::get_sightings),
         )
+        .route(api_constants::UPLOAD_STATS_ROUTE, get(stats::get_stats))
         .route(api_constants::TILE_ROUTE, get(tiles::get_tile))
         .route(api_constants::FIELDS_ROUTE, get(handlers::fields_metadata))
         .route(

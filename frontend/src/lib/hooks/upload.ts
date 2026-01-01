@@ -13,15 +13,18 @@ import {
   UPLOAD_COUNT_ROUTE,
   UPLOAD_DETAILS_ROUTE,
   UPLOAD_SIGHTINGS_ROUTE,
+  UPLOAD_STATS_ROUTE,
 } from "@/lib/generated/api_constants";
 import {
   CountResponse,
   SightingsResponse as SightingsResponseDecoder,
+  StatsResponse as StatsResponseDecoder,
   UploadMetadata as UploadMetadataDecoder,
 } from "@/lib/proto/redgrouse_api";
 import type {
   UploadMetadata as UploadMetadataMessage,
   Species,
+  StatsResponse as StatsResponseMessage,
 } from "@/lib/proto/redgrouse_api";
 import { UPLOAD_EVENTS_CHANNEL, type UploadBroadcastEvent } from "@/lib/uploads";
 import { useFieldValues, sortCountries, sortYears } from "@/lib/hooks/fields";
@@ -450,4 +453,104 @@ export function useCountries(
   );
 
   return { countries, dataVersion, isLoading, error, refresh };
+}
+
+interface UploadStatsOptions {
+  filterString: string | null;
+  tickFilterParam: string | null;
+  yearTickYear: number | null;
+  countryTickCountry: string | null;
+  enabled?: boolean;
+  onError?: ErrorHandler;
+  onUploadDeleted?: () => void;
+  onVersionObserved?: (version?: number | null) => void;
+}
+
+export interface UseUploadStatsResult {
+  stats: StatsResponseMessage | null;
+  isLoading: boolean;
+  error: string | null;
+}
+
+export function useUploadStats(
+  uploadId: string | null,
+  options: UploadStatsOptions,
+): UseUploadStatsResult {
+  const {
+    filterString,
+    tickFilterParam,
+    yearTickYear,
+    countryTickCountry,
+    enabled = true,
+    onError,
+    onUploadDeleted,
+    onVersionObserved,
+  } = options;
+
+  const [stats, setStats] = useState<StatsResponseMessage | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!uploadId || !enabled) {
+      setStats(null);
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoading(true);
+    const params = buildFilterParams(
+      filterString,
+      tickFilterParam,
+      yearTickYear,
+      countryTickCountry,
+    );
+    const url = `${buildApiUrl(UPLOAD_STATS_ROUTE, { upload_id: uploadId })}?${params}`;
+
+    apiFetch(url)
+      .then(async (res) => {
+        if (cancelled) {
+          return;
+        }
+        if (res.status === 404) {
+          onUploadDeleted?.();
+          setError("Upload not found");
+          return;
+        }
+        await checkApiResponse(res, "Failed to fetch stats");
+        const data = await parseProtoResponse(res, StatsResponseDecoder);
+        onVersionObserved?.(data.dataVersion);
+        setStats(data);
+        setError(null);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          const msg = getErrorMessage(err, "Failed to load stats");
+          setError(msg);
+          onError?.(msg, err);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    uploadId,
+    filterString,
+    tickFilterParam,
+    yearTickYear,
+    countryTickCountry,
+    enabled,
+    onError,
+    onUploadDeleted,
+    onVersionObserved,
+  ]);
+
+  return { stats, isLoading, error };
 }
